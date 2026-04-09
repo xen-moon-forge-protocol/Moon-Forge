@@ -1,0 +1,19 @@
+[programs.mainnet]
+moon_forge_games = "MoonForgeGames111111111111111111111111111"
+
+[registry]
+url = "https://api.apr.dev"
+
+[provider]
+cluster = "https://rpc.mainnet.x1.xyz"
+wallet = "~/.config/solana/id.json"
+
+[scripts]
+test = "yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/**/*.ts"
+
+[toolchain]
+anchor_version = "0.30.1"
+
+[test]
+[test.validator]
+url = "https://rpc.mainnet.x1.xyz"

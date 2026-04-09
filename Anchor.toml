@@ -1,0 +1,18 @@
+[programs.mainnet]
+moon_forge_games = "57UE1U1t23ztg2noLp8pcpGW1B1Xw25rLH6ra9Mchea9"
+
+[registry]
+url = "https://api.apr.dev"
+
+[provider]
+cluster = "https://rpc.mainnet.x1.xyz"
+wallet = "~/.config/solana/deploy-wallet.json"
+
+[scripts]
+test = "yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/**/*.ts"
+
+[toolchain]
+anchor_version = "0.32.1"
+
+[workspace]
+members = ["programs/moon-forge-games"]

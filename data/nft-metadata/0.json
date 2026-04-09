@@ -1,0 +1,23 @@
+{
+  "name": "Lunar Dust #0",
+  "description": "A powerful Moon Forge Artifact providing a 5% boost to your XEN burn rewards. Collect and equip to maximize your yield on X1 SVM.",
+  "image": "ipfs://PLACEHOLDER_CID/0.png",
+  "attributes": [
+    {
+      "trait_type": "Tier",
+      "value": "Lunar Dust"
+    },
+    {
+      "trait_type": "Boost",
+      "value": "5%"
+    },
+    {
+      "trait_type": "Type",
+      "value": "Artifact"
+    },
+    {
+      "trait_type": "Collection",
+      "value": "Moon Forge Founders"
+    }
+  ]
+}

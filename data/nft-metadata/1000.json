@@ -1,0 +1,45 @@
+{
+  "name": "Void Anomaly #1000 — Event Horizon",
+  "description": "A Legendary Moon Forge Artifact. Only 10 exist. Grants a massive 50% boost to Forge Score. An anomaly in the fabric of the forge — unmistakable, irreplaceable, and permanently verifiable on X1.",
+  "image": "ipfs://PLACEHOLDER_IMAGES_CID/void_anomaly/event_horizon.jpg",
+  "external_url": "https://moonforge.protocol/artifacts/1000",
+  "attributes": [
+    {
+      "trait_type": "Tier",
+      "value": "Void Anomaly"
+    },
+    {
+      "trait_type": "Tier ID",
+      "value": 3
+    },
+    {
+      "trait_type": "Rarity",
+      "value": "Legendary"
+    },
+    {
+      "trait_type": "Variant",
+      "value": "Event Horizon"
+    },
+    {
+      "trait_type": "Boost",
+      "display_type": "boost_percentage",
+      "value": 50
+    },
+    {
+      "trait_type": "Floor Price",
+      "value": "50 XNT"
+    },
+    {
+      "trait_type": "Pricing",
+      "value": "Dynamic"
+    },
+    {
+      "trait_type": "Chain",
+      "value": "X1"
+    },
+    {
+      "trait_type": "Collection",
+      "value": "Moon Forge Artifacts"
+    }
+  ]
+}

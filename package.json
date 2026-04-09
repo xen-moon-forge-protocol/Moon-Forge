@@ -1,0 +1,32 @@
+{
+    "name": "moon-forge-protocol",
+    "version": "6.0.0",
+    "description": "Moon Forge Protocol - The Scarcity Game",
+    "scripts": {
+        "test": "hardhat test",
+        "compile": "hardhat compile",
+        "deploy:core": "hardhat run scripts/deploy_final.ts",
+        "deploy:portal:eth": "hardhat run scripts/deploy_portal.ts --network mainnet",
+        "deploy:portal:op": "hardhat run scripts/deploy_portal.ts --network optimism",
+        "deploy:portal:bsc": "hardhat run scripts/deploy_portal.ts --network bsc",
+        "deploy:portal:polygon": "hardhat run scripts/deploy_portal.ts --network polygon",
+        "deploy:portal:avax": "hardhat run scripts/deploy_portal.ts --network avalanche",
+        "renounce": "hardhat run scripts/renounce_ownership.ts",
+        "nft:generate": "ts-node scripts/nft-metadata/generate-metadata.ts",
+        "nft:upload:images": "ts-node scripts/nft-metadata/upload-to-ipfs.ts --images-only",
+        "nft:upload:metadata": "ts-node scripts/nft-metadata/upload-to-ipfs.ts --metadata-only",
+        "verify:system": "ts-node scripts/verify_system.ts"
+    },
+    "devDependencies": {
+        "@nomicfoundation/hardhat-toolbox": "^4.0.0",
+        "hardhat": "^2.19.0",
+        "ts-node": "^10.9.0",
+        "typescript": "^5.0.0"
+    },
+    "dependencies": {
+        "@coral-xyz/anchor": "^0.32.1",
+        "@openzeppelin/contracts": "^4.9.0",
+        "@solana/web3.js": "^1.98.4",
+        "dotenv": "^16.0.0"
+    }
+}

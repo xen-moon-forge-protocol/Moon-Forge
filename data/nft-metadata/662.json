@@ -1,0 +1,45 @@
+{
+  "name": "Cosmic Shard #662 — Amethyst",
+  "description": "A Rare Moon Forge Artifact forged from fragments of cosmic material. Grants a 10% boost to Forge Score when equipped. Price increases with each sale and decays gradually without demand — true dynamic scarcity.",
+  "image": "ipfs://PLACEHOLDER_IMAGES_CID/cosmic_shard/amethyst.jpg",
+  "external_url": "https://moonforge.protocol/artifacts/662",
+  "attributes": [
+    {
+      "trait_type": "Tier",
+      "value": "Cosmic Shard"
+    },
+    {
+      "trait_type": "Tier ID",
+      "value": 1
+    },
+    {
+      "trait_type": "Rarity",
+      "value": "Rare"
+    },
+    {
+      "trait_type": "Variant",
+      "value": "Amethyst"
+    },
+    {
+      "trait_type": "Boost",
+      "display_type": "boost_percentage",
+      "value": 10
+    },
+    {
+      "trait_type": "Floor Price",
+      "value": "10 XNT"
+    },
+    {
+      "trait_type": "Pricing",
+      "value": "Dynamic"
+    },
+    {
+      "trait_type": "Chain",
+      "value": "X1"
+    },
+    {
+      "trait_type": "Collection",
+      "value": "Moon Forge Artifacts"
+    }
+  ]
+}

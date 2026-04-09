@@ -1,0 +1,39 @@
+{
+  "name": "moonforge-oracle",
+  "version": "1.0.0",
+  "description": "Off-chain oracle for Moon Forge Protocol - bridges EVM burns to X1 rewards",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "ts-node src/index.ts",
+    "epoch": "ts-node src/index.ts --run-epoch",
+    "listen": "ts-node src/index.ts --listen"
+  },
+  "keywords": [
+    "xen",
+    "x1",
+    "oracle",
+    "merkle",
+    "burn"
+  ],
+  "author": "Moon Forge Community",
+  "license": "MIT",
+  "dependencies": {
+    "@solana/web3.js": "^1.98.4",
+    "dotenv": "^16.3.1",
+    "ethers": "^6.9.0",
+    "keccak256": "^1.0.6",
+    "merkletreejs": "^0.3.11",
+    "node-cron": "^3.0.3"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@types/node-cron": "^3.0.11",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.3.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

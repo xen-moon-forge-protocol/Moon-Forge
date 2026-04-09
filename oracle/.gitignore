@@ -1,0 +1,23 @@
+# Environment (NEVER COMMIT!)
+.env
+
+# Build output
+dist/
+
+# Dependencies
+node_modules/
+
+# State files (contain block numbers, can be regenerated)
+data/state.json
+
+# Logs
+*.log
+logs/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db

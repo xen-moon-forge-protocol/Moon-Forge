@@ -1,0 +1,141 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   MOON FORGE - Global Styles
+   "Don't wait for the party. Forge it."
+═══════════════════════════════════════════════════════════════════════════ */
+
+:root {
+  --forge-orange: #ff6b35;
+  --forge-gold: #ffd700;
+  --space-dark: #0a0a0f;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  font-family: 'JetBrains Mono', monospace;
+  background: radial-gradient(ellipse at center, #1a1a25 0%, #0a0a0f 100%);
+  min-height: 100vh;
+}
+
+/* Stars Background Animation */
+body::before {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-image: 
+    radial-gradient(2px 2px at 20px 30px, #ffffff20, transparent),
+    radial-gradient(2px 2px at 40px 70px, #ffffff15, transparent),
+    radial-gradient(1px 1px at 90px 40px, #ffffff20, transparent),
+    radial-gradient(2px 2px at 130px 80px, #ffffff10, transparent),
+    radial-gradient(1px 1px at 160px 120px, #ffffff15, transparent);
+  background-repeat: repeat;
+  background-size: 200px 200px;
+  animation: twinkle 5s ease-in-out infinite;
+  pointer-events: none;
+  z-index: 0;
+}
+
+@keyframes twinkle {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #12121a;
+}
+
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(135deg, #ff6b35, #ffd700);
+  border-radius: 4px;
+}
+
+/* Glassmorphism */
+@layer components {
+  .glass {
+    @apply bg-space-800/50 backdrop-blur-md border border-white/10 rounded-2xl;
+  }
+  
+  .glass-card {
+    @apply glass p-6 hover:border-forge-orange/30 transition-all duration-300;
+  }
+
+  .btn-forge {
+    @apply px-6 py-3 bg-gradient-to-r from-forge-orange to-forge-gold 
+           text-space-900 font-bold rounded-xl 
+           hover:shadow-lg hover:shadow-forge-orange/30 
+           transition-all duration-300 
+           disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-outline {
+    @apply px-6 py-3 border-2 border-forge-orange text-forge-orange 
+           font-bold rounded-xl 
+           hover:bg-forge-orange hover:text-space-900 
+           transition-all duration-300;
+  }
+
+  .input-forge {
+    @apply w-full px-4 py-3 bg-space-700 border border-white/10 
+           rounded-xl text-white placeholder-lunar-400 
+           focus:outline-none focus:border-forge-orange 
+           transition-all duration-300;
+  }
+
+  .tier-card {
+    @apply glass-card cursor-pointer relative overflow-hidden;
+  }
+
+  .tier-card.selected {
+    @apply border-forge-orange shadow-lg shadow-forge-orange/20;
+  }
+
+  .tier-launchpad {
+    @apply border-l-4 border-l-mission-launchpad;
+  }
+
+  .tier-orbit {
+    @apply border-l-4 border-l-mission-orbit;
+  }
+
+  .tier-moon {
+    @apply border-l-4 border-l-mission-moon;
+  }
+}
+
+/* Glow Effects */
+.glow-orange {
+  box-shadow: 0 0 20px rgba(255, 107, 53, 0.3);
+}
+
+.glow-gold {
+  box-shadow: 0 0 20px rgba(255, 215, 0, 0.3);
+}
+
+/* Number Input Styling */
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+input[type="number"] {
+  -moz-appearance: textfield;
+}

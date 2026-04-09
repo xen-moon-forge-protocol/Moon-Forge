@@ -1,0 +1,45 @@
+{
+  "name": "Lunar Dust #440 — Sage Green",
+  "description": "A Common Moon Forge Artifact. Equipped on a mission, it grants a 5% boost to your Forge Score. Locked until mission completion or early exit. Floor price is fixed at 5 XNT — the most accessible entry into the Artifact economy.",
+  "image": "ipfs://PLACEHOLDER_IMAGES_CID/lunar_dust/sage_green.jpg",
+  "external_url": "https://moonforge.protocol/artifacts/440",
+  "attributes": [
+    {
+      "trait_type": "Tier",
+      "value": "Lunar Dust"
+    },
+    {
+      "trait_type": "Tier ID",
+      "value": 0
+    },
+    {
+      "trait_type": "Rarity",
+      "value": "Common"
+    },
+    {
+      "trait_type": "Variant",
+      "value": "Sage Green"
+    },
+    {
+      "trait_type": "Boost",
+      "display_type": "boost_percentage",
+      "value": 5
+    },
+    {
+      "trait_type": "Floor Price",
+      "value": "5 XNT"
+    },
+    {
+      "trait_type": "Pricing",
+      "value": "Fixed"
+    },
+    {
+      "trait_type": "Chain",
+      "value": "X1"
+    },
+    {
+      "trait_type": "Collection",
+      "value": "Moon Forge Artifacts"
+    }
+  ]
+}

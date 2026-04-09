@@ -1,0 +1,45 @@
+{
+  "name": "Solar Core #918 — Flame",
+  "description": "An Epic Moon Forge Artifact. Only 90 exist across the entire protocol. Grants a 20% boost to Forge Score. The solar crucible demands real commitment — equip it and watch the yield ignite.",
+  "image": "ipfs://PLACEHOLDER_IMAGES_CID/solar_core/flame.jpg",
+  "external_url": "https://moonforge.protocol/artifacts/918",
+  "attributes": [
+    {
+      "trait_type": "Tier",
+      "value": "Solar Core"
+    },
+    {
+      "trait_type": "Tier ID",
+      "value": 2
+    },
+    {
+      "trait_type": "Rarity",
+      "value": "Epic"
+    },
+    {
+      "trait_type": "Variant",
+      "value": "Flame"
+    },
+    {
+      "trait_type": "Boost",
+      "display_type": "boost_percentage",
+      "value": 20
+    },
+    {
+      "trait_type": "Floor Price",
+      "value": "20 XNT"
+    },
+    {
+      "trait_type": "Pricing",
+      "value": "Dynamic"
+    },
+    {
+      "trait_type": "Chain",
+      "value": "X1"
+    },
+    {
+      "trait_type": "Collection",
+      "value": "Moon Forge Artifacts"
+    }
+  ]
+}
