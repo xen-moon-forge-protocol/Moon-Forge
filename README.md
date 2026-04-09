@@ -6,6 +6,8 @@
 
 Moon Forge is a decentralized, community-owned burn-to-earn protocol. Burn XEN on any supported EVM chain. Earn XNT on the X1 Blockchain. No team. No VC. No admin keys. The code runs itself.
 
+🚀 **[LIVE SITE / DEMO](https://xen-moon-forge-protocol.github.io/Moon-Forge/)**
+
 ---
 
 ## Current Deployment Status

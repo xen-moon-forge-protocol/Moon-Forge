@@ -40,6 +40,7 @@ This kit contains pre-written, English-only announcement templates designed to m
 > Verified Code. Verified Contract. Join the Forge.
 > 
 > 📦 GitHub: https://github.com/xen-moon-forge-protocol/Moon-Forge
+> 🖥️ Live Site: https://xen-moon-forge-protocol.github.io/Moon-Forge/
 > ⛓️ Contract: `57UE1U1t23ztg2noLp8pcpGW1B1Xw25rLH6ra9Mchea9` (X1 SVM)
 > 
 > Don't wait for the party. Forge it. 🌑🚀
@@ -60,6 +61,7 @@ This kit contains pre-written, English-only announcement templates designed to m
 > 
 > **Resources:**
 > 📦 GitHub: https://github.com/xen-moon-forge-protocol/Moon-Forge
+> 🖥️ Live Site: https://xen-moon-forge-protocol.github.io/Moon-Forge/
 > 📖 Whitepaper: [Link to Repo/docs/WHITEPAPER.md]
 > ⛓️ X1 Contract: `57UE1U1t23ztg2noLp8pcpGW1B1Xw25rLH6ra9Mchea9`
 > 
