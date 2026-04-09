@@ -862,7 +862,7 @@ A: No. The price floor is the original base price set at deployment and is enfor
 
 ## Links
 
-- **GitHub:** [Repository](https://github.com/moon-forge-dao/protocol)
+- **GitHub:** [Repository](https://github.com/xen-moon-forge-protocol/Moon-Forge)
 - **X1 Blockchain:** [Official Site](https://x1.xyz) | [Explorer](https://explorer.mainnet.x1.xyz) | [Docs](https://docs.x1.xyz)
 - **XEN Crypto:** [Official Site](https://xen.network)
 

@@ -199,7 +199,7 @@ Open `oracle/src/services/x1Publisher.ts` and replace the `[0,0,0,0,0,0,0,0]` pl
 
 ### What a community deployer needs
 
-1. **Git clone** of this repo: `git clone https://github.com/moon-forge-dao/protocol.git`
+1. **Git clone** of this repo: `git clone https://github.com/xen-moon-forge-protocol/Moon-Forge.git`
 2. **Node.js 18+** and `npm install` in the project root
 3. **Their own fresh EVM wallet** with gas money on the target chain
 4. **The XEN token address** for their chain (all known chains are hardcoded in `deploy_portal.ts`)

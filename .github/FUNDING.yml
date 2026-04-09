@@ -1,0 +1,10 @@
+# GitHub Funding Configuration
+# Displays a "Sponsor" button on the repository
+# This is the official, transparent way to support the project
+
+# GitHub Sponsors (official sponsorship program)
+github: xen-moon-forge-protocol
+
+# Direct wallet support (X1 SVM)
+# If someone wants to donate directly without GitHub interface
+custom: ["xen-moon-forge-protocol.github.io/Moon-Forge/architect"]

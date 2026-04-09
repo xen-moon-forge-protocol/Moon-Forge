@@ -9,9 +9,9 @@
  */
 
 import { useState } from 'react';
-import { Heart, ExternalLink, CheckCircle, AlertTriangle, Loader, Rocket, Copy, Check } from 'lucide-react';
+import { Heart, ExternalLink, CheckCircle, AlertTriangle, Loader } from 'lucide-react';
 import { useWallet } from '../context/WalletContext';
-import { parseXNT, DONATION_ADDRESSES } from '../lib/constants';
+import { parseXNT } from '../lib/constants';
 
 const X1_PROGRAM_ID = ''; // filled after Anchor deploy
 
@@ -22,7 +22,6 @@ export default function DonationPanel() {
     const [status, setStatus] = useState<'idle' | 'pending' | 'success' | 'error'>('idle');
     const [txHash, setTxHash] = useState<string | null>(null);
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
-    const [devCopied, setDevCopied] = useState(false);
 
     const handleDonate = async () => {
         if (!amount || parseFloat(amount) <= 0) return;
@@ -59,12 +58,6 @@ export default function DonationPanel() {
             setStatus('error');
             setErrorMsg(err.message || 'Transaction failed');
         }
-    };
-
-    const copyDevWallet = () => {
-        navigator.clipboard.writeText(DONATION_ADDRESSES.devWallet);
-        setDevCopied(true);
-        setTimeout(() => setDevCopied(false), 2000);
     };
 
     return (
@@ -212,57 +205,6 @@ export default function DonationPanel() {
                 </div>
             </div>
 
-            {/* ── DEV WALLET DONATION ──────────────────────────────────────── */}
-            <div className="bg-gradient-to-br from-amber-900/15 to-yellow-900/15 border border-amber-500/25 rounded-xl p-6">
-                <div className="flex items-center gap-3 mb-4">
-                    <div className="w-10 h-10 bg-amber-500/20 rounded-full flex items-center justify-center">
-                        <Rocket className="w-5 h-5 text-amber-400" />
-                    </div>
-                    <div>
-                        <h3 className="font-bold text-white text-lg">Support the Dev</h3>
-                        <p className="text-amber-400 text-sm font-semibold">Fuel Phase 2 · Oracle Ops · Open Source Growth</p>
-                    </div>
-                </div>
-
-                <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-4 mb-5">
-                    <p className="text-sm text-gray-300">
-                        Moon Forge is <strong className="text-white">open-source, anonymous, and zero-admin</strong> — no VC funding,
-                        no pre-mine, no insider allocation. The dev wallet receives 2% of early-exit penalties automatically
-                        (protocol-enforced), but that only kicks in at scale. If you believe in the mission, a direct donation
-                        helps fund:
-                    </p>
-                    <ul className="text-sm text-gray-300 mt-3 space-y-1">
-                        <li>⚙️ <strong>Oracle infrastructure</strong> — keeping the bridge between EVM and X1 running 24/7</li>
-                        <li>🎨 <strong>Phase 2 NFT Artifacts</strong> — artwork, metadata, Arweave pinning, MoonArtifacts deploy</li>
-                        <li>🔧 <strong>Protocol upgrades</strong> — new chains, UI improvements, security audits</li>
-                        <li>🌐 <strong>Community growth</strong> — translations, docs, educational content</li>
-                    </ul>
-                </div>
-
-                {/* Dev wallet address */}
-                <div className="bg-black/40 border border-white/10 rounded-lg p-4">
-                    <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Dev Wallet (X1 SVM)</p>
-                    <div className="flex items-center gap-3">
-                        <code className="text-amber-300 text-sm font-mono flex-1 break-all">
-                            {DONATION_ADDRESSES.devWallet}
-                        </code>
-                        <button
-                            onClick={copyDevWallet}
-                            className="shrink-0 p-2 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/30 rounded-lg transition-colors"
-                            title="Copy address"
-                        >
-                            {devCopied
-                                ? <Check className="w-4 h-4 text-green-400" />
-                                : <Copy className="w-4 h-4 text-amber-400" />
-                            }
-                        </button>
-                    </div>
-                    <p className="text-xs text-gray-500 mt-2">
-                        Send XNT directly from X1 Wallet or Backpack. No minimum. No deadline.
-                        Visible on-chain — transparent like everything else in this protocol.
-                    </p>
-                </div>
-            </div>
 
         </div>
     );

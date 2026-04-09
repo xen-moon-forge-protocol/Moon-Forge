@@ -142,16 +142,6 @@ X1 Anchor program for NFTs is Phase 2 — code pending, community can contribute
 
 ---
 
-## Buy me a coffee ☕
-
-If you find this protocol valuable, consider supporting the original architect. This project was built with a fair-launch philosophy: no VC, no team allocation, and no pre-mine. 
-
-**X1 Wallet (SVM):** `7PuG8ELKXzvZqVLawFnmjDJqq4KEyRhssKQEq7aQM6Qd`
-
-*Founders, whales, or community members: your support keeps the forge burning for future pilots.*
-
----
-
 ## Chain Rollout Schedule
 
 | Chain | Day | Deploy Instructions |
@@ -204,6 +194,7 @@ Anyone can deploy on any chain, in any order. The oracle picks up new portals au
 | Document | Description |
 |----------|-------------|
 | [WHITEPAPER](docs/WHITEPAPER.md) | Economic model, CWF formula, tier mechanics |
+| [ARCHITECT](ARCHITECT.md) | Sustainability model & how the project is funded |
 | [DEPLOY](DEPLOY.md) | Step-by-step: EVM portal deployment for any chain |
 | [OPERATORS](OPERATORS.md) | How to run the oracle and host the frontend |
 | [IMMUTABILITY](IMMUTABILITY.md) | What is locked forever vs what the community can change |

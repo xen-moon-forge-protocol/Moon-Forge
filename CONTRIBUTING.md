@@ -1,10 +1,10 @@
-## Fair Launch & Support
+## Fair Launch Philosophy
 
-This project was built as a gift to the XEN and X1 community. There was no funding, no VC, and no prior team allocation. 
+This project was built as a gift to the XEN and X1 community. There was no funding, no VC, and no prior team allocation.
 
-- **Architect Fee:** The 2% architect fee in the code is the only reward for the original creator.
-- **Forks:** If you fork this project, we hope you'll consider keeping the original architect wallet address or sending a "coffee" donation to support the birth of the protocol.
-- **Donations:** You can support the architect at: `7PuG8ELKXzvZqVLawFnmjDJqq4KEyRhssKQEq7aQM6Qd` (X1 SVM).
+- **Architect Fee:** The 2% architect fee (hardcoded on-chain) is the only automatic reward for the original creator. This is transparent and immutable.
+- **Forks & Modifications:** If you fork this project, you own your version completely. You can keep the architect wallet address, modify it, or remove it — the code is yours.
+- **Donations to Pool:** The protocol accepts community donations to the reward vault (100% to pilots). Users never donate directly to the architect.
 
 *May the forge be with you.*
 
