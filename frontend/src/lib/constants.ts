@@ -6,7 +6,7 @@
  * Rollout schedule: ETH/OP (Day 0) → BSC (Day 13) → Polygon/Avalanche (Day 26)
  *
  * Fee split (applied to early-exit penalties):
- *   93.5% Reward Pool | 1.0% Oracle | 2.0% Referrer | 3.5% Dev Wallet
+ *   93.5% Reward Pool | 1.0% Oracle | 2.0% Referrer | 2.0% Dev | 1.5% Escrow
  */
 
 // ═══════════════════════════════════════════════════════════════════════════
