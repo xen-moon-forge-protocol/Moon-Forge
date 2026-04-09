@@ -1,5 +1,7 @@
 # Moon Forge Protocol
 
+![Moon Forge Hero](branding/hero_launch.png)
+
 > **"Don't wait for the party. Forge it."**
 
 Moon Forge is a decentralized, community-owned burn-to-earn protocol. Burn XEN on any supported EVM chain. Earn XNT on the X1 Blockchain. No team. No VC. No admin keys. The code runs itself.
@@ -107,6 +109,8 @@ Early exit penalties are split: **93.5% stays in the reward pool** (benefits all
 ---
 
 ## NFT Artifacts (Phase 2)
+
+![Moon Forge Artifacts](branding/collection_showcase.png)
 
 Solidity contracts (`contracts/MoonArtifacts.sol`) are complete and ready to deploy.
 X1 Anchor program for NFTs is Phase 2 — code pending, community can contribute.
@@ -217,5 +221,7 @@ No one can change them — including whoever wrote this code.
 MIT — Take control. Build your own. The forge is open.
 
 ---
+
+![Pilot Action](branding/pilot_action.png)
 
 *Anonymous, open-source, community-driven. Don't wait for the party. Forge it.*
