@@ -8,6 +8,8 @@ Moon Forge is a decentralized, community-owned burn-to-earn protocol. Burn XEN o
 
 🚀 **[LIVE SITE / DEMO](https://xen-moon-forge-protocol.github.io/Moon-Forge/)**
 
+> **"Don't wait for the party that never arrives. Forge your own sovereignty today."**
+
 ---
 
 ## Current Deployment Status

@@ -11,6 +11,8 @@ This kit contains pre-written, English-only announcement templates designed to m
 >
 > Introducing **Moon Forge Protocol**: A sovereign, fair-launch commitment engine built on X1 Mainnet.
 >
+> Stop waiting for a "Party" that keeps moving. The forge is hot. The code is live. We are forgers, not waiters.
+>
 > No VCs. No insiders. No pre-mine. Just absolute scarcity and code.
 > 
 > #XEN #X1 #XNT #MoonForge #DeFi
@@ -43,7 +45,7 @@ This kit contains pre-written, English-only announcement templates designed to m
 > 🖥️ Live Site: https://xen-moon-forge-protocol.github.io/Moon-Forge/
 > ⛓️ Contract: `57UE1U1t23ztg2noLp8pcpGW1B1Xw25rLH6ra9Mchea9` (X1 SVM)
 > 
-> Don't wait for the party. Forge it. 🌑🚀
+> Don't wait for the party. Forge it. Early pilots pave the way for future sovereign snapshots. 🌑🚀
 
 ---
 
