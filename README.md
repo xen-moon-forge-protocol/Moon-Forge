@@ -1,6 +1,6 @@
 # Moon Forge Protocol
 
-![Moon Forge Hero](branding/hero_launch.png)
+![Moon Forge Hero](branding/assets/hero/hero_launch.png)
 
 > **"Don't wait for the party. Forge it."**
 
@@ -110,7 +110,7 @@ Early exit penalties are split: **93.5% stays in the reward pool** (benefits all
 
 ## NFT Artifacts (Phase 2)
 
-![Moon Forge Artifacts](branding/collection_showcase.png)
+![Moon Forge Artifacts](branding/assets/renders/collection_showcase.png)
 
 Solidity contracts (`contracts/MoonArtifacts.sol`) are complete and ready to deploy.
 X1 Anchor program for NFTs is Phase 2 — code pending, community can contribute.
@@ -205,6 +205,7 @@ Anyone can deploy on any chain, in any order. The oracle picks up new portals au
 | [IMMUTABILITY](IMMUTABILITY.md) | What is locked forever vs what the community can change |
 | [CONTRIBUTING](CONTRIBUTING.md) | How to contribute |
 | [SECURITY](SECURITY.md) | Vulnerability reporting |
+| [BRANDING](branding/README.md) | Official visual assets & Launch Kit |
 
 ---
 
@@ -222,6 +223,6 @@ MIT — Take control. Build your own. The forge is open.
 
 ---
 
-![Pilot Action](branding/pilot_action.png)
+![Pilot Action](branding/assets/renders/pilot_action.png)
 
 *Anonymous, open-source, community-driven. Don't wait for the party. Forge it.*
