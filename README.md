@@ -206,6 +206,7 @@ Anyone can deploy on any chain, in any order. The oracle picks up new portals au
 | [CONTRIBUTING](CONTRIBUTING.md) | How to contribute |
 | [SECURITY](SECURITY.md) | Vulnerability reporting |
 | [BRANDING](branding/README.md) | Official visual assets & Launch Kit |
+| [FORK](FORK.md) | How to re-deploy and launch your own version |
 
 ---
 

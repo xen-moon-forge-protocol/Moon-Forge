@@ -6,7 +6,8 @@ Welcome to the official visual identity of the Moon Forge Protocol. This hub pro
 The Moon Forge aesthetic is **"Cybernetic Lunar Sovereign"**.
 - **Colors:** Deep Space Black, Ether Blue, Pulse Purple, and Solar Gold.
 - **Mood:** High-fidelity, cinematic, mysterious, and technical.
-- **The Architect:** A "Ghost in the Machine". Professional yet unreachable.
+- **The Architect:** A "Ghost in the Machine". Professional, technical, and unreachable.
+- **Immutability:** No admin keys, no upgrade path, no governance. The math is the only law.
 
 ## 📂 Asset Directory
 

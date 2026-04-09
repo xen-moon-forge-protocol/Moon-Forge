@@ -14,7 +14,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 // UPDATE THIS after creating your anonymous GitHub account and repo
-// Example: 'https://github.com/YOUR-ANON-USERNAME/Moon-Forge'
+// IMPORTANT: If you fork this project, read FORK.md for re-deployment steps.
 export const GITHUB_URL = 'https://github.com/xen-moon-forge-protocol/Moon-Forge';
 
 export const PROJECT_LINKS = {
@@ -478,8 +478,8 @@ export const DONATION_ADDRESSES = {
     poolVault: 'CScsBfpj63Mppem9Bmddmfi87bkcAfeLevdSauYMDsHR',
 } as const;
 
-// Protocol program IDs on X1 SVM — fill after Anchor programs are deployed (Base58, NOT 0x)
-// X1 uses the Solana Virtual Machine (SVM) — all contracts are Rust/Anchor programs.
+// Protocol program IDs on X1 SVM — fill after Anchor programs are deployed
+// IMPORTANT: Forking? Visit FORK.md to learn how to update these for your own deployment.
 export const PROTOCOL_CONTRACTS = {
     BASE:        '57UE1U1t23ztg2noLp8pcpGW1B1Xw25rLH6ra9Mchea9', // MoonForge Anchor program (vault + vesting + games)
     ARTIFACTS:   '', // MoonArtifacts Anchor program (NFT boosters)  — Phase 2
