@@ -5,7 +5,7 @@
  * fork guide, DevEscrow mechanics, and NFT recycling.
  *
  * Every claim on this page is verifiable on-chain.
- * Source code: github.com/moon-forge-dao/protocol
+ * Source code: github.com/xen-moon-forge-protocol/Moon-Forge
  */
 
 import { ExternalLink, Lock, Unlock, RefreshCw, Coins, Users, GitFork, Shield, Zap, FlaskConical } from 'lucide-react';

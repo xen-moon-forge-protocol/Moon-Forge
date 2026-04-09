@@ -124,7 +124,7 @@ export default function RiskWarning({ onAccept, showOnLoad = true }: RiskWarning
                     {/* External Links */}
                     <div className="flex flex-wrap gap-2">
                         <a
-                            href="https://github.com/MoonForge/protocol"
+                            href="https://github.com/xen-moon-forge-protocol/Moon-Forge"
                             target="_blank"
                             rel="noopener noreferrer"
                             className="flex items-center gap-1 text-xs text-amber-400 hover:text-amber-300"
@@ -133,9 +133,7 @@ export default function RiskWarning({ onAccept, showOnLoad = true }: RiskWarning
                             View Source Code
                         </a>
                         <a
-                            href="https://docs.moonforge.xyz/risks"
-                            target="_blank"
-                            rel="noopener noreferrer"
+                            href="/whitepaper"
                             className="flex items-center gap-1 text-xs text-amber-400 hover:text-amber-300"
                         >
                             <ExternalLink className="w-3 h-3" />

@@ -153,7 +153,7 @@ export default function SystemStatus() {
                                     Rewards calculated weekly.
                                 </p>
                                 <a
-                                    href="https://github.com/MoonForge/protocol/blob/main/proofs/"
+                                    href="https://github.com/xen-moon-forge-protocol/Moon-Forge"
                                     target="_blank"
                                     rel="noopener noreferrer"
                                     className="text-xs text-forge-orange hover:underline flex items-center gap-1"

@@ -27,9 +27,9 @@ Action shots and collection showcases.
 - `collection_showcase.png`: A unified view of the artifact tiers.
 - `pilot_action.png`: The experience of a pilot holding a high-tier artifact.
 
-## 📣 Announcements & Marketing
-Ready to spread the word? Use our official templates:
-👉 **[LAUNCH_KIT.md](LAUNCH_KIT.md)** — Pre-written posts for Twitter, Telegram, and Discord.
+## 🌐 Live Material
+The community-hosted sample frontend is live for pilot reference:
+👉 **[Sample Frontend / Demo](https://xen-moon-forge-protocol.github.io/Moon-Forge/)**
 
 ---
 *The forge is open. Sovereignty is your asset.*

@@ -34,7 +34,7 @@ This kit contains pre-written, English-only announcement templates designed to m
 > 
 > - MIT Licensed Source Code
 > - Immutable X1 SVM Contract
-> - Permissionless Governance
+> - Absolute Sovereignty (No Admin Keys)
 > 
 > The architect is a ghost. The forge is yours.
 
@@ -64,7 +64,7 @@ This kit contains pre-written, English-only announcement templates designed to m
 > **Resources:**
 > 📦 GitHub: https://github.com/xen-moon-forge-protocol/Moon-Forge
 > 🖥️ Live Site: https://xen-moon-forge-protocol.github.io/Moon-Forge/
-> 📖 Whitepaper: [Link to Repo/docs/WHITEPAPER.md]
+> 📖 Whitepaper: https://github.com/xen-moon-forge-protocol/Moon-Forge/blob/main/docs/WHITEPAPER.md
 > ⛓️ X1 Contract: `57UE1U1t23ztg2noLp8pcpGW1B1Xw25rLH6ra9Mchea9`
 > 
 > *The architect has stepped aside. The forge belongs to the community.*
@@ -82,6 +82,30 @@ This kit contains pre-written, English-only announcement templates designed to m
 
 3. **Community Ownership:**
    If asked about the founder, point to the MIT License. *"The code is the founder. We are the operators."*
+
+---
+
+## 🛡️ Anti-Block Protection & Delivery Strategy
+
+Social media filters (X/Twitter shadowbans and Telegram spam bots) often block direct links. Use these tactics to ensure your message reaches the community:
+
+1. **"Link in Bio/Profile" Strategy (Twitter):**
+   - Don't put links in the first tweet. It kills the reach.
+   - Say: *"Experience the Forge: Link in Bio 🔗"*
+   - Keep the Live Site and GitHub URLs in your anonymous account profile settings.
+
+2. **"Link Breaking" Technique (Telegram):**
+   - If a group's bot deletes links, type it as:
+     - `github[dot]com/xen-moon-forge-protocol/Moon-Forge`
+     - `xen-moon-forge-protocol[dot]github.io/Moon-Forge/`
+
+3. **Media-First Disclosure:**
+   - Always attach one of the high-res renders from the [**branding/assets/**](../branding/assets/) directory. 
+   - Algorithms favor image-rich posts. Put the links in the image description or a reply.
+
+4. **The "Non-Shill" Tone:**
+   - Frame it as a technical find, not a promotion.
+   - *"Found this immutable CWF implementaton on X1. Zero admin keys. Rare to see this level of technical transparency."*
 
 ---
 *Global Forge Status: OPERATIONAL.*

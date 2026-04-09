@@ -1551,7 +1551,7 @@ export default function WhitepaperPage() {
                     </p>
                     <div className="flex justify-center gap-4 mt-4">
                         <a
-                            href="https://github.com/MoonForge/protocol"
+                            href="https://github.com/xen-moon-forge-protocol/Moon-Forge"
                             target="_blank"
                             rel="noopener noreferrer"
                             className="text-amber-400 hover:text-amber-300 text-sm flex items-center gap-1"
@@ -1560,7 +1560,7 @@ export default function WhitepaperPage() {
                             GitHub
                         </a>
                         <a
-                            href="https://github.com/MoonForge/protocol/blob/main/docs/WHITEPAPER.md"
+                            href="https://github.com/xen-moon-forge-protocol/Moon-Forge/blob/main/docs/WHITEPAPER.md"
                             target="_blank"
                             rel="noopener noreferrer"
                             className="text-amber-400 hover:text-amber-300 text-sm flex items-center gap-1"
