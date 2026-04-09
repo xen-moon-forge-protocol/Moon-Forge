@@ -1,4 +1,12 @@
-# Contributing to Moon Forge
+## Fair Launch & Support
+
+This project was built as a gift to the XEN and X1 community. There was no funding, no VC, and no prior team allocation. 
+
+- **Architect Fee:** The 2% architect fee in the code is the only reward for the original creator.
+- **Forks:** If you fork this project, we hope you'll consider keeping the original architect wallet address or sending a "coffee" donation to support the birth of the protocol.
+- **Donations:** You can support the architect at: `7PuG8ELKXzvZqVLawFnmjDJqq4KEyRhssKQEq7aQM6Qd` (X1 SVM).
+
+*May the forge be with you.*
 
 Moon Forge is a decentralized, community-owned protocol. We welcome contributions from anyone who shares our vision of a commitment-based ecosystem for XEN and XNT.
 

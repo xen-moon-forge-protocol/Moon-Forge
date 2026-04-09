@@ -134,6 +134,16 @@ X1 Anchor program for NFTs is Phase 2 — code pending, community can contribute
 
 ---
 
+## Buy me a coffee ☕
+
+If you find this protocol valuable, consider supporting the original architect. This project was built with a fair-launch philosophy: no VC, no team allocation, and no pre-mine. 
+
+**X1 Wallet (SVM):** `7PuG8ELKXzvZqVLawFnmjDJqq4KEyRhssKQEq7aQM6Qd`
+
+*Founders, whales, or community members: your support keeps the forge burning for future pilots.*
+
+---
+
 ## Chain Rollout Schedule
 
 | Chain | Day | Deploy Instructions |
