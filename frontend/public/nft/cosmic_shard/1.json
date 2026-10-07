@@ -1,0 +1,50 @@
+{
+  "name": "Cosmic Shard — Aquamarine",
+  "symbol": "MFART",
+  "description": "A crystal splinter of the burn, still humming with the chain it left behind.\n\nUTILITY (Moon Forge program + oracle):\n• +10% XEN burn score for the holder — counts only if held by the same owner at two consecutive epoch snapshots; best Artifact per wallet; it shifts shares within an epoch and never raises the epoch total\n• 15 Burn Lottery chips every week (claim_artifact_chips; weeks reset Thursdays 00:00 UTC, missed weeks do not accumulate)\n• Ticket to Artifact Duel: any live Artifact lets its holder create or join duels; the element played is chosen freely and hidden by commit-reveal\n• Refundable floor: half of the price its buyer paid (12.5 XNT at the base price) — recycle to get it back. The exact floor of each Artifact is its on-chain \"Floor XNT\" attribute\n• Max 300 alive at any time; recycling frees the slot for a new forge\n\nBase forge price 25 XNT, +5% with every forge and ÷1.05 (-4.76%) per full week without one (never below base, never above 100× base); the buyer signs a max price. Of the price paid: 50% floor, 40% burners' reward pool, 5% Burn Lottery, 5% architect; 5% royalty on secondary sales where honored.",
+  "image": "https://xen-moon-forge-protocol.github.io/Moon-Forge/nft/images/cosmic_shard/aquamarine.jpg",
+  "external_url": "https://xen-moon-forge-protocol.github.io/Moon-Forge/artifacts",
+  "attributes": [
+    {
+      "trait_type": "Tier",
+      "value": "Cosmic Shard"
+    },
+    {
+      "trait_type": "Variant",
+      "value": "Aquamarine"
+    },
+    {
+      "trait_type": "Element",
+      "value": "Cosmic"
+    },
+    {
+      "trait_type": "Duel Ticket",
+      "value": "Yes"
+    },
+    {
+      "trait_type": "Burn Boost",
+      "value": "+10%"
+    },
+    {
+      "trait_type": "Weekly Chips",
+      "value": 15
+    },
+    {
+      "trait_type": "Max Alive",
+      "value": 300
+    },
+    {
+      "trait_type": "Recyclable",
+      "value": "Yes"
+    }
+  ],
+  "properties": {
+    "category": "image",
+    "files": [
+      {
+        "uri": "https://xen-moon-forge-protocol.github.io/Moon-Forge/nft/images/cosmic_shard/aquamarine.jpg",
+        "type": "image/jpeg"
+      }
+    ]
+  }
+}

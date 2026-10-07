@@ -1,0 +1,36 @@
+{
+  "name": "moonforge-oracle",
+  "version": "2.0.0",
+  "description": "Moon Forge oracle v2: reads final EVM burns, publishes bounded epoch roots on X1, auto-claims for burners, runs the permissionless keeper. Anyone can verify every epoch.",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "epoch": "ts-node src/index.ts epoch",
+    "claim": "ts-node src/index.ts claim",
+    "keeper": "ts-node src/index.ts keeper",
+    "verify": "ts-node src/index.ts verify",
+    "init": "ts-node src/index.ts init",
+    "market": "ts-node src/market-report.ts",
+    "test": "ts-node test/merkle.test.ts"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@coral-xyz/anchor": "^0.32.1",
+    "@noble/hashes": "^1.4.0",
+    "@solana/web3.js": "^1.98.4",
+    "bs58": "^5.0.0",
+    "dotenv": "^16.3.1",
+    "ethers": "^6.9.0"
+  },
+  "overrides": {
+    "uuid": "11.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.3.3"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

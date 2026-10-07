@@ -1,0 +1,24 @@
+[package]
+name = "moon-forge"
+version = "2.0.0"
+description = "Moon Forge Protocol v2 - burn XEN on any EVM chain, earn XNT on X1. Zero protocol fees on the burn path."
+edition = "2021"
+license = "MIT"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "moon_forge"
+
+[features]
+default = []
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+cpi = ["no-entrypoint"]
+idl-build = ["anchor-lang/idl-build"]
+# Integration-test build only: test keys + compressed time. Never deployed.
+localnet = []
+
+[dependencies]
+anchor-lang = { version = "=0.32.1", features = ["init-if-needed"] }
+sha3 = { version = "0.10", default-features = false }

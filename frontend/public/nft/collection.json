@@ -1,0 +1,7 @@
+{
+  "name": "Moon Forge Artifacts",
+  "symbol": "MFART",
+  "description": "Recyclable utility NFTs of Moon Forge Protocol on X1. Each Artifact raises its holder's share of an epoch's burn rewards (only if held by the same owner at two consecutive epoch snapshots; best Artifact per wallet; the epoch total never changes), grants weekly Burn Lottery chips, is a ticket to Artifact Duel (the element played is chosen freely and hidden), and holds a refundable XNT floor (except Genesis airdrop Lunar Dust). Recycle it through Moon Forge at any time to get the floor back. Lunar Dust is also drawn among XEN burners as Forge Drops, paid to them as part of their own epoch reward. Utilities are implemented by the program 57UE1U1t23ztg2noLp8pcpGW1B1Xw25rLH6ra9Mchea9 and the public epoch oracle, and readable by any project.",
+  "image": "https://xen-moon-forge-protocol.github.io/Moon-Forge/nft/images/void_anomaly/event_horizon.jpg",
+  "external_url": "https://xen-moon-forge-protocol.github.io/Moon-Forge/artifacts"
+}

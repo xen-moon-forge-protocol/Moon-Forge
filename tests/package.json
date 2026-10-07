@@ -1,0 +1,25 @@
+{
+  "name": "moonforge-program-tests",
+  "private": true,
+  "scripts": {
+    "test": "TS_NODE_PROJECT=./tsconfig.json mocha -r ts-node/register -t 900000 moon-forge.test.ts stress.test.ts"
+  },
+  "dependencies": {
+    "@coral-xyz/anchor": "^0.32.1",
+    "@noble/hashes": "^1.4.0",
+    "@solana/web3.js": "^1.98.4"
+  },
+  "overrides": {
+    "uuid": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/chai": "^4.3.11",
+    "@types/mocha": "^10.0.6",
+    "@types/node": "^20.10.0",
+    "chai": "^4.3.10",
+    "mocha": "^10.8.2",
+    "ts-mocha": "^10.0.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.3.3"
+  }
+}

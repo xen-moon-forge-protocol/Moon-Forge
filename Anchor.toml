@@ -1,0 +1,31 @@
+[toolchain]
+anchor_version = "0.32.1"
+
+[features]
+resolution = true
+skip-lint = false
+
+[programs.localnet]
+moon_forge = "57UE1U1t23ztg2noLp8pcpGW1B1Xw25rLH6ra9Mchea9"
+
+[programs.mainnet]
+moon_forge = "57UE1U1t23ztg2noLp8pcpGW1B1Xw25rLH6ra9Mchea9"
+
+[registry]
+url = "https://api.apr.dev"
+
+[provider]
+cluster = "localnet"
+wallet = "~/.config/solana/id.json"
+
+[workspace]
+members = ["programs/moon-forge"]
+
+[scripts]
+test = "npx ts-mocha -p ./tests/tsconfig.json -t 1000000 tests/**/*.ts"
+
+# Metaplex Core is loaded from a dump of the program deployed on X1 mainnet
+# (solana program dump -u https://rpc.mainnet.x1.xyz CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d tests/fixtures/mpl_core.so)
+[[test.genesis]]
+address = "CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d"
+program = "tests/fixtures/mpl_core.so"

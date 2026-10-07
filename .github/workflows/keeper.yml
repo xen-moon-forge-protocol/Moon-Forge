@@ -1,0 +1,41 @@
+name: Keeper (near-continuous)
+
+# Permissionless upkeep so the protocol runs without any server: settles bets that the
+# player's browser did not settle, closes and draws Jackpot / Burn Lottery rounds when their
+# time is up, pays back refunded rounds, seals and delivers Forge Drops, claims pending leaves
+# and expires old epochs. Anyone can run the same thing (`cd oracle && npm run keeper`).
+# The payer key only pays fees and receives the pool's keeper rebates; it has no special power.
+# Each run loops for 14 minutes (a pass every 15 s) and a new run starts every 15 minutes, so
+# draws are normally settled within seconds, well inside the ~3-minute block-hash window.
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: keeper
+  cancel-in-progress: false
+
+jobs:
+  keep:
+    runs-on: ubuntu-latest
+    if: ${{ vars.KEEPER_ENABLED == 'true' }}
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: oracle/package-lock.json
+      - working-directory: oracle
+        run: npm ci
+      - name: Keeper loop (14 min)
+        working-directory: oracle
+        env:
+          ORACLE_PRIVATE_KEY: ${{ secrets.KEEPER_PRIVATE_KEY || secrets.ORACLE_PRIVATE_KEY }}
+        run: npm run keeper -- --for 840

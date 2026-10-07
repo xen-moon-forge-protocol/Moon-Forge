@@ -1,0 +1,27 @@
+{
+  "note": "MoonForgePortal deployments. Same address on every chain (deployer nonce 0). No owner, no fee, no pause, no upgrade. Source verified on Sourcify (exact match).",
+  "deployer": "0x593218E8dFb59De01e7e0E359646CcB8Ef3257A3",
+  "contract": "contracts/MoonForgePortal.sol",
+  "portals": [
+    {
+      "chain": "Base",
+      "chainId": 8453,
+      "address": "0x7b00f314aB48D223bee567181CA89c65126Bf6E9",
+      "xen": "0xffcbF84650cE02DaFE96926B37a0ac5E34932fa5",
+      "deployBlock": 52302281,
+      "deployedAt": "2026-10-07T17:25:09Z",
+      "explorer": "https://basescan.org/address/0x7b00f314aB48D223bee567181CA89c65126Bf6E9",
+      "sourcify": "https://repo.sourcify.dev/8453/0x7b00f314aB48D223bee567181CA89c65126Bf6E9"
+    },
+    {
+      "chain": "Optimism",
+      "chainId": 10,
+      "address": "0x7b00f314aB48D223bee567181CA89c65126Bf6E9",
+      "xen": "0xeB585163DEbB1E637c6D617de3bEF99347cd75c8",
+      "deployBlock": 157898892,
+      "deployedAt": "2026-10-07T18:09:21Z",
+      "explorer": "https://optimistic.etherscan.io/address/0x7b00f314aB48D223bee567181CA89c65126Bf6E9",
+      "sourcify": "https://repo.sourcify.dev/10/0x7b00f314aB48D223bee567181CA89c65126Bf6E9"
+    }
+  ]
+}
