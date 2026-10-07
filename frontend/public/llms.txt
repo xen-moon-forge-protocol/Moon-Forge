@@ -1,0 +1,22 @@
+# Moon Forge
+
+> Open-source protocol on the X1 blockchain (SVM; native token XNT). Burn XEN on Base, Optimism, Polygon, BSC or Avalanche and receive XNT on X1, with zero protocol fee on the burn path. Its games are on-chain instructions that people and AI agents can play with their own keypair.
+
+Program: 57UE1U1t23ztg2noLp8pcpGW1B1Xw25rLH6ra9Mchea9 (X1 mainnet, RPC https://rpc.mainnet.x1.xyz). Burn portals: 0x7b00f314aB48D223bee567181CA89c65126Bf6E9 (same address on every supported EVM chain). Upgradeable during the public test period; no third-party audit (internal reviews are public). Not run by the XEN or X1 teams; not XEN Prime.
+
+## Start
+- [Start here](https://xen-moon-forge-protocol.github.io/Moon-Forge/start): this week's real budget, step-by-step guide, verify-it-yourself checklist, FAQ
+- [Transparency](https://xen-moon-forge-protocol.github.io/Moon-Forge/transparency): live vaults, chain weights (Fair Value Engine), who can do what, every fee
+- [Whitepaper](https://github.com/xen-moon-forge-protocol/Moon-Forge/blob/main/docs/WHITEPAPER.md): scoring, budget, tiers, Forge Drops, games, Artifacts, trust model
+
+## For AI agents
+- [Skill file](https://raw.githubusercontent.com/xen-moon-forge-protocol/Moon-Forge/main/agents/moon-forge-arena/SKILL.md): rules, costs, workflows and guardrails (Conway Automaton format)
+- [Agent kit](https://github.com/xen-moon-forge-protocol/Moon-Forge/tree/main/agents/kit): JavaScript client for Moon Wars, Predictions, Be the House; examples and an end-to-end test
+- [Agent card](https://xen-moon-forge-protocol.github.io/Moon-Forge/agent-card.json): ERC-8004 registration format
+
+## Key rules
+- Burn payout: share of the weekly epoch budget = min(10% of the free reward pool, 1.25 x the liquidity-adjusted value burned); each chain's XEN is valued at its own market price with a liquidity discount L/(L+V).
+- Moon Wars: player vs player, perfect information, 2 minutes per turn (timeout loses), winner takes both stakes minus 2%, draw after 100 rounds refunds. A live Artifact is the ticket.
+- Predictions: one round per UTC day, entries for 12 h, settled by the XDEX WXNT/USDC.X 15-minute TWAP 24 h after the lock; winners share the pot minus 2%; ties, empty sides or missing data refund.
+- Artifacts (Metaplex Core NFTs): 50% of the price stays inside as a refundable floor, 40% goes to the reward pool; recycle any time.
+- House games (Coin Flip, High-Low, Void Rush): fixed 2% edge.

@@ -1,0 +1,47 @@
+name: Health check (daily)
+
+# Read-only daily check of everything the protocol needs to keep running: keeper / oracle wallet
+# balances, the latest run of every automation workflow, keeper freshness, the site and agent card,
+# the burn portals, and the publishing token's expiry (repository variable PAT_EXPIRES). The run fails
+# when something needs attention, and GitHub notifies the account by email.
+
+on:
+  schedule:
+    - cron: '30 12 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: health
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: oracle/package-lock.json
+      - working-directory: oracle
+        run: npm ci
+      - name: Check
+        working-directory: oracle
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PAT_EXPIRES: ${{ vars.PAT_EXPIRES }}
+          PORTAL_ETH: ${{ vars.PORTAL_ETH }}
+          PORTAL_OP: ${{ vars.PORTAL_OP }}
+          PORTAL_BSC: ${{ vars.PORTAL_BSC }}
+          PORTAL_POLYGON: ${{ vars.PORTAL_POLYGON }}
+          PORTAL_AVAX: ${{ vars.PORTAL_AVAX }}
+          PORTAL_BASE: ${{ vars.PORTAL_BASE }}
+          PORTAL_PULSE: ${{ vars.PORTAL_PULSE }}
+          PORTAL_MOONBEAM: ${{ vars.PORTAL_MOONBEAM }}
+        run: npm run health

@@ -1,0 +1,23 @@
+{
+  "name": "moonforge-agent-kit",
+  "version": "1.0.0",
+  "description": "Play Moon Forge on X1 (Moon Wars, Predictions, Be the House) from an autonomous agent with its own keypair",
+  "type": "module",
+  "main": "moonforge.mjs",
+  "scripts": {
+    "status": "node examples/status.mjs",
+    "war": "node examples/war-bot.mjs",
+    "predict": "node examples/predict.mjs",
+    "test:local": "node test/e2e-local.mjs"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@coral-xyz/anchor": "0.32.1",
+    "@solana/web3.js": "1.98.4",
+    "bs58": "^6.0.0"
+  },
+  "overrides": {
+    "rpc-websockets": "9.3.5",
+    "uuid": "11.1.0"
+  }
+}

@@ -1,0 +1,63 @@
+name: Keeper (near-continuous)
+
+# Permissionless upkeep so the protocol runs without any server: settles bets that the
+# player's browser did not settle, closes and draws Jackpot / Burn Lottery rounds when their
+# time is up, pays back refunded rounds, seals and delivers Forge Drops, claims pending leaves
+# and expires old epochs. Anyone can run the same thing (`cd oracle && npm run keeper`).
+# The payer key only pays fees and receives the pool's keeper rebates; it has no special power.
+# Each run loops at least 14 minutes (a pass every 15 s), then stays up to 5.5 h more while some
+# upkeep with a clock on it is due (Prediction locks and settlements, draws, Moon Wars turns), and
+# hands over to a new run if such work remains. Idle runs end after 14 minutes.
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: write # only to start the weekly oracle run when it is due
+
+concurrency:
+  group: keeper
+  cancel-in-progress: false
+
+jobs:
+  keep:
+    runs-on: ubuntu-latest
+    if: ${{ vars.KEEPER_ENABLED == 'true' }}
+    timeout-minutes: 345
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: oracle/package-lock.json
+      - working-directory: oracle
+        run: npm ci
+      # At least 14 min; then up to 5.5 h more, but only while some upkeep with a clock on it is due
+      # before then (Prediction locks / settlements, draws, Moon Wars turns). Idle runs end after 14 min.
+      - name: Keeper loop
+        id: loop
+        working-directory: oracle
+        env:
+          ORACLE_PRIVATE_KEY: ${{ secrets.KEEPER_PRIVATE_KEY || secrets.ORACLE_PRIVATE_KEY }}
+        run: npm run keeper -- --for 840 --max 19800
+      - name: Hand over to the next run when time-sensitive upkeep is still due
+        if: ${{ always() && steps.loop.outputs.more == 'true' }}
+        run: gh workflow run keeper.yml -R "$GITHUB_REPOSITORY"
+        env:
+          GH_TOKEN: ${{ github.token }}
+      # Backup to the oracle's own Sunday schedule (GitHub may delay or drop cron runs): start it once
+      # when the weekly epoch is due and nothing has been published since the slot opened.
+      - name: Is the weekly epoch due?
+        id: due
+        if: ${{ always() && vars.ORACLE_ENABLED == 'true' }}
+        working-directory: oracle
+        run: npm run --silent due
+      - name: Start the oracle run
+        if: ${{ always() && steps.due.outputs.due == 'true' }}
+        run: gh workflow run oracle.yml -R "$GITHUB_REPOSITORY" -f dry=false
+        env:
+          GH_TOKEN: ${{ github.token }}
