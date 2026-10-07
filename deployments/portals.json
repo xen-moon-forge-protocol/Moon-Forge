@@ -1,0 +1,57 @@
+{
+  "note": "MoonForgePortal deployments. Same address on every chain (deployer nonce 0). No owner, no fee, no pause, no upgrade. Source verified on Sourcify (exact match).",
+  "deployer": "0x593218E8dFb59De01e7e0E359646CcB8Ef3257A3",
+  "contract": "contracts/MoonForgePortal.sol",
+  "portals": [
+    {
+      "chain": "Base",
+      "chainId": 8453,
+      "address": "0x7b00f314aB48D223bee567181CA89c65126Bf6E9",
+      "xen": "0xffcbF84650cE02DaFE96926B37a0ac5E34932fa5",
+      "deployBlock": 52302281,
+      "deployedAt": "2026-10-07T17:25:09Z",
+      "explorer": "https://basescan.org/address/0x7b00f314aB48D223bee567181CA89c65126Bf6E9",
+      "sourcify": "https://repo.sourcify.dev/8453/0x7b00f314aB48D223bee567181CA89c65126Bf6E9"
+    },
+    {
+      "chain": "Optimism",
+      "chainId": 10,
+      "address": "0x7b00f314aB48D223bee567181CA89c65126Bf6E9",
+      "xen": "0xeB585163DEbB1E637c6D617de3bEF99347cd75c8",
+      "deployBlock": 157898892,
+      "deployedAt": "2026-10-07T18:09:21Z",
+      "explorer": "https://optimistic.etherscan.io/address/0x7b00f314aB48D223bee567181CA89c65126Bf6E9",
+      "sourcify": "https://repo.sourcify.dev/10/0x7b00f314aB48D223bee567181CA89c65126Bf6E9"
+    },
+    {
+      "chain": "Polygon",
+      "chainId": 137,
+      "address": "0x7b00f314aB48D223bee567181CA89c65126Bf6E9",
+      "xen": "0x2AB0e9e4eE70FFf1fB9D67031E44F6410170d00e",
+      "deployBlock": 95131060,
+      "deployedAt": "2026-10-07T19:36:21Z",
+      "explorer": "https://polygonscan.com/address/0x7b00f314aB48D223bee567181CA89c65126Bf6E9",
+      "sourcify": "https://repo.sourcify.dev/137/0x7b00f314aB48D223bee567181CA89c65126Bf6E9"
+    },
+    {
+      "chain": "BSC",
+      "chainId": 56,
+      "address": "0x7b00f314aB48D223bee567181CA89c65126Bf6E9",
+      "xen": "0x2AB0e9e4eE70FFf1fB9D67031E44F6410170d00e",
+      "deployBlock": 126311331,
+      "deployedAt": "2026-10-07T19:53:17Z",
+      "explorer": "https://bscscan.com/address/0x7b00f314aB48D223bee567181CA89c65126Bf6E9",
+      "sourcify": "https://repo.sourcify.dev/56/0x7b00f314aB48D223bee567181CA89c65126Bf6E9"
+    },
+    {
+      "chain": "Avalanche",
+      "chainId": 43114,
+      "address": "0x7b00f314aB48D223bee567181CA89c65126Bf6E9",
+      "xen": "0xC0C5AA69Dbe4d6DDdfBc89c0957686ec60F24389",
+      "deployBlock": 96979937,
+      "deployedAt": "2026-10-07T19:53:39Z",
+      "explorer": "https://snowtrace.io/address/0x7b00f314aB48D223bee567181CA89c65126Bf6E9",
+      "sourcify": "https://repo.sourcify.dev/43114/0x7b00f314aB48D223bee567181CA89c65126Bf6E9"
+    }
+  ]
+}

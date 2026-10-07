@@ -1,0 +1,5 @@
+# Shows a "Sponsor" button on the repository.
+# The link opens the site's Donate page, which lists the destinations
+# (burners' reward pool, game bankroll, Burn Lottery prize vault) and
+# explains where each one goes.
+custom: ["https://xen-moon-forge-protocol.github.io/Moon-Forge/donate"]

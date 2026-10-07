@@ -1,0 +1,79 @@
+name: Oracle epoch (weekly)
+
+# Builds and publishes the next epoch, auto-claims it for burners, commits the public
+# epoch file and redeploys the site. Everything it does is reproducible with
+# `npm run verify -- frontend/public/epochs/epoch-N.json --full`.
+
+on:
+  schedule:
+    - cron: '0 0 * * 0' # Sundays 00:00 UTC (the program enforces >= 6 days between epochs)
+  workflow_dispatch:
+    inputs:
+      dry:
+        description: 'Dry run (build only, publish nothing)'
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: oracle
+  cancel-in-progress: false
+
+jobs:
+  epoch:
+    runs-on: ubuntu-latest
+    if: ${{ vars.ORACLE_ENABLED == 'true' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: oracle/package-lock.json
+      - name: Install
+        working-directory: oracle
+        run: npm ci
+      - name: Unit tests
+        working-directory: oracle
+        run: npm test
+      - name: Build / publish epoch
+        working-directory: oracle
+        env:
+          ORACLE_PRIVATE_KEY: ${{ secrets.ORACLE_PRIVATE_KEY }}
+          EPOCHS_DIR: ../frontend/public/epochs
+          PORTAL_ETH: ${{ vars.PORTAL_ETH }}
+          START_ETH: ${{ vars.START_ETH }}
+          PORTAL_OP: ${{ vars.PORTAL_OP }}
+          START_OP: ${{ vars.START_OP }}
+          PORTAL_BSC: ${{ vars.PORTAL_BSC }}
+          START_BSC: ${{ vars.START_BSC }}
+          PORTAL_POLYGON: ${{ vars.PORTAL_POLYGON }}
+          START_POLYGON: ${{ vars.START_POLYGON }}
+          PORTAL_AVAX: ${{ vars.PORTAL_AVAX }}
+          START_AVAX: ${{ vars.START_AVAX }}
+          PORTAL_BASE: ${{ vars.PORTAL_BASE }}
+          START_BASE: ${{ vars.START_BASE }}
+          PORTAL_PULSE: ${{ vars.PORTAL_PULSE }}
+          START_PULSE: ${{ vars.START_PULSE }}
+          PORTAL_MOONBEAM: ${{ vars.PORTAL_MOONBEAM }}
+          START_MOONBEAM: ${{ vars.START_MOONBEAM }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.dry }}" = "true" ]; then
+            npm run epoch -- --dry
+          else
+            npm run epoch
+          fi
+      - name: Commit epoch files
+        run: |
+          git config user.name "moon-forge-oracle"
+          git config user.email "oracle@users.noreply.github.com"
+          git add frontend/public/epochs
+          if git diff --cached --quiet; then echo "nothing new"; exit 0; fi
+          git commit -m "oracle: publish epoch data"
+          git push
+          gh workflow run deploy-frontend.yml
+        env:
+          GH_TOKEN: ${{ github.token }}

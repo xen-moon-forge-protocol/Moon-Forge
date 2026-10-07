@@ -1,0 +1,32 @@
+{
+    "name": "moon-forge-protocol",
+    "version": "2.0.0",
+    "description": "Moon Forge Protocol - burn XEN on any EVM chain, earn XNT on X1",
+    "license": "MIT",
+    "scripts": {
+        "test": "hardhat test",
+        "compile": "hardhat compile",
+        "deploy:portal:bsc": "hardhat run scripts/deploy_portal.ts --network bsc",
+        "deploy:portal:polygon": "hardhat run scripts/deploy_portal.ts --network polygon",
+        "deploy:portal:avax": "hardhat run scripts/deploy_portal.ts --network avalanche",
+        "deploy:portal:op": "hardhat run scripts/deploy_portal.ts --network optimism",
+        "deploy:portal:base": "hardhat run scripts/deploy_portal.ts --network base",
+        "deploy:portal:pulse": "hardhat run scripts/deploy_portal.ts --network pulsechain",
+        "deploy:portal:eth": "hardhat run scripts/deploy_portal.ts --network mainnet",
+        "nft:generate": "node scripts/nft-metadata/generate-metadata.mjs",
+        "airdrop:collect": "node scripts/airdrop/collect-validators.mjs",
+        "airdrop:build": "node scripts/airdrop/build-airdrop.mjs"
+    },
+    "devDependencies": {
+        "@nomicfoundation/hardhat-toolbox": "^4.0.0",
+        "hardhat": "^2.19.0",
+        "ts-node": "^10.9.0",
+        "typescript": "^5.0.0"
+    },
+    "dependencies": {
+        "@coral-xyz/anchor": "^0.32.1",
+        "@openzeppelin/contracts": "^4.9.0",
+        "@solana/web3.js": "^1.98.4",
+        "dotenv": "^16.0.0"
+    }
+}
