@@ -1,0 +1,44 @@
+# Uploads the Artifact images and metadata to Arweave (permanent storage) through ArDrive Turbo's
+# free tier, signed by a throwaway key generated inside the run. Run "sandbox" first (ar.io testnet,
+# data purged after a few days), then "mainnet" once. The resulting manifest ids are in the run
+# summary and in the artifact; the metadata manifest goes into METADATA_BASE_URI (constants.rs).
+name: NFT metadata to Arweave
+
+on:
+  workflow_dispatch:
+    inputs:
+      network:
+        description: "sandbox = rehearsal (ephemeral) / mainnet = permanent upload"
+        required: true
+        default: sandbox
+        type: choice
+        options: [sandbox, mainnet]
+
+permissions:
+  contents: read
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install the Turbo SDK (pinned)
+        run: npm install --prefix scripts/nft-metadata --no-save --no-audit --no-fund @ardrive/turbo-sdk@2.1.1
+      - name: Upload images, then metadata
+        run: node scripts/nft-metadata/upload-arweave.mjs out ${{ inputs.network == 'sandbox' && '--sandbox' || '' }}
+      - name: Summary
+        if: always()
+        run: |
+          if [ -f out/result.json ]; then
+            { echo '### Arweave upload (${{ inputs.network }})'; echo '```json'; cat out/result.json; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nft-arweave-${{ inputs.network }}
+          path: out/result.json
+          if-no-files-found: ignore

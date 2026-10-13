@@ -14,7 +14,10 @@
     "verify": "ts-node src/index.ts verify",
     "init": "ts-node src/index.ts init",
     "market": "ts-node src/market-report.ts",
-    "test": "ts-node test/merkle.test.ts"
+    "test": "ts-node test/merkle.test.ts",
+    "refresh-collection": "ts-node src/index.ts refresh-collection",
+    "propose-oracle": "ts-node src/index.ts propose-oracle",
+    "accept-oracle": "ts-node src/index.ts accept-oracle"
   },
   "license": "MIT",
   "dependencies": {

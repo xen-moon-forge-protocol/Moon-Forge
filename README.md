@@ -18,7 +18,7 @@ Moon Forge lets XEN holders on Ethereum, Optimism, BSC, Polygon, Avalanche, Base
 | EVM portals v2 | **Live on Base, Optimism, Polygon, BSC and Avalanche** at `0x7b00f314aB48D223bee567181CA89c65126Bf6E9` (same address on every chain; source verified on Sourcify, exact match; see [deployments/portals.json](deployments/portals.json)). PulseChain and Ethereum: launching as deploy gas is funded (Ethereum last) |
 | Oracle, keeper, announcements | Running from GitHub Actions: the oracle builds an epoch every Sunday 00:00 UTC (with a backup trigger; weeks without burns publish nothing); the public keeper stays up while time-sensitive upkeep is due (draws, Prediction locks, Moon Wars turns); weekly state-of-the-forge and epoch receipts on the project's own channels. Anyone can run the same commands |
 | Frontend | Live at the site above; every number is read from chain or public price sources (Start here, Fair Value Engine, Transparency) |
-| Upgrade authority | Held by the architect wallet during the test period, **to be burned** afterwards (shown live on the Transparency page) |
+| Upgrade authority | Held by the architect wallet during the test period, **to be burned** once the published conditions are met, not before 2026-11-01 ([IMMUTABILITY.md](IMMUTABILITY.md#when-the-upgrade-authority-will-be-burned); shown live on the Transparency page) |
 | Third-party audit | None. Internal (not independent) reviews: [docs/AUDIT-2026-10.md](docs/AUDIT-2026-10.md) |
 
 ---
@@ -102,6 +102,6 @@ docs/                 Whitepaper, review notes, bots, NFTs, operations
 
 ## Disclaimer
 
-Experimental software, MIT licensed, no team allocation, no token, no promised returns. XNT is volatile and illiquid. Only use what you can afford to lose. Moon Forge is not affiliated with X1 Labs, XEN/FairCrypto or XEN Prime.
+Experimental software, MIT licensed, no team allocation, no token, no promised returns. XNT is volatile and illiquid. Only use what you can afford to lose. Moon Forge is not affiliated with X1 Labs, XEN/FairCrypto, XEN Prime or X1 Forge ($FORGE), and has no token.
 
 *Don't wait for the party. Forge it.*

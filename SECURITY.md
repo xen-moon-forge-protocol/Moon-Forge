@@ -25,7 +25,7 @@ The oracle is the main off-chain trust: it reports which burns happened and at w
 
 ## Upgrade authority
 
-During the public test period the program upgrade authority is the architect wallet `7PuG8ELKXzvZqVLawFnmjDJqq4KEyRhssKQEq7aQM6Qd`, so that bugs found by the community can be fixed. **It is planned to be burned** at the end of the test period:
+During the public test period the program upgrade authority is the architect wallet `7PuG8ELKXzvZqVLawFnmjDJqq4KEyRhssKQEq7aQM6Qd`, so that bugs found by the community can be fixed. **It will be burned** at the end of the test period, on the published conditions (not before 2026-11-01, see [IMMUTABILITY.md](IMMUTABILITY.md#when-the-upgrade-authority-will-be-burned)):
 
 ```bash
 solana program set-upgrade-authority 57UE1U1t23ztg2noLp8pcpGW1B1Xw25rLH6ra9Mchea9 --final -u https://rpc.mainnet.x1.xyz

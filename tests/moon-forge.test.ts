@@ -402,6 +402,21 @@ describe("Moon Forge v2", () => {
     await program.methods.initArtifacts().accountsPartial({ config: P.config, collection: P.collection, artifactAuthority: P.authority, payer: payer.publicKey, coreProgram: MPL_CORE, systemProgram: SystemProgram.programId }).rpc();
     expect((await connection.getAccountInfo(P.collection))!.owner.toBase58()).to.equal(MPL_CORE.toBase58());
 
+    // the collection URI follows METADATA_BASE_URI; anyone can re-point it, and only to that constant
+    const baseUri = /METADATA_BASE_URI: &str = "([^"]+)"/.exec(fs.readFileSync(path.join(__dirname, "../programs/moon-forge/src/constants.rs"), "utf8"))![1];
+    const collectionUri = async () => { // CollectionV1: key | update_authority | name | uri | ...
+      const d = (await connection.getAccountInfo(P.collection))!.data;
+      const o = 33 + 4 + d.readUInt32LE(33);
+      return d.subarray(o + 4, o + 4 + d.readUInt32LE(o)).toString();
+    };
+    expect(await collectionUri()).to.equal(`${baseUri}collection.json`);
+    const refresh = () => program.methods.refreshCollectionUri().accountsPartial({
+      config: P.config, collection: P.collection, artifactAuthority: P.authority, payer: bob.publicKey, coreProgram: MPL_CORE, systemProgram: SystemProgram.programId,
+    }).signers([bob]).rpc();
+    await refresh();
+    await refresh();
+    expect(await collectionUri()).to.equal(`${baseUri}collection.json`);
+
     const forge = (k: Keypair, tier: number, serial: number) => program.methods.forgeArtifact(tier, serial, new anchor.BN("18446744073709551615")).accountsPartial({
       config: P.config, asset: P.asset(tier, serial), record: P.artifact(P.asset(tier, serial)), collection: P.collection, artifactAuthority: P.authority,
       rewardVault: P.reward, drawVault: P.draw, architect: architect.publicKey, buyer: k.publicKey, coreProgram: MPL_CORE, systemProgram: SystemProgram.programId,

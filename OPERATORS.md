@@ -22,6 +22,8 @@ The oracle wallet pays one epoch account rent (~0.002 XNT) per epoch and, when a
 | `npm run keeper` | loop every 15 s, in this order: close, draw and settle Jackpot and Burn Lottery rounds; settle house bets; seal and deliver Forge Drops; submit pending claims; pay back refunded Jackpot entries; expire epochs (`--once` = single pass, `--for <s>` = loop for s seconds). It does **not** push vested XNT — Orbit / Moon Landing burners use "Withdraw vested" (anyone can push it) |
 | `npm run verify -- <file> [--full]` | anyone: recompute an epoch (including its `rate_cap`) and compare with X1 (`--full` also re-reads the EVM logs) |
 | `npm run market` | print the current per-chain XEN price and eligible liquidity |
+| `npm run refresh-collection` | anyone: point the Artifact collection at the program's `METADATA_BASE_URI` (idempotent) |
+| `npm run propose-oracle -- <pubkey>` / `npm run accept-oracle` | hand the oracle role to a new key (see below) |
 | `npm test` | unit tests (no network) |
 
 ## Weekly automation (GitHub Actions)
@@ -31,6 +33,28 @@ The oracle wallet pays one epoch account rent (~0.002 XNT) per epoch and, when a
 `.github/workflows/keeper.yml` starts every 15 minutes and loops for 14 minutes (a pass every 15 s), so draws are normally settled within seconds — inside the ~3-minute block-hash window. GitHub can delay or skip scheduled runs, so this is best effort. It runs only when the repository variable `KEEPER_ENABLED=true`, and uses the secret `KEEPER_PRIVATE_KEY` (falling back to `ORACLE_PRIVATE_KEY`). It does everything `npm run keeper` does, so the protocol can keep running with no server. If a run is delayed and a draw expires, it is never re-drawn: the Jackpot round is refunded entry by entry, and the lottery round has no winner — its would-be prize (50% of the vault) goes to the burners' reward pool.
 
 House bets must be settled within ~3 minutes or they count as lost, which GitHub Actions cannot guarantee. The site settles each bet immediately; for extra safety run `npm run keeper` on any always-on machine (any funded X1 key works — keeping is permissionless).
+
+GitHub disables scheduled workflows in a public repository after 60 days without repository activity, and weeks without burns produce no commits. The daily health check therefore re-enables `oracle.yml`, `keeper.yml`, `announce.yml` and itself through the API (no commit needed).
+
+## The oracle key
+
+The oracle key is the one role that stays alive after the upgrade authority is burned, so treat it as the most important secret of the protocol.
+
+- **Only the current oracle key can publish epochs and hand the role over.** Nobody else can replace it: not the architect, not the upgrade authority, and once the program is frozen, not a program upgrade either.
+- **If it is lost, the burn path stops paying for good.** Epochs that are already published can still be claimed until their 90-day windows end, but no new epoch can be published.
+- **If it leaks,** whoever holds it can publish epochs. The program still caps each one at 10% of the free pool and at least 6 days apart, but those payouts could go to the wrong wallets. Hand the role to a fresh key at once.
+- **Backups:** keep at least two offline copies of the key file in different places (for example two encrypted USB drives) in addition to the `ORACLE_PRIVATE_KEY` secret. Restore one of them once to make sure it works.
+
+Hand-over to a new key (two steps, so a typo cannot lock the role away):
+
+```bash
+cd oracle
+solana-keygen new -o new-oracle.json                    # or any Solana/SVM keypair; fund it with ~1 XNT
+npm run propose-oracle -- <new pubkey>                  # signed by the current key (ORACLE_PRIVATE_KEY)
+NEW_ORACLE_PRIVATE_KEY="$(cat new-oracle.json)" npm run accept-oracle   # signed by the new key
+```
+
+Then replace the `ORACLE_PRIVATE_KEY` secret (and `oracle/.env`) with the new key. Until `accept-oracle` runs, the current key keeps the role, and a new `propose-oracle` replaces a mistaken proposal.
 
 ## Safety rules built into the oracle
 

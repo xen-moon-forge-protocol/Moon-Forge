@@ -77,7 +77,7 @@ export default function StartPage() {
                     Moon Forge burns XEN that is hard to sell and pays XNT on X1. Every rule is public, every payout can be recomputed,
                     and nothing here asks you to trust anyone. This page shows what it can really pay this week, how to use it, and how to check it yourself.
                 </p>
-                <p className="text-xs text-lunar-500">An independent community project. Not run by the XEN or X1 teams, and not XEN Prime.</p>
+                <p className="text-xs text-lunar-500">An independent community project. Not run by the XEN or X1 teams, not XEN Prime, and not X1 Forge.</p>
             </header>
 
             {/* ── this week, in real numbers ── */}
@@ -286,6 +286,10 @@ export default function StartPage() {
                 <Faq q="Is this XEN Prime? Is it run by the X1 team?">
                     No to both. Moon Forge is an independent, open-source project. XEN Prime is announced for Ethereum XEN only; Moon Forge works with XEN on
                     {' '}{live.map((c) => c.name).join(', ')}{soon.length ? ` (${soon.join(' and ')} follow)` : ''}. You can use both with different XEN.
+                </Faq>
+                <Faq q="Is this X1 Forge?">
+                    No. X1 Forge ($FORGE) is a separate, unrelated project on X1. Moon Forge has no token at all: if you see a "Moon Forge" token, presale or
+                    airdrop claim anywhere, it is not us. Official places: this site, the GitHub repository and the project's X account.
                 </Faq>
                 <Faq q="Can I calculate what I will get?">
                     Yes, after the fact, exactly: the epoch file lists every burn, its price and your share, and the program checks the totals. Before the epoch you can only

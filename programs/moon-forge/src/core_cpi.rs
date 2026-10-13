@@ -1,7 +1,7 @@
 //! Minimal hand-written CPI to Metaplex Core (CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d).
 //! The official `mpl-core` crate pins a different Anchor/borsh version, so we encode the
-//! three instructions we need directly from the published IDL:
-//!   CreateV1 (0), CreateCollectionV1 (1), BurnV1 (12).
+//! four instructions we need directly from the published IDL:
+//!   CreateV1 (0), CreateCollectionV1 (1), BurnV1 (12), UpdateCollectionV1 (16).
 //! Optional accounts that are "None" are passed as the Core program id (Shank convention).
 
 use anchor_lang::prelude::*;
@@ -14,6 +14,7 @@ use crate::errors::ForgeError;
 const IX_CREATE_V1: u8 = 0;
 const IX_CREATE_COLLECTION_V1: u8 = 1;
 const IX_BURN_V1: u8 = 12;
+const IX_UPDATE_COLLECTION_V1: u8 = 16;
 
 const PLUGIN_ROYALTIES: u8 = 0;
 const PLUGIN_ATTRIBUTES: u8 = 6;
@@ -134,6 +135,49 @@ pub fn create_asset<'info>(
             authority.clone(),
             payer.clone(),
             owner.clone(),
+            system_program.clone(),
+            core_program.clone(),
+        ],
+        signer_seeds,
+    )?;
+    Ok(())
+}
+
+/// UpdateCollectionV1 { new_name: None, new_uri: Some(uri) }, signed by the collection's update
+/// authority PDA. Core resizes the collection account; `payer` covers any rent difference.
+pub fn update_collection_uri<'info>(
+    core_program: &AccountInfo<'info>,
+    collection: &AccountInfo<'info>,
+    payer: &AccountInfo<'info>,
+    update_authority: &AccountInfo<'info>,
+    system_program: &AccountInfo<'info>,
+    uri: &str,
+    signer_seeds: &[&[&[u8]]],
+) -> Result<()> {
+    require_keys_eq!(*core_program.key, MPL_CORE_ID, ForgeError::InvalidTarget);
+    let mut data = vec![IX_UPDATE_COLLECTION_V1];
+    data.push(0); // new_name: None
+    data.push(1); // new_uri: Some
+    put_str(&mut data, uri);
+
+    let ix = Instruction {
+        program_id: MPL_CORE_ID,
+        accounts: vec![
+            AccountMeta::new(*collection.key, false),
+            AccountMeta::new(*payer.key, true),
+            AccountMeta::new_readonly(*update_authority.key, true),
+            AccountMeta::new_readonly(MPL_CORE_ID, false), // new_update_authority: None
+            AccountMeta::new_readonly(*system_program.key, false),
+            AccountMeta::new_readonly(MPL_CORE_ID, false), // log_wrapper: None
+        ],
+        data,
+    };
+    invoke_signed(
+        &ix,
+        &[
+            collection.clone(),
+            payer.clone(),
+            update_authority.clone(),
             system_program.clone(),
             core_program.clone(),
         ],

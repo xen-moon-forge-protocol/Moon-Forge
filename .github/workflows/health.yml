@@ -12,7 +12,7 @@ on:
 
 permissions:
   contents: read
-  actions: read
+  actions: write # only to re-enable the scheduled workflows (last step)
 
 concurrency:
   group: health
@@ -45,3 +45,18 @@ jobs:
           PORTAL_PULSE: ${{ vars.PORTAL_PULSE }}
           PORTAL_MOONBEAM: ${{ vars.PORTAL_MOONBEAM }}
         run: npm run health
+      - name: Keep the scheduled workflows enabled
+        # GitHub disables scheduled workflows in a public repository after 60 days without repository
+        # activity, and weeks without burns produce no commits. Re-enabling them through the API keeps
+        # the oracle, keeper, announcements and this check running, without any commit.
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for wf in oracle.yml keeper.yml announce.yml health.yml; do
+            if gh api -X PUT "repos/${{ github.repository }}/actions/workflows/$wf/enable" >/dev/null; then
+              echo "enabled: $wf"
+            else
+              echo "::warning::could not re-enable $wf"
+            fi
+          done

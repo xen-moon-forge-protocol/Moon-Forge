@@ -227,6 +227,32 @@ async function main() {
     console.log("sweep_legacy:", tx);
     return;
   }
+  if (cmd === "refresh-collection") {
+    // Permissionless and idempotent: points the Artifact collection at METADATA_BASE_URI (a program constant).
+    const signer = loadKeypair();
+    const { program } = connect(signer);
+    const { SystemProgram } = await import("@solana/web3.js");
+    const tx = await program.methods.refreshCollectionUri().accountsPartial({
+      config: PDA.config(), collection: PDA.collection(),
+      artifactAuthority: PublicKey.findProgramAddressSync([Buffer.from("artifact_authority")], program.programId)[0],
+      payer: signer.publicKey, coreProgram: new PublicKey("CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d"), systemProgram: SystemProgram.programId,
+    }).signers([signer]).rpc();
+    console.log("refresh_collection_uri:", tx);
+    return;
+  }
+  if (cmd === "propose-oracle" || cmd === "accept-oracle") {
+    // Two-step hand-over of the oracle role (see OPERATORS.md). propose-oracle <new pubkey> is signed by the
+    // current oracle (ORACLE_PRIVATE_KEY); accept-oracle is signed by the new key (NEW_ORACLE_PRIVATE_KEY).
+    const signer = loadKeypair(cmd === "accept-oracle" ? process.env.NEW_ORACLE_PRIVATE_KEY : undefined);
+    const { program } = connect(signer);
+    const accounts = { config: PDA.config(), signer: signer.publicKey };
+    const tx = cmd === "propose-oracle"
+      ? await program.methods.proposeOracle(new PublicKey(arg)).accountsPartial(accounts).signers([signer]).rpc()
+      : await program.methods.acceptOracle().accountsPartial(accounts).signers([signer]).rpc();
+    const cfg = await fetchConfig(program);
+    console.log(`${cmd}: ${tx}\n  oracle  ${cfg.oracle.toBase58()}\n  pending ${cfg.pendingOracle.toBase58()}`);
+    return;
+  }
   if (cmd === "keeper") {
     const signer = loadKeypair();
     const { connection, program } = connect(signer);
@@ -259,7 +285,7 @@ async function main() {
     if (process.env.GITHUB_OUTPUT) fs.appendFileSync(process.env.GITHUB_OUTPUT, `more=${more}\n`);
     return;
   }
-  console.log("usage: epoch [--dry] | due | verify <file> [--full] | claim <file> | keeper [--once | --for <seconds>]");
+  console.log("usage: epoch [--dry] | due | verify <file> [--full] | claim <file> | keeper [--once | --for <seconds>] | refresh-collection | propose-oracle <pubkey> | accept-oracle");
 }
 
 main().catch((e) => {

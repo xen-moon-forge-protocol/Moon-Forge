@@ -9,7 +9,8 @@
 //!                    seal and deliver Forge Drops (the Artifact goes to the player in the leaf),
 //!                    push vested XNT, settle bets/rounds/draws, start / time out / pay out
 //!                    Moon Wars matches, lock / settle / pay out / close Prediction rounds,
-//!                    expire epochs, sweep v1 accounts, reclaim orphan artifacts, init accounts.
+//!                    expire epochs, sweep v1 accounts, reclaim orphan artifacts, init accounts,
+//!                    point the Artifact collection at the compiled METADATA_BASE_URI.
 //!   • Players      : game wallet, house games, Jackpot, Duel, Burn Lottery, Moon Wars,
 //!                    Predictions, Be the House, forge/recycle Artifacts, eject early from a
 //!                    vesting mission. P2P games accept only the wallet owner (never a session key).
@@ -47,6 +48,9 @@ pub mod moon_forge {
     }
     pub fn init_artifacts(ctx: Context<InitArtifacts>) -> Result<()> {
         artifacts::init_artifacts(ctx)
+    }
+    pub fn refresh_collection_uri(ctx: Context<RefreshCollectionUri>) -> Result<()> {
+        artifacts::refresh_collection_uri(ctx)
     }
     pub fn sweep_legacy(ctx: Context<SweepLegacy>) -> Result<()> {
         forge::sweep_legacy(ctx)

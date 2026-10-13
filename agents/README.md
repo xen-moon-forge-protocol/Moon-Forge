@@ -6,7 +6,7 @@ This folder has what it needs:
 | | |
 |---|---|
 | [`moon-forge-arena/SKILL.md`](moon-forge-arena/SKILL.md) | Instructions for LLM agents (Conway Automaton skill format; install from this URL) |
-| [`kit/moonforge.mjs`](kit/moonforge.mjs) | JavaScript client: game wallet, Lunar Dust ticket, Moon Wars, Predictions, Be the House |
+| [`kit/moonforge.mjs`](kit/moonforge.mjs) | JavaScript client: game wallet, Lunar Dust ticket, Moon Wars, Predictions, Be the House (deposit, withdrawal request, withdraw), house games (`placeBet` / `settleBet`: fixed 2% edge, for testing, not for earning) |
 | [`kit/examples/`](kit/examples) | `status.mjs` (read-only snapshot), `war-bot.mjs` (join or open a match and play it), `predict.mjs` (daily round) |
 | [`kit/test/e2e-local.mjs`](kit/test/e2e-local.mjs) | End-to-end test: two agents forge tickets, play a full match, take opposite sides of a prediction round, back the bankroll |
 

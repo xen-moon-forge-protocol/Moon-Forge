@@ -8,7 +8,7 @@ import { Connection, Keypair, LAMPORTS_PER_SOL, SystemProgram } from '@solana/we
 import assert from 'assert';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { connect, MPL_CORE, PDA, PRED, WAR, XNT } from '../moonforge.mjs';
+import { connect, GAME, MPL_CORE, PDA, PRED, WAR, XNT } from '../moonforge.mjs';
 
 const RPC = process.env.RPC ?? 'http://127.0.0.1:8899';
 const IDL = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../target/idl/moon_forge.json');
@@ -126,6 +126,29 @@ await A.houseDeposit(2);
 const share = await A.acc.houseShare.fetch(PDA.house(alice.publicKey));
 assert.ok(BigInt(share.shares.toString()) >= (quote * 99n) / 100n);
 ok(`house deposit: ${share.shares.toString()} shares (quote ${quote}, 1% slippage guard)`);
+
+// 6b. leaving Be the House: request half, wait out the cooldown (1 s on localnet), withdraw
+const h0 = await A.houseShare();
+await A.houseRequestWithdraw(h0.shares / 2n);
+const h1 = await A.houseShare();
+assert.equal(h1.pendingShares, h0.shares / 2n);
+while ((await A.chainTime()) <= h1.unlockTs) await sleep(500);
+const w0 = await connection.getBalance(alice.publicKey);
+await A.houseWithdraw(0.9);
+const h2 = await A.houseShare();
+assert.equal(h2.shares, h0.shares - h0.shares / 2n);
+assert.ok((await connection.getBalance(alice.publicKey)) - w0 > 0.9 * XNT, 'about 1 XNT back');
+ok('house withdraw: half the shares requested, paid after the cooldown');
+
+// 6c. house games: a coin flip placed and settled through the kit
+await B.deposit(0.1);
+const g0 = await B.gameBalance();
+const bet = await B.placeBet(GAME.COINFLIP, 0, 1, 0.01);
+assert.equal(Number(g0 - (await B.gameBalance())), 0.01 * XNT, 'stake taken from the game wallet');
+const res = await B.settleBet(bet);
+assert.equal(await connection.getAccountInfo(bet), null, 'bet account closed, rent returned');
+assert.ok(res.won ? Math.abs(res.payoutXnt - 0.0196) < 1e-9 : res.payoutXnt === 0, `payout ${res.payoutXnt}`);
+ok(`coin flip: placed and settled through the kit (${res.won ? 'won 0.0196' : 'lost 0.01'} XNT)`);
 
 // 7. legalMoves / greedyMove never propose an illegal move on a fresh match state
 const war2 = await A.createWar(0.2);

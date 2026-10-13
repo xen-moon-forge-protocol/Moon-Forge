@@ -16,7 +16,7 @@ use anchor_lang::prelude::*;
 use anchor_lang::system_program::{transfer, Transfer};
 
 use crate::constants::*;
-use crate::core_cpi::{burn_asset, create_asset, create_collection, live_asset_owner};
+use crate::core_cpi::{burn_asset, create_asset, create_collection, live_asset_owner, update_collection_uri};
 use crate::errors::ForgeError;
 use crate::events::*;
 use crate::state::*;
@@ -94,6 +94,43 @@ pub fn init_artifacts(ctx: Context<InitArtifacts>) -> Result<()> {
         &ctx.accounts.system_program,
         &uri,
         &[&[SEED_COLLECTION, &[bump]]],
+    )
+}
+
+#[derive(Accounts)]
+pub struct RefreshCollectionUri<'info> {
+    #[account(seeds = [SEED_CONFIG], bump = config.bump)]
+    pub config: Box<Account<'info, Config>>,
+    /// CHECK: Core collection PDA
+    #[account(mut, seeds = [SEED_COLLECTION], bump = config.bumps[3])]
+    pub collection: UncheckedAccount<'info>,
+    /// CHECK: collection update authority PDA
+    #[account(seeds = [SEED_ART_AUTHORITY], bump = config.bumps[4])]
+    pub artifact_authority: UncheckedAccount<'info>,
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    /// CHECK: Metaplex Core program
+    #[account(address = MPL_CORE_ID @ ForgeError::InvalidTarget)]
+    pub core_program: UncheckedAccount<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+/// PERMISSIONLESS, idempotent. Sets the collection's metadata URI to
+/// METADATA_BASE_URI + "collection.json". The URI is a compile-time constant, so a caller can
+/// only ever write that value; this lets the metadata move to permanent storage without any
+/// admin key. Each asset takes its URI from the same constant when it is created.
+pub fn refresh_collection_uri(ctx: Context<RefreshCollectionUri>) -> Result<()> {
+    require!(*ctx.accounts.collection.owner == MPL_CORE_ID, ForgeError::InvalidTarget);
+    let uri = format!("{}collection.json", METADATA_BASE_URI);
+    let bump = ctx.accounts.config.bumps[4];
+    update_collection_uri(
+        &ctx.accounts.core_program,
+        &ctx.accounts.collection,
+        &ctx.accounts.payer,
+        &ctx.accounts.artifact_authority,
+        &ctx.accounts.system_program,
+        &uri,
+        &[&[SEED_ART_AUTHORITY, &[bump]]],
     )
 }
 

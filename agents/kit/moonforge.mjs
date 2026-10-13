@@ -6,8 +6,10 @@
  *   console.log(await mf.status());
  *
  * Covers: game wallet, Lunar Dust Artifact (the arena ticket), Moon Wars (player vs player, perfect information,
- * every move validated on-chain), daily Predictions (XNT up/down, priced by the XDEX on-chain TWAP) and Be the House
- * (backing the game bankroll). Everything goes through the open-source Moon Forge program; the kit holds no keys
+ * every move validated on-chain), daily Predictions (XNT up/down, priced by the XDEX on-chain TWAP), Be the House
+ * (backing the game bankroll: deposit, 24 h withdrawal request, withdraw) and the house games (Coin Flip, High-Low,
+ * Void Rush: a fixed 2% edge, so negative expected value: useful to test, never to earn). Everything goes through the
+ * open-source Moon Forge program; the kit holds no keys
  * other than the one you pass and sends nothing anywhere else.
  *
  * Program: 57UE1U1t23ztg2noLp8pcpGW1B1Xw25rLH6ra9Mchea9 (X1 mainnet). Rules and source: https://github.com/xen-moon-forge-protocol/Moon-Forge
@@ -15,6 +17,7 @@
 import anchor from '@coral-xyz/anchor'; // CommonJS package: the default import is the whole module (BN, Program, Wallet...)
 import { Connection, Keypair, PublicKey, SystemProgram, SYSVAR_SLOT_HASHES_PUBKEY } from '@solana/web3.js';
 import bs58 from 'bs58';
+import crypto from 'crypto';
 import fs from 'fs';
 
 export const PROGRAM_ID = new PublicKey('57UE1U1t23ztg2noLp8pcpGW1B1Xw25rLH6ra9Mchea9');
@@ -39,6 +42,7 @@ export const PDA = {
   artifactAuthority: () => pda(seed('artifact_authority')),
   player: (owner) => pda(seed('player'), owner.toBuffer()),
   house: (owner) => pda(seed('house'), owner.toBuffer()),
+  bet: (playerState, nonce) => pda(seed('bet'), playerState.toBuffer(), u64(nonce)),
   asset: (tier, serial) => pda(seed('asset'), Buffer.from([tier]), u32(serial)),
   artifact: (asset) => pda(seed('artifact'), asset.toBuffer()),
   war: (creator, nonce) => pda(seed('war'), creator.toBuffer(), u64(nonce)),
@@ -56,6 +60,12 @@ export const WAR = {
   /** attack target that means "the enemy player" (allowed only when the enemy field is empty) */
   PLAYER: 255,
 };
+/**
+ * House games (constants.rs GAME_*). Coin Flip: param 0, choice 0 | 1. High-Low: param = win chance in bps,
+ * choice 0 low | 1 high. Void Rush: param = target multiplier in bps (20000 = 2x). Minimum stake 0.01 XNT; the net
+ * win of one bet can be at most 0.25% of the free bankroll.
+ */
+export const GAME = { COINFLIP: 0, HIGHLOW: 1, VOIDRUSH: 2 };
 export const PRED = {
   state: { OPEN: 0, LOCKED: 1, SETTLED: 2, REFUND: 3 },
   side: { DOWN: 0, UP: 1 },
@@ -160,6 +170,37 @@ export class MoonForge {
   }
   async withdraw(xnt) {
     return this.program.methods.withdraw(bn(lamports(xnt))).accountsPartial({ playerState: PDA.player(this.me), owner: this.me }).rpc();
+  }
+
+  // ─── house games (fixed 2% edge: negative expected value) ──────────────────
+  /**
+   * Places a bet from the game wallet and returns the bet account. See GAME for game / param / choice.
+   * The outcome comes from the hash of a future slot: call settleBet right away (a bet nobody settles within
+   * ~3 minutes counts as lost).
+   */
+  async placeBet(game, param, choice, stakeXnt) {
+    const ps = await this.ensurePlayer();
+    const { nonce } = await this.acc.playerState.fetch(ps);
+    const bet = PDA.bet(ps, BigInt(nonce.toString()));
+    const cfg = await this.config();
+    await this.program.methods.placeBet(game, bn(param), choice, bn(lamports(stakeXnt)), Array.from(crypto.randomBytes(32))).accountsPartial({
+      config: PDA.config(), playerState: ps, bet, bankrollVault: PDA.bankrollVault(), rewardVault: PDA.rewardVault(),
+      architect: cfg.architect, signer: this.me, systemProgram: SystemProgram.programId,
+    }).rpc();
+    return bet;
+  }
+  /** Settles a bet once its target slot has passed (anyone may; the bet rent goes back to whoever paid it). */
+  async settleBet(bet) {
+    const b = await this.acc.bet.fetch(bet);
+    const target = BigInt(b.targetSlot.toString());
+    while (BigInt(await this.connection.getSlot('confirmed')) <= target) await sleep(400);
+    const before = await this.gameBalance();
+    await this.program.methods.settleBet().accountsPartial({
+      config: PDA.config(), bet, playerState: b.playerState, bankrollVault: PDA.bankrollVault(),
+      slotHashes: SYSVAR_SLOT_HASHES_PUBKEY, rentPayer: b.rentPayer,
+    }).rpc();
+    const paid = (await this.gameBalance()) - before;
+    return { won: paid > 0n, payoutXnt: Number(paid) / XNT };
   }
 
   // ─── Artifacts (any live one is the Moon Wars / Artifact Duel ticket) ──────
@@ -376,6 +417,25 @@ export class MoonForge {
     const minShares = ((await this.houseQuote(xnt)) * BigInt(10_000 - slippageBps)) / 10_000n;
     return this.program.methods.houseDeposit(bn(lamports(xnt)), bn(minShares)).accountsPartial({
       config: PDA.config(), share: PDA.house(this.me), bankrollVault: PDA.bankrollVault(), owner: this.me, systemProgram: SystemProgram.programId,
+    }).rpc();
+  }
+  /** Your Be the House position: shares, shares requested for withdrawal and when they unlock (unix seconds). */
+  async houseShare() {
+    const s = await this.acc.houseShare.fetchNullable(PDA.house(this.me));
+    return s ? { shares: BigInt(s.shares.toString()), pendingShares: BigInt(s.pendingShares.toString()), unlockTs: Number(s.unlockTs.toString()) } : null;
+  }
+  /** Starts the 24 h withdrawal cooldown for `shares` (default: all of them). A new request replaces the previous one. */
+  async houseRequestWithdraw(shares) {
+    const s = await this.houseShare();
+    if (!s) throw new Error('houseRequestWithdraw: no Be the House position');
+    return this.program.methods.houseRequestWithdraw(bn(shares === undefined ? s.shares : BigInt(shares))).accountsPartial({
+      share: PDA.house(this.me), owner: this.me,
+    }).rpc();
+  }
+  /** After the cooldown, pays the requested shares at the conservative share value; fails if that is below `minXnt`. */
+  async houseWithdraw(minXnt = 0) {
+    return this.program.methods.houseWithdraw(bn(lamports(minXnt))).accountsPartial({
+      config: PDA.config(), share: PDA.house(this.me), bankrollVault: PDA.bankrollVault(), owner: this.me,
     }).rpc();
   }
 }

@@ -8,8 +8,18 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# A validator left over from an earlier run would answer on 8899 and the tests would hit its old program.
+if (ss -ltn 2>/dev/null || netstat -ltn 2>/dev/null) | grep -qE ':(8899|9900) '; then
+  echo "a validator is already listening on 8899/9900: stop it first" >&2
+  exit 1
+fi
+
 cargo test -p moon-forge --lib
+mkdir -p target/idl
 anchor idl build -p moon_forge -o target/idl/moon_forge.json
+# build-sbf can reuse the artifact of the other feature set (mainnet keys in a "localnet" build):
+# touching a source file forces a real rebuild before each of the two builds.
+touch programs/moon-forge/src/constants.rs
 cargo build-sbf --manifest-path programs/moon-forge/Cargo.toml --features localnet
 cp target/deploy/moon_forge.so target/deploy/moon_forge_localnet.so
 mkdir -p tests/fixtures
@@ -31,4 +41,4 @@ npm install --no-audit --no-fund
 TS_NODE_PROJECT=./tsconfig.json npx mocha -r ts-node/register -t 900000 moon-forge.test.ts stress.test.ts
 
 # Rebuild the mainnet binary afterwards (the localnet build must never be deployed)
-cd .. && cargo build-sbf --manifest-path programs/moon-forge/Cargo.toml
+cd .. && touch programs/moon-forge/src/constants.rs && cargo build-sbf --manifest-path programs/moon-forge/Cargo.toml

@@ -4,13 +4,19 @@
 // so the VARIANT ORDER BELOW MUST NEVER CHANGE once the collection exists.
 //
 // Usage: node scripts/nft-metadata/generate-metadata.mjs
+// The permanent copy on Arweave is built by upload-arweave.mjs, which calls this script with
+// NFT_OUT (output folder, JSON only), NFT_IMAGE_BASE (image folder URL) and NFT_IMAGE_EXT (webp).
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const SITE = 'https://xen-moon-forge-protocol.github.io/Moon-Forge';
-const OUT = path.join(root, 'frontend/public/nft');
+const OUT = process.env.NFT_OUT ? path.resolve(process.env.NFT_OUT) : path.join(root, 'frontend/public/nft');
+const COPY_IMAGES = !process.env.NFT_OUT;
+const IMAGE_BASE = process.env.NFT_IMAGE_BASE ?? `${SITE}/nft/images`;
+const IMAGE_EXT = process.env.NFT_IMAGE_EXT ?? 'jpg';
+const IMAGE_TYPE = IMAGE_EXT === 'webp' ? 'image/webp' : 'image/jpeg';
 const SRC_IMAGES = path.join(root, 'frontend/src/assets/nft');
 
 const TIERS = [
@@ -34,18 +40,18 @@ fs.writeFileSync(path.join(OUT, 'collection.json'), JSON.stringify({
   name: 'Moon Forge Artifacts',
   symbol: 'MFART',
   description: 'Recyclable utility NFTs of Moon Forge Protocol on X1. Each Artifact raises its holder\'s share of an epoch\'s burn rewards (only if held by the same owner at two consecutive epoch snapshots; best Artifact per wallet; the epoch total never changes), grants weekly Burn Lottery chips, is a ticket to Artifact Duel (the element played is chosen freely and hidden) and to Moon Wars real-XNT matches, and holds a refundable XNT floor (except Genesis airdrop Lunar Dust). Recycle it through Moon Forge at any time to get the floor back. Lunar Dust is also drawn among XEN burners as Forge Drops, paid to them as part of their own epoch reward. Utilities are implemented by the program 57UE1U1t23ztg2noLp8pcpGW1B1Xw25rLH6ra9Mchea9 and the public epoch oracle, and readable by any project.',
-  image: `${SITE}/nft/images/void_anomaly/event_horizon.jpg`,
+  image: `${IMAGE_BASE}/void_anomaly/event_horizon.${IMAGE_EXT}`,
   external_url: `${SITE}/artifacts`,
 }, null, 2));
 
 for (const t of TIERS) {
   fs.mkdirSync(path.join(OUT, t.slug), { recursive: true });
-  fs.mkdirSync(path.join(OUT, 'images', t.slug), { recursive: true });
+  if (COPY_IMAGES) fs.mkdirSync(path.join(OUT, 'images', t.slug), { recursive: true });
   t.variants.forEach((v, i) => {
     const src = path.join(SRC_IMAGES, t.slug, `${v}.jpg`);
     const dst = path.join(OUT, 'images', t.slug, `${v}.jpg`);
-    if (fs.existsSync(src)) fs.copyFileSync(src, dst);
-    const image = `${SITE}/nft/images/${t.slug}/${v}.jpg`;
+    if (COPY_IMAGES && fs.existsSync(src)) fs.copyFileSync(src, dst);
+    const image = `${IMAGE_BASE}/${t.slug}/${v}.${IMAGE_EXT}`;
     const meta = {
       name: `${t.name} — ${title(v)}`,
       symbol: 'MFART',
@@ -81,7 +87,7 @@ for (const t of TIERS) {
         { trait_type: 'Max Alive', value: t.supply },
         { trait_type: 'Recyclable', value: 'Yes' },
       ],
-      properties: { category: 'image', files: [{ uri: image, type: 'image/jpeg' }] },
+      properties: { category: 'image', files: [{ uri: image, type: IMAGE_TYPE }] },
     };
     fs.writeFileSync(path.join(OUT, t.slug, `${i}.json`), JSON.stringify(meta, null, 2));
   });

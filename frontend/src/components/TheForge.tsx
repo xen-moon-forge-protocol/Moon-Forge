@@ -332,6 +332,7 @@ export default function TheForge() {
                                 <Notice kind="success" className="mb-4">
                                     Fits this week's fair capacity ({money(fair.remainingUsd)} left). This burn counts for about {money(fair.counted)}{tierInfo.multiplier > 1 ? ` (×${tierInfo.multiplier} for ${tierInfo.name})` : ''};
                                     at today's numbers the epoch should pay about {money(fair.estimateUsd)} in XNT, at least what selling it would return. It can still drop if many others burn before Sunday.
+                                    {' '}Gas is paid separately (two transactions: approve, then burn) and your wallet shows it before you sign: if it is more than {money(fair.estimateUsd)}, this burn costs more than it pays.
                                 </Notice>
                             ) : (
                                 <Notice kind="warn" className="mb-4">
