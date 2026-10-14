@@ -31,12 +31,12 @@ Each asset carries a Core `Attributes` plugin: `Tier`, `Element` (thematic, tied
 
 ## Metadata
 
-Stored on **Arweave** (permanent, pay-once storage with no account behind it), in a folder whose address is the program constant `METADATA_BASE_URI`: `<METADATA_BASE_URI><tier_slug>/<variant>.json` (variant = serial % variants), plus `collection.json`. The manifest ids and every file id are in [`deployments/nft-arweave.json`](../deployments/nft-arweave.json); any Arweave gateway serves the same files by id.
+Each Artifact's metadata lives at `<METADATA_BASE_URI><tier_slug>/<variant>.json` (variant = serial % variants), plus `collection.json`, where `METADATA_BASE_URI` is a program constant. **Today it is the site's GitHub Pages folder `/nft/`.** A permanent copy is being prepared on **Arweave** (pay-once storage with no account behind it); the final program upgrade will point `METADATA_BASE_URI` and the collection at it. The upload record is [`deployments/nft-arweave.json`](../deployments/nft-arweave.json); its utility text is being rewritten before it is used.
 
 - Images: 1024×1024 WebP built from the source art by `scripts/nft-metadata/build-webp.py` (kept in `nft-arweave/images/`), each under ArDrive Turbo's free upload limit.
 - JSON: `scripts/nft-metadata/generate-metadata.mjs`. The upload (images first, then the JSON pointing at them) is done by `scripts/nft-metadata/upload-arweave.mjs` from the `NFT metadata to Arweave` workflow, signed by a throwaway key created inside the run.
-- The collection is pointed at the same folder by `refresh_collection_uri`, which anyone can call and which can only write the compiled constant.
-- A copy is also served by GitHub Pages under `/nft/` for the site.
+- After the upgrade, the collection is pointed at the same folder by `refresh_collection_uri`, which anyone can call and which can only write the compiled constant.
+- The GitHub Pages copy under `/nft/` stays online for the site.
 
 Names and URIs are written on-chain at mint time by the program (`{Tier} #{serial+1}`, URI as above), so the JSON describes the variant artwork and the on-chain `Attributes` plugin carries the per-asset facts (exact floor, origin, serial).
 

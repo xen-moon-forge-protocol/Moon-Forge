@@ -40,7 +40,7 @@ GitHub disables scheduled workflows in a public repository after 60 days without
 
 The oracle key is the one role that stays alive after the upgrade authority is burned, so treat it as the most important secret of the protocol.
 
-- **Only the current oracle key can publish epochs and hand the role over.** Nobody else can replace it: not the architect, not the upgrade authority, and once the program is frozen, not a program upgrade either.
+- **Only the current oracle key can publish epochs and hand the role over.** Nobody else can replace it through the program as it is. Until the upgrade authority is burned, a program upgrade could; after that, nothing can.
 - **If it is lost, the burn path stops paying for good.** Epochs that are already published can still be claimed until their 90-day windows end, but no new epoch can be published.
 - **If it leaks,** whoever holds it can publish epochs. The program still caps each one at 10% of the free pool and at least 6 days apart, but those payouts could go to the wrong wallets. Hand the role to a fresh key at once.
 - **Backups:** keep at least two offline copies of the key file in different places (for example two encrypted USB drives) in addition to the `ORACLE_PRIVATE_KEY` secret. Restore one of them once to make sure it works.
