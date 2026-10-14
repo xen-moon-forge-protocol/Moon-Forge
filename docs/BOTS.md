@@ -49,3 +49,9 @@ ORACLE_PRIVATE_KEY='[...]' npm run keeper    # any funded X1 key works for keepi
 ```
 
 The keeper settles rounds first, then bets, seals and delivers Forge Drops, submits pending claims, pays back refunded Jackpot entries and expires epochs. It does not push vested XNT automatically.
+
+## Checking that a burn was paid
+
+- **Proof of payment: the `ClaimReceipt` account.** PDA `["receipt", u64le(epoch), player, tier]` of the program; it stores `epoch`, `player`, `tier` and `amount` (lamports) and exists from the claim until the epoch is closed (90 days after publication), when anyone may close it. If the account exists, that leaf was paid, once. Orbit / Moon Landing leaves also have a `Mission` account (`["mission", u64le(epoch), player, tier]`) holding the vesting XNT.
+- **Where the XNT goes.** A Launchpad claim pays the player's wallet. If that wallet would still be below the rent-exempt minimum after the payment (a brand-new wallet receiving less than ~0.00089 XNT), the amount is credited to the player's **game balance** (`PlayerState`, `["player", owner]`) instead, because the chain refuses to leave an account under that minimum. Moving it to the wallet then needs a `withdraw` signed by the owner. Payouts above that minimum always land in the wallet itself.
+- The epoch file (`frontend/public/epochs/epoch-N.json`) lists every leaf with its score and proof; `npm run verify -- <file> --full` recomputes it from the EVM logs and compares with X1.

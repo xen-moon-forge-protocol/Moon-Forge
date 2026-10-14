@@ -24,7 +24,7 @@ contract MockXEN is ERC20 {
     }
 
     function burn(address user, uint256 amount) public {
-        require(amount > 0, "XEN: amount");
+        require(amount > 0, "Burn: Below min limit"); // same message as XENCrypto.burn (XEN_MIN_BURN = 0)
         require(
             IERC165Like(msg.sender).supportsInterface(0x543746b1),
             "Burn: not a supported contract"

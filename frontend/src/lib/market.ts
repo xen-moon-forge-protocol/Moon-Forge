@@ -8,7 +8,7 @@
 import { useEffect, useState } from 'react';
 import { ethers } from 'ethers';
 import { CHAINS, EVM_CHAINS, isPortalDeployed } from './constants';
-import { fetchEpochFile, fetchEpochIndex, PORTAL_ABI } from './protocol';
+import { fetchEpochFile, fetchEpochIndex, P, PORTAL_ABI } from './protocol';
 
 const GT = 'https://api.geckoterminal.com/api/v2';
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -176,8 +176,10 @@ export function countedUsd(m: XenMarketLive, burnedWeekXen: number, xen: number)
  * Fair burn capacity of the week. The liquidity factor L / (L + V) is what selling V dollars of XEN into an AMM
  * pool of depth L returns at best (before pool fees, bridge costs and buying XNT back), so a burn beats selling
  * whenever the epoch pays at least 1 dollar of XNT per counted dollar (score dollar for vesting tiers).
- * capacity = this epoch's budget in USD; remaining = capacity − counted value already burned this week.
- * Approximate before the epoch: other people's tiers and the burn-hour prices are known only when it is built.
+ * Forge Drops take min(10% of the budget, 100 XNT) as Lunar Dust, so the part paid in XNT is the rest:
+ * capacity = that XNT part in USD; remaining = capacity − counted value already burned this week.
+ * Approximate before the epoch: other people's tiers (Orbit / Moon Landing count 2× / 3×) and the burn-hour
+ * prices are known only when it is built, so other burns are counted at 1× here.
  */
 export function weekCapacity(rows: Record<string, ChainMarket | 'loading'>, budgetXnt: number | null, xntUsd: number | null, rateCapK: number) {
     if (budgetXnt === null || !xntUsd) return null;
@@ -189,10 +191,15 @@ export function weekCapacity(rows: Record<string, ChainMarket | 'loading'>, budg
         counted += countedUsd(r.market, 0, r.burnedWeek);
     }
     const budgetUsd = budgetXnt * xntUsd;
+    const dropXnt = Math.min((budgetXnt * P.dropBudgetPct) / 100, P.maxDropsPerEpoch * P.dropBackingXnt);
+    const cashUsd = (budgetXnt - dropXnt) * xntUsd;
     return {
         budgetUsd,
+        /** the part of the budget paid in XNT (the rest is drawn as Forge Drops) */
+        cashUsd,
+        cashFraction: budgetXnt > 0 ? (budgetXnt - dropXnt) / budgetXnt : 1 - P.dropBudgetPct / 100,
         countedWeekUsd: counted,
-        remainingUsd: Math.max(0, budgetUsd - counted),
+        remainingUsd: Math.max(0, cashUsd - counted),
         /** XNT-dollars paid per counted dollar if nothing else is burned this week (capped at K) */
         rateNow: counted > 0 ? Math.min(rateCapK, budgetUsd / counted) : rateCapK,
     };

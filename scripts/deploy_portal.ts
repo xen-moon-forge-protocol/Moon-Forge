@@ -7,11 +7,12 @@
  * Run once per chain with the correct --network flag.
  *
  * The Portal is 100% immutable (no owner, no admin, no upgradability).
- * It only emits events — the oracle reads them off-chain.
+ * It burns the caller's XEN through XEN's own burn() (supply goes down) and emits
+ * MissionStarted — the oracle reads those events off-chain.
  *
  * XEN contract addresses by chain:
- *   Ethereum  (1):     0x06450dEe7FD2Fb8E39061434BAbCfc05599a6Fb8
- *   Optimism  (10):    0xeB585163DEbb1E637c6D617de3bef99347CD75c8
+ *   Ethereum  (1):     0x06450dEe7FD2Fb8E39061434BAbCFC05599a6Fb8
+ *   Optimism  (10):    0xeB585163DEbB1E637c6D617de3bEF99347cd75c8
  *   BSC       (56):    0x2AB0e9e4eE70FFf1fB9D67031E44F6410170d00e
  *   Polygon   (137):   0x2AB0e9e4eE70FFf1fB9D67031E44F6410170d00e
  *   Avalanche (43114): 0xC0C5AA69Dbe4d6DDdfBc89c0957686ec60F24389

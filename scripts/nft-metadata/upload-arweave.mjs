@@ -92,8 +92,6 @@ execFileSync(process.execPath, [path.join(here, 'generate-metadata.mjs')], {
 });
 const metadata = await upload(JSON_DIR, 'metadata');
 
-const missingImages = await verify(images.manifest, Object.keys(images.ids), 'image/webp');
-const missingJson = await verify(metadata.manifest, Object.keys(metadata.ids), 'application/json');
 const result = {
   network: SANDBOX ? 'ar.io testnet sandbox (ephemeral)' : 'arweave mainnet (permanent)',
   imagesManifest: images.manifest,
@@ -102,8 +100,12 @@ const result = {
   metadataBaseUri: `${GATEWAY}/${metadata.manifest}/`,
   images: images.ids,
   metadata: metadata.ids,
-  notYetServed: [...missingImages.map((p) => `images/${p}`), ...missingJson.map((p) => `metadata/${p}`)],
 };
+// written before the gateway check, so the ids are kept even if that check runs out of time
+fs.writeFileSync(path.join(OUT, 'result.json'), JSON.stringify(result, null, 2));
+const missingImages = await verify(images.manifest, Object.keys(images.ids), 'image/webp');
+const missingJson = await verify(metadata.manifest, Object.keys(metadata.ids), 'application/json');
+result.notYetServed = [...missingImages.map((p) => `images/${p}`), ...missingJson.map((p) => `metadata/${p}`)];
 fs.writeFileSync(path.join(OUT, 'result.json'), JSON.stringify(result, null, 2));
 console.log(JSON.stringify(result, null, 2));
 if (result.notYetServed.length) console.log('some paths are not served yet; re-check them before using metadataBaseUri');

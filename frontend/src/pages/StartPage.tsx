@@ -110,7 +110,8 @@ export default function StartPage() {
                 {cap && (
                     <p className="text-sm text-lunar-300">
                         <strong className="text-white">Fair capacity left this week: {money(cap.remainingUsd)}</strong> of counted value. Within it, a burn should pay at least what selling
-                        that XEN would return (the liquidity discount is the same math as selling into the pool); beyond it, burns are paid pro-rata and likely earn less.
+                        that XEN would return, in XNT alone (the liquidity discount is the same math as selling into the pool); beyond it, burns are paid pro-rata and likely earn less.
+                        Vesting tiers count 2× / 3× toward it.
                         The Forge checks your burn against it before you sign.
                     </p>
                 )}
@@ -286,6 +287,10 @@ export default function StartPage() {
                 <Faq q="Is this XEN Prime? Is it run by the X1 team?">
                     No to both. Moon Forge is an independent, open-source project. XEN Prime is announced for Ethereum XEN only; Moon Forge works with XEN on
                     {' '}{live.map((c) => c.name).join(', ')}{soon.length ? ` (${soon.join(' and ')} follow)` : ''}. You can use both with different XEN.
+                </Faq>
+                <Faq q="My X1 wallet is brand new. Where does a tiny payout go?">
+                    To your wallet, as long as it ends with at least about 0.00089 XNT (the chain's minimum for an account). A smaller payment to an empty wallet is
+                    credited to your game balance instead; move it with Withdraw in the Games page (that needs your signature and a little XNT for the fee).
                 </Faq>
                 <Faq q="Is this X1 Forge?">
                     No. X1 Forge ($FORGE) is a separate, unrelated project on X1. Moon Forge has no token at all: if you see a "Moon Forge" token, presale or

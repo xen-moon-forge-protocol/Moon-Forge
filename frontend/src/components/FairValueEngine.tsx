@@ -71,7 +71,8 @@ export default function FairValueEngine({ compact = false }: { compact?: boolean
 
             {cap && (
                 <div className={`rounded-xl p-3 text-sm ${cap.remainingUsd > 1 ? 'bg-green-500/10 text-green-200' : 'bg-amber-500/10 text-amber-200'}`}>
-                    <strong>Fair capacity this week:</strong> the budget ({money(cap.budgetUsd)}) can pay at least the value of a sale for up to {money(cap.budgetUsd)} of counted value in total.
+                    <strong>Fair capacity this week:</strong> of the budget ({money(cap.budgetUsd)}), {money(cap.cashUsd)} is paid in XNT (the rest is drawn as Forge Drops),
+                    so XNT can pay at least the value of a sale for up to {money(cap.cashUsd)} of counted value in total (vesting tiers count 2× / 3×).
                     {' '}Already burned this week: {money(cap.countedWeekUsd)}. <strong>Left: {money(cap.remainingUsd)}.</strong>
                     {' '}Burns beyond that are still paid, but pro-rata, so they would likely earn less than selling. The capacity grows with the reward pool
                     (every game stake, Artifact sale and donation adds to it).

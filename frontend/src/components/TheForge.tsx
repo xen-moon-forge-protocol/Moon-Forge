@@ -106,7 +106,7 @@ export default function TheForge() {
         const score = counted * P.tiers[tier].multiplier;
         const total = cap.countedWeekUsd + score;
         const rate = total > 0 ? Math.min(P.rateCapK, cap.budgetUsd / total) : P.rateCapK;
-        return { ...cap, counted, score, fits: score <= cap.remainingUsd, estimateUsd: rate * score };
+        return { ...cap, counted, score, fits: score <= cap.remainingUsd, estimateUsd: rate * score * cap.cashFraction };
     }, [markets.rows, chainKey, amountWei, poolNow, xntUsd, tier]);
     useEffect(() => setOverAck(false), [amount, chainKey, tier]);
     const overBalance = balance !== null && amountWei !== null && amountWei > balance;
@@ -331,7 +331,8 @@ export default function TheForge() {
                             {fair && (fair.fits ? (
                                 <Notice kind="success" className="mb-4">
                                     Fits this week's fair capacity ({money(fair.remainingUsd)} left). This burn counts for about {money(fair.counted)}{tierInfo.multiplier > 1 ? ` (×${tierInfo.multiplier} for ${tierInfo.name})` : ''};
-                                    at today's numbers the epoch should pay about {money(fair.estimateUsd)} in XNT, at least what selling it would return. It can still drop if many others burn before Sunday.
+                                    at today's numbers the epoch should pay about {money(fair.estimateUsd)} in XNT, at least what selling it would return, plus a chance at a Forge Drop.
+                                    It can still drop if others burn before Sunday, and other people's Orbit / Moon Landing burns weigh 2× / 3×.
                                     {' '}Gas is paid separately (two transactions: approve, then burn) and your wallet shows it before you sign: if it is more than {money(fair.estimateUsd)}, this burn costs more than it pays.
                                 </Notice>
                             ) : (

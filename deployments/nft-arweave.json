@@ -1,0 +1,39 @@
+{
+  "network": "arweave mainnet (permanent)",
+  "uploadedAt": "2026-10-14",
+  "uploadedBy": "GitHub Actions run 38527770153 (NFT metadata to Arweave), throwaway key, ArDrive Turbo free tier",
+  "imagesManifest": "68yMFaMMiQwSp3Ev0UFk0nel3_18yPxIjJc9dmz50PQ",
+  "metadataManifest": "rdVTds7h7EwIlyYhD_lC9ikmXAj1SuHOvbvAOe30zow",
+  "imageBaseUri": "https://arweave.net/68yMFaMMiQwSp3Ev0UFk0nel3_18yPxIjJc9dmz50PQ/",
+  "metadataBaseUri": "https://arweave.net/rdVTds7h7EwIlyYhD_lC9ikmXAj1SuHOvbvAOe30zow/",
+  "note": "Any Arweave gateway serves these ids (e.g. https://turbo-gateway.com/<id>); the program uses metadataBaseUri.",
+  "images": {
+    "cosmic_shard/amethyst.webp": "B_iEn7L2EJHHfoxMlbp685McDtn7CFqsK4tiJrb_dpQ",
+    "cosmic_shard/aquamarine.webp": "Ajnk_h2qqL1rGqXYdAqoPZztG7tyQvxxVlRd135EfMw",
+    "cosmic_shard/magenta_pulse.webp": "EE6VEuaODO2rHDWTeNNX72hpEfxCsbL9CvKppCAKqBk",
+    "lunar_dust/frost_blue.webp": "wb-7kojMy-fgsLXwGfzo6TQ_2slRlG-b-HUjR413CcQ",
+    "lunar_dust/golden_dust.webp": "7dSjX0KSZEOKyedrHuTZriO2BL1-OQFllHl1Je6U4BE",
+    "lunar_dust/lavender_mist.webp": "EqyFe-24PCOwrbNF4xc2-R_oZZqkWg-HoRpiPIgAEPM",
+    "lunar_dust/rose_quartz.webp": "EtzUt0Fd0ux0eYsvCQLcbE8XVlviaaeE-QxR-gWETIU",
+    "lunar_dust/sage_green.webp": "NAg2wDNGxYarqXLJLw71_ZhWzJHIMDedvwAy8TIo42M",
+    "lunar_dust/silver_moon.webp": "NVs_LamVpeqTg3aJMJOClErONsER859iaSbwQNHSOkU",
+    "solar_core/flame.webp": "s5L2bHVibtNqol9Y5vWcur9dNthmaB2L8RcKCkHYVk4",
+    "solar_core/red_giant.webp": "hD2KWJCjWwpzx8hiTTb642yycuaAfVABAjGOOxqf4Os",
+    "void_anomaly/event_horizon.webp": "wNoawCWGSyse5V0CUdrXASBtwmh3PE-PrATHoceaxEs"
+  },
+  "metadata": {
+    "collection.json": "11qw1GGalfT0dxuzNErLHr_9tID4ijwuuBYfkf-fb1Q",
+    "cosmic_shard/0.json": "Xji4kFeeWm4or35P-i_asp_DbH3S5nz6tN-YkNrluXI",
+    "cosmic_shard/1.json": "jJ0Mbqdo_ue-L0DimqluEPlOkXgPbdGM1dhrfIR72J0",
+    "cosmic_shard/2.json": "_h2TaguJOft0uzjxOaQ5UdmI_I3qgt7YRqBoRknN-pc",
+    "lunar_dust/0.json": "rwm5UcWkr1a0fKrUWtrMzunF-MTu6cdo5tXHhh67NSY",
+    "lunar_dust/1.json": "NhGwcsfmz9e9hI6xcRdMgHdKFVzxIyJQTyPY2ZxSQcM",
+    "lunar_dust/2.json": "pFLRdh6nA_AnwwFyDskSsy_3ZjWqT-IrOYXWXU7zWI0",
+    "lunar_dust/3.json": "r1ZEVXqRMWT4cIK25yf5raqX4E1lU-YLG7ZKyeRqRfE",
+    "lunar_dust/4.json": "FJFnJcZz2MTMlFG_dHIvia2yo409AnqlHaZ86-EIQUs",
+    "lunar_dust/5.json": "rP7m0Sfg80YVQPImgQB0LuaMUm_WhxeL3orQQ26yUQ8",
+    "solar_core/0.json": "TezQhIcVg5IM6KVND8I7DF0FrAT1BU4UiZ7iUJvW7Y4",
+    "solar_core/1.json": "Zg-KFcBYSJ8Yd6-3o1-KH662JTtTM0i4AIxLRJZgke8",
+    "void_anomaly/0.json": "5Xe-poqyyzuVcy_5kWZXzUrwLfA8P-LK7Uea8x0hKes"
+  }
+}
