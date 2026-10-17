@@ -66,7 +66,17 @@ jobs:
           else
             npm run epoch
           fi
+      # Runs even when the step above failed: the file is written before publishing, so an RPC error
+      # after an on-chain publish must not lose the only copy of the epoch data.
+      - name: Keep a copy of the epoch files
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: epochs-${{ github.run_id }}
+          path: frontend/public/epochs
+          retention-days: 90
       - name: Commit epoch files
+        if: ${{ !cancelled() }}
         run: |
           git config user.name "moon-forge-oracle"
           git config user.email "oracle@users.noreply.github.com"
