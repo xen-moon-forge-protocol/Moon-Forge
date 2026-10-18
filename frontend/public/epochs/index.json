@@ -1,4 +1,14 @@
 {
   "programId": "57UE1U1t23ztg2noLp8pcpGW1B1Xw25rLH6ra9Mchea9",
-  "epochs": []
+  "epochs": [
+    {
+      "epoch": 1,
+      "root": "d277eb366200c447083d285719ce6b3ff8c07bd4b7a535ad44d188e1a891b358",
+      "dataHash": "3bfe5bd015a6215f752b0aed657459a158e831c2a956935b9142a167d74e4218",
+      "leaves": 1,
+      "totalScore": "63918",
+      "tx": "4XyLDEHiP4upPW7SEiMCDQrNrRjHGAiPjw6cKv7wN4we9uFGrByEmXtDGto5edJniVT16rQ8SprwXQRVNVCWSDrY",
+      "createdAt": "2026-10-18T01:38:05.469Z"
+    }
+  ]
 }

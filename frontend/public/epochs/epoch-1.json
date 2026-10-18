@@ -1,0 +1,170 @@
+{
+  "version": 2,
+  "programId": "57UE1U1t23ztg2noLp8pcpGW1B1Xw25rLH6ra9Mchea9",
+  "epoch": 1,
+  "createdAt": "2026-10-18T01:38:05.469Z",
+  "chains": [
+    {
+      "chainId": 10,
+      "name": "Optimism",
+      "portal": "0x7b00f314aB48D223bee567181CA89c65126Bf6E9",
+      "fromBlockExclusive": 157898891,
+      "toBlock": 158343717,
+      "xenUsd": 4.743235761e-10,
+      "xenUsdE18": "474323576",
+      "priceSource": "reserve-weighted spot of 1 eligible pools",
+      "clamped": false,
+      "liquidityUsdMicro": "1197713900",
+      "pools": [
+        {
+          "address": "0xfdf64c32f4a03923547e6061911483b793e8d7e2",
+          "reserveUsd": 2395.43
+        }
+      ],
+      "totalSupply": "69784685380516592959997199751234"
+    },
+    {
+      "chainId": 56,
+      "name": "BSC",
+      "portal": "0x7b00f314aB48D223bee567181CA89c65126Bf6E9",
+      "fromBlockExclusive": 126311330,
+      "toBlock": 128273320,
+      "xenUsd": 6.765038558369722e-11,
+      "xenUsdE18": "67650386",
+      "priceSource": "reserve-weighted spot of 3 eligible pools",
+      "clamped": false,
+      "liquidityUsdMicro": "2328906499",
+      "pools": [
+        {
+          "address": "0x85d3f8a47314eeb541e2ee1bc7af44efb7c28cf1",
+          "reserveUsd": 3271.88
+        },
+        {
+          "address": "0xaaa77f0acdc01cbe71e74f177efd38697b5a7feb",
+          "reserveUsd": 1086.89
+        },
+        {
+          "address": "0x9f8ca02962de84a7094c381d66efd46e01c2b8f0",
+          "reserveUsd": 299.04
+        }
+      ],
+      "totalSupply": "580188526256618131720284143564022"
+    },
+    {
+      "chainId": 137,
+      "name": "Polygon",
+      "portal": "0x7b00f314aB48D223bee567181CA89c65126Bf6E9",
+      "fromBlockExclusive": 95131059,
+      "toBlock": 95721104,
+      "xenUsd": 2.6891507299832507e-11,
+      "xenUsdE18": "26891507",
+      "priceSource": "reserve-weighted spot of 3 eligible pools",
+      "clamped": false,
+      "liquidityUsdMicro": "3308705100",
+      "pools": [
+        {
+          "address": "0x97ffb2574257280e0fb2fa522345f0e81faae711",
+          "reserveUsd": 6103.64
+        },
+        {
+          "address": "0x80c3425573bb1c4f947fb9b4b45679c754a88245",
+          "reserveUsd": 336.48
+        },
+        {
+          "address": "0x8bda6206ca3fed38c5943e41a4bddb31a9c61011a8d3bfbf9fd935a6923140a6",
+          "reserveUsd": 177.28
+        }
+      ],
+      "totalSupply": "2464546340014626255076342178650153"
+    },
+    {
+      "chainId": 43114,
+      "name": "Avalanche",
+      "portal": "0x7b00f314aB48D223bee567181CA89c65126Bf6E9",
+      "fromBlockExclusive": 96979936,
+      "toBlock": 97841119,
+      "xenUsd": 2.678482719251028e-11,
+      "xenUsdE18": "26784827",
+      "priceSource": "reserve-weighted spot of 2 eligible pools",
+      "clamped": false,
+      "liquidityUsdMicro": "378713200",
+      "pools": [
+        {
+          "address": "0x90fbfd28f16fa163b914be6b9b3eeeb1c3e02fe5",
+          "reserveUsd": 545.41
+        },
+        {
+          "address": "0x5689aa012a0d1e4cb3f3a70d8cc9fdd2babdcde9",
+          "reserveUsd": 212.02
+        }
+      ],
+      "totalSupply": "330793094201439612356514446690103"
+    },
+    {
+      "chainId": 8453,
+      "name": "Base",
+      "portal": "0x7b00f314aB48D223bee567181CA89c65126Bf6E9",
+      "fromBlockExclusive": 52302280,
+      "toBlock": 52748924,
+      "xenUsd": 1.193920037e-11,
+      "xenUsdE18": "11939200",
+      "priceSource": "reserve-weighted spot of 1 eligible pools",
+      "clamped": false,
+      "liquidityUsdMicro": "421877350",
+      "pools": [
+        {
+          "address": "0xe28f5637d009732259fcbb5cea23488a411a5ead",
+          "reserveUsd": 843.75
+        }
+      ],
+      "totalSupply": "1275858357804641932968940080358781"
+    }
+  ],
+  "xnt": {
+    "usd": 0.1851472331643392,
+    "usdE18": "185147233164339203",
+    "source": "https://x1report.com/api/xnt"
+  },
+  "kBps": 12500,
+  "rateCap": "6751",
+  "artifacts": {
+    "slot": 86728912,
+    "holders": [],
+    "eligible": []
+  },
+  "burns": [
+    {
+      "chainId": 10,
+      "txHash": "0x04e972c26f094c300e7b4b1950fc1260778c5fb6c09cbb32da4bfbcab19f4dd7",
+      "logIndex": 416,
+      "blockNumber": 158187163,
+      "missionId": "1",
+      "pilot": "0xCae57f45936d2ADe4A3A26de714B049b12054043",
+      "amountWei": "113421926000000000000000000",
+      "tier": 0,
+      "x1": "AFuEuc2SrXPCSkXKMZEBbV9cYVJ556kiHtBy6ESqDRKs",
+      "timestamp": 1791973103,
+      "priceE18": "563582843",
+      "priceSource": "median24h optimism/0xfdf64c32f4a03923547e6061911483b793e8d7e2 until 2026-10-14T11:00:00.000Z",
+      "clamped": false
+    }
+  ],
+  "leaves": [
+    {
+      "player": "AFuEuc2SrXPCSkXKMZEBbV9cYVJ556kiHtBy6ESqDRKs",
+      "tier": 0,
+      "score": "63918"
+    }
+  ],
+  "totalScore": "63918",
+  "root": "d277eb366200c447083d285719ce6b3ff8c07bd4b7a535ad44d188e1a891b358",
+  "dataHash": "3bfe5bd015a6215f752b0aed657459a158e831c2a956935b9142a167d74e4218",
+  "proofs": {
+    "AFuEuc2SrXPCSkXKMZEBbV9cYVJ556kiHtBy6ESqDRKs:0": []
+  },
+  "publish": {
+    "tx": "4XyLDEHiP4upPW7SEiMCDQrNrRjHGAiPjw6cKv7wN4we9uFGrByEmXtDGto5edJniVT16rQ8SprwXQRVNVCWSDrY",
+    "slot": 86728945,
+    "budget": "388359377"
+  }
+}
