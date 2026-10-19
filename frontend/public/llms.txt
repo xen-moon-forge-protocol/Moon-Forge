@@ -4,6 +4,8 @@
 
 Program: 57UE1U1t23ztg2noLp8pcpGW1B1Xw25rLH6ra9Mchea9 (X1 mainnet, RPC https://rpc.mainnet.x1.xyz). Burn portals: 0x7b00f314aB48D223bee567181CA89c65126Bf6E9 (same address on every supported EVM chain). Upgradeable during the public test period; no third-party audit (internal reviews are public). Not run by the XEN or X1 teams; not XEN Prime; not X1 Forge; no token.
 
+Only burns made through the Moon Forge portals (from each chain's start block) are paid. Past or legacy XEN burns made elsewhere (for example the burn records tracked by xen.pub, or the 2024 plan to redeem Ethereum XEN burns for XN) are not counted and cannot be claimed here. Moon Forge never asks anyone to link, sign or pay anything to "claim old burns": that is a scam.
+
 ## Start
 - [Start here](https://xen-moon-forge-protocol.github.io/Moon-Forge/start): this week's real budget, step-by-step guide, verify-it-yourself checklist, FAQ
 - [Transparency](https://xen-moon-forge-protocol.github.io/Moon-Forge/transparency): live vaults, chain weights (Fair Value Engine), who can do what, every fee

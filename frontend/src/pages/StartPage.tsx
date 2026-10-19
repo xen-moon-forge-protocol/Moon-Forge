@@ -288,6 +288,11 @@ export default function StartPage() {
                     No to both. Moon Forge is an independent, open-source project. XEN Prime is announced for Ethereum XEN only; Moon Forge works with XEN on
                     {' '}{live.map((c) => c.name).join(', ')}{soon.length ? ` (${soon.join(' and ')} follow)` : ''}. You can use both with different XEN.
                 </Faq>
+                <Faq q="Do my old XEN burns count?">
+                    No. Only burns made through the Moon Forge portal on a supported chain are paid. Burns you made before, or anywhere else (for example the
+                    records tracked by xen.pub, or the 2024 plan to redeem Ethereum XEN burns), are not counted and cannot be claimed here. Moon Forge never asks
+                    you to link a wallet, sign a message or pay a fee to "claim old burns": anyone who does is running a scam.
+                </Faq>
                 <Faq q="My X1 wallet is brand new. Where does a tiny payout go?">
                     To your wallet, as long as it ends with at least about 0.00089 XNT (the chain's minimum for an account). A smaller payment to an empty wallet is
                     credited to your game balance instead; move it with Withdraw in the Games page (that needs your signature and a little XNT for the fee).

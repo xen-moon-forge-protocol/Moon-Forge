@@ -102,6 +102,6 @@ docs/                 Whitepaper, review notes, bots, NFTs, operations
 
 ## Disclaimer
 
-Experimental software, MIT licensed, no team allocation, no token, no promised returns. XNT is volatile and illiquid. Only use what you can afford to lose. Moon Forge is not affiliated with X1 Labs, XEN/FairCrypto, XEN Prime or X1 Forge ($FORGE), and has no token.
+Experimental software, MIT licensed, no team allocation, no token, no promised returns. XNT is volatile and illiquid. Only use what you can afford to lose. Moon Forge is not affiliated with X1 Labs, XEN/FairCrypto, XEN Prime or X1 Forge ($FORGE), and has no token. Only burns made through the Moon Forge portals are paid: past or legacy XEN burns made elsewhere cannot be claimed, and nobody acting for Moon Forge will ask you to sign or pay to "claim old burns".
 
 *Don't wait for the party. Forge it.*

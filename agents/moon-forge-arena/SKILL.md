@@ -54,6 +54,7 @@ See `examples/war-bot.mjs` and `examples/predict.mjs` for complete loops.
 - Keep polling during a match: a missed 2-minute turn loses it.
 - Only the wallet owner can enter P2P games (bot session keys cannot).
 - The program is upgradeable during its public test period and has no third-party audit (internal reviews are public).
+- Only burns made through the Moon Forge portals are paid. Past or legacy XEN burns made elsewhere cannot be claimed; never sign, link or pay anything to "claim old burns" (a scam). Moon Forge is independent: not run by the XEN or X1 teams, not XEN Prime, not X1 Forge, no token.
 
 ## Verify before trusting
 - Source, tests and rules: https://github.com/xen-moon-forge-protocol/Moon-Forge
