@@ -8,7 +8,7 @@ import { PublicKey } from '@solana/web3.js';
 import { Gamepad2 } from 'lucide-react';
 import { useWallet } from '../context/WalletContext';
 import { usePoll, useProtocol } from '../lib/hooks';
-import { fetchPlayer, NEXT_UPGRADE_LIVE, P } from '../lib/protocol';
+import { fetchPlayer, NEXT_UPGRADE_LIVE, P, WARS_REAL_PAUSED } from '../lib/protocol';
 import { PROJECT_LINKS } from '../lib/constants';
 import { Notice } from '../components/ui';
 import GameWallet from '../components/games/GameWallet';
@@ -35,7 +35,7 @@ const TABS = [
 export default function GamesPage() {
     const { x1Provider, x1Address, x1Connected, connectX1, isConnecting } = useWallet();
     const [tab, setTab] = useState<(typeof TABS)[number]['id']>('house');
-    const [warsMode, setWarsMode] = useState<'practice' | 'real'>(NEXT_UPGRADE_LIVE ? 'real' : 'practice');
+    const [warsMode, setWarsMode] = useState<'practice' | 'real'>(NEXT_UPGRADE_LIVE && !WARS_REAL_PAUSED ? 'real' : 'practice');
     const owner = x1Connected && x1Address ? new PublicKey(x1Address) : null;
     const player = usePoll(() => (owner ? fetchPlayer(owner) : Promise.resolve(null)), [x1Address, x1Connected], 15_000);
     const proto = useProtocol(15_000);

@@ -9,7 +9,7 @@ import { useState } from 'react';
 import { PublicKey } from '@solana/web3.js';
 import { Swords } from 'lucide-react';
 import {
-    cancelWar, claimWarTimeout, createWar, fetchMyArtifacts, fetchWars, joinWar, NEXT_UPGRADE_LIVE, P, settleWar, startWar,
+    cancelWar, claimWarTimeout, createWar, fetchMyArtifacts, fetchWars, joinWar, NEXT_UPGRADE_LIVE, P, settleWar, startWar, WARS_REAL_PAUSED,
     WAR, warAttack, warEndTurn, warMoveKey, warSummon,
 } from '../../lib/protocol';
 import { formatDuration } from '../../lib/constants';
@@ -145,7 +145,7 @@ export default function MoonWarsReal({ ctx }: { ctx: GameCtx }) {
     const ticket = (arts.data ?? [])[0]?.asset ?? null;
     const stakeNum = Number(stake);
     const balance = player ? Number(player.balance) : 0;
-    const canCreate = NEXT_UPGRADE_LIVE && !!provider && !!ticket && stakeNum >= WAR.minStakeXnt && Math.round(stakeNum * 1e9) <= balance && !tx.busy;
+    const canCreate = NEXT_UPGRADE_LIVE && !WARS_REAL_PAUSED && !!provider && !!ticket && stakeNum >= WAR.minStakeXnt && Math.round(stakeNum * 1e9) <= balance && !tx.busy;
     const reload = () => { wars.reload(); refresh(); };
     const list = wars.data ?? [];
     const mine = list.filter((w) => owner && (w.account.creator.equals(owner) || (w.account.state > 0 && w.account.opponent.equals(owner))));
@@ -162,6 +162,13 @@ export default function MoonWarsReal({ ctx }: { ctx: GameCtx }) {
             {!NEXT_UPGRADE_LIVE && (
                 <Notice kind="info">
                     Real matches are written and tested in the program, and go live with the next program upgrade. Until then nothing can be staked here; the free practice uses the same rules.
+                </Notice>
+            )}
+            {NEXT_UPGRADE_LIVE && WARS_REAL_PAUSED && (
+                <Notice kind="warn">
+                    Creating and joining real-XNT matches is paused on this site while a fix is made: the browser move key that pays your move fees was funded
+                    for only about two moves, so a match could be lost on time. The free practice below uses the same rules. Existing matches can still be played,
+                    cancelled, claimed on timeout and paid out.
                 </Notice>
             )}
             {provider && arts.data && !ticket && (
@@ -210,7 +217,7 @@ export default function MoonWarsReal({ ctx }: { ctx: GameCtx }) {
                             <div><div className="text-xs text-lunar-400">Stake each</div><Xnt lamports={Number(w.account.stake)} /></div>
                             {provider && (
                                 <button className="btn-forge !px-3 !py-1 text-xs ml-auto"
-                                    disabled={!NEXT_UPGRADE_LIVE || !!tx.busy || !ticket || Number(w.account.stake) > balance}
+                                    disabled={!NEXT_UPGRADE_LIVE || WARS_REAL_PAUSED || !!tx.busy || !ticket || Number(w.account.stake) > balance}
                                     title={!ticket ? 'You need an Artifact (any tier) to join' : undefined}
                                     onClick={() => ticket && tx.run('Joining match', () => joinWar(provider, w.publicKey, ticket), reload)}>
                                     Join

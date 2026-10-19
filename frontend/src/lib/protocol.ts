@@ -760,6 +760,10 @@ export async function fetchOpenDuels(connection: Connection = readConnection) {
 // ── Moon Wars (real) and Predictions ────────────────────────────────────────
 /** Moon Wars (real) and Predictions are live on mainnet since the program upgrade of 12 October 2026. */
 export const NEXT_UPGRADE_LIVE = true;
+/** Creating and joining real-XNT Moon Wars matches is paused from this site: the browser move key is funded for
+ *  only about two moves (each move transaction costs about 0.002 XNT), so a player would time out and lose.
+ *  Moves, cancel, timeout claims and payouts of existing matches stay available. */
+export const WARS_REAL_PAUSED = true;
 
 export const WAR = {
   minStakeXnt: 0.1, startHp: 20, fieldMax: 6, maxRounds: 100, turnSeconds: 120, solarBurn: 2,
