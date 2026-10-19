@@ -71,10 +71,14 @@ function cached<T>(key: string, f: () => Promise<T>, ttlMs = 300_000): Promise<T
 export function xenMarketLive(chainKey: string): Promise<XenMarketLive | null> {
     return cached(`mkt:${chainKey}`, async () => {
         const c = CHAINS[chainKey];
+        // A failed or throttled read throws, so it is not cached and the next refresh retries;
+        // null is kept only for a market that really has no price or no eligible pool.
         const token = await gtJson(`${GT}/networks/${c.gecko}/tokens/${c.xenToken}`);
+        if (!token) throw new Error(`market data unavailable for ${c.name}`);
         const ref = Number(token?.data?.attributes?.price_usd);
         if (!(ref > 0)) return null;
         const j = await gtJson(`${GT}/networks/${c.gecko}/tokens/${c.xenToken}/pools?page=1`);
+        if (!j) throw new Error(`market data unavailable for ${c.name}`);
         const xenId = `${c.gecko}_${c.xenToken.toLowerCase()}`;
         const allow = new Set((QUOTE_ALLOWLIST[c.gecko] ?? []).map((a) => `${c.gecko}_${a}`));
         let reserve = 0, weighted = 0, n = 0, trades = 0, volume = 0;
@@ -129,7 +133,8 @@ export function burnedInPublishedEpochs(): Promise<Map<number, number>> {
 
 // ─── shared live view of every chain + the week's fair burn capacity ───────────────────────────
 
-export type ChainMarket = { market: XenMarketLive | null; supply: number | null; burnedWeek: number | null; stale: boolean };
+/** `marketError`: the market could not be read (as opposed to a chain that has no eligible market). */
+export type ChainMarket = { market: XenMarketLive | null; supply: number | null; burnedWeek: number | null; stale: boolean; marketError: boolean };
 
 /** All chains' market and burn state, refreshed every `refreshMs`. A source that fails keeps its last good
  *  value, marked stale, instead of going blank. */
@@ -146,16 +151,16 @@ export function useChainMarkets(refreshMs = 300_000) {
         (async () => {
             const counted = await burnedInPublishedEpochs().catch(() => new Map<number, number>());
             for (const k of EVM_CHAINS) {
-                const [market, state] = await Promise.all([
-                    xenMarketLive(k).catch(() => null),
+                const [m, state] = await Promise.all([
+                    xenMarketLive(k).then((market) => ({ market, err: false }), () => ({ market: null, err: true })),
                     chainBurnState(k).catch(() => ({ supply: null, burnedAllTime: null })),
                 ]);
                 if (!alive) return;
                 const burnedWeek = state.burnedAllTime === null ? null : Math.max(0, state.burnedAllTime - (counted.get(CHAINS[k].chainId) ?? 0));
                 setRows((prev) => {
                     const old = prev[k];
-                    if (!market && old !== 'loading' && old.market) return { ...prev, [k]: { ...old, stale: true } };
-                    return { ...prev, [k]: { market, supply: state.supply ?? (old !== 'loading' ? old.supply : null), burnedWeek, stale: false } };
+                    if (m.err && old !== 'loading' && old.market) return { ...prev, [k]: { ...old, stale: true } };
+                    return { ...prev, [k]: { market: m.market, supply: state.supply ?? (old !== 'loading' ? old.supply : null), burnedWeek, stale: false, marketError: m.err } };
                 });
             }
             if (alive) setUpdatedAt(Date.now());
@@ -187,7 +192,14 @@ export function weekCapacity(rows: Record<string, ChainMarket | 'loading'>, budg
     for (const k of EVM_CHAINS) {
         if (!isPortalDeployed(k)) continue;
         const r = rows[k];
-        if (r === 'loading' || !r.market || !r.burnedWeek) continue;
+        // Unknown until every live chain is read: a burn on a chain whose market failed to load would
+        // otherwise count as $0 and overstate what is left.
+        if (r === 'loading' || r.burnedWeek === null) return null;
+        if (!r.burnedWeek) continue;
+        if (!r.market) {
+            if (r.marketError) return null;
+            continue; // no eligible market at all: the oracle values these burns at 0 too
+        }
         counted += countedUsd(r.market, 0, r.burnedWeek);
     }
     const budgetUsd = budgetXnt * xntUsd;

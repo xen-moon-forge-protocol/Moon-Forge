@@ -113,6 +113,15 @@ export const chainById = (chainId: number | null | undefined) =>
 export const formatNumber = (n: number | bigint, maxFrac = 2): string =>
     new Intl.NumberFormat('en-US', { maximumFractionDigits: maxFrac }).format(Number(n));
 
+/** Typed token amount → plain decimal string ("1,5" → "1.5"), or null. Digits with at most one "." or ","
+ *  as the decimal separator; grouped input ("1,000,000", "1.000.000") is refused, never guessed, because a
+ *  wrong guess changes an irreversible burn by 10× or more. */
+export function normalizeAmountInput(input: string): string | null {
+    const raw = input.trim().replace(/[\s_]/g, '');
+    if (!raw || !/^\d*([.,]\d*)?$/.test(raw) || !/\d/.test(raw)) return null;
+    return raw.replace(',', '.');
+}
+
 /** lamports → "1,234.5678" (no unit). null/undefined → "--". */
 export const formatXNT = (lamports: bigint | number | null | undefined, maxFrac = 4): string => {
     if (lamports === null || lamports === undefined) return '--';

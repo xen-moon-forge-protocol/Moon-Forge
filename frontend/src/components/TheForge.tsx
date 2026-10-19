@@ -12,7 +12,7 @@ import { ethers } from 'ethers';
 import { PublicKey } from '@solana/web3.js';
 import { Flame, ArrowRight, Loader2 } from 'lucide-react';
 import { useWallet } from '../context/WalletContext';
-import { CHAINS, EVM_CHAINS, isPortalDeployed, formatNumber, PROJECT_LINKS } from '../lib/constants';
+import { CHAINS, EVM_CHAINS, isPortalDeployed, formatNumber, normalizeAmountInput, PROJECT_LINKS } from '../lib/constants';
 import { burnXen, errorMessage, P, parseMissionStarted, x1ToBytes32, xenBalanceOf } from '../lib/protocol';
 import { EvmTxLink, Notice, Row } from './ui';
 import BurnVsSell from './ROICalculator';
@@ -71,7 +71,7 @@ export default function TheForge() {
 
     const amountWei = useMemo(() => {
         try {
-            const s = amount.trim().replace(/,/g, '');
+            const s = normalizeAmountInput(amount);
             if (!s) return null;
             const v = ethers.parseUnits(s, 18);
             return v > 0n ? v : null;
@@ -85,6 +85,7 @@ export default function TheForge() {
         try {
             x1ToBytes32(dest);
             const pk = new PublicKey(dest.trim());
+            if (pk.equals(PublicKey.default)) return { ok: false, msg: 'This is the all-zero address: nobody can ever use XNT sent to it.', warn: null };
             const warn = !PublicKey.isOnCurve(pk.toBytes())
                 ? 'This is not a regular wallet key (off-curve / program address). It could receive XNT but never sign ejects or games.'
                 : x1Address && pk.toBase58() !== x1Address
@@ -109,10 +110,14 @@ export default function TheForge() {
         return { ...cap, counted, score, fits: score <= cap.remainingUsd, estimateUsd: rate * score * cap.cashFraction };
     }, [markets.rows, chainKey, amountWei, poolNow, xntUsd, tier]);
     useEffect(() => setOverAck(false), [amount, chainKey, tier]);
+    // Any edit invalidates the "irreversible, address is correct" confirmation.
+    useEffect(() => setAck(false), [amount, dest, chainKey, tier]);
     const overBalance = balance !== null && amountWei !== null && amountWei > balance;
     const wrongNetwork = !!evmAddress && evmChainId !== chain.chainId;
     const busy = step === 'switching' || step === 'approve' || step === 'burn';
-    const canBurn = !!evmAddress && portalReady && amountWei !== null && !overBalance && destCheck.ok && ack && (!fair || fair.fits || overAck) && !busy;
+    // Fail closed: without this chain's market and the week's capacity there is no quote to check the burn against.
+    const quoteMissing = amountWei !== null && !fair;
+    const canBurn = !!evmAddress && portalReady && amountWei !== null && !overBalance && destCheck.ok && ack && !!fair && (fair.fits || overAck) && !busy;
 
     const handleBurn = async () => {
         if (!amountWei || !window.ethereum) return;
@@ -276,7 +281,8 @@ export default function TheForge() {
                                 </div>
                                 <div className="flex justify-between mt-1 text-xs text-lunar-400">
                                     <span>Balance on {chain.shortName}: {balance !== null ? formatNumber(Number(ethers.formatUnits(balance, 18))) : '--'} XEN</span>
-                                    {amount && amountWei === null && <span className="text-red-400">Invalid amount</span>}
+                                    {amount && amountWei === null && <span className="text-red-400">Invalid amount: digits only, one "." or "," for decimals, no thousands separators</span>}
+                                    {amountWei !== null && !overBalance && <span className="text-lunar-300">= {formatNumber(Number(ethers.formatUnits(amountWei, 18)))} XEN</span>}
                                     {overBalance && <span className="text-red-400">Above your balance</span>}
                                 </div>
                             </div>
@@ -327,6 +333,16 @@ export default function TheForge() {
                                 {destCheck.msg && <p className="mt-1 text-xs text-red-400">{destCheck.msg}</p>}
                                 {destCheck.warn && <p className="mt-1 text-xs text-amber-400">{destCheck.warn}</p>}
                             </div>
+
+                            {quoteMissing && portalReady && (
+                                <Notice kind="warn" className="mb-4">
+                                    <div>
+                                        No quote yet: the XEN market data for {chain.name} or this week's capacity has not loaded (the price source may be busy, or this chain has no
+                                        eligible market). Burning stays disabled until it loads, because without a market price a burn can be valued at $0.
+                                    </div>
+                                    <button onClick={markets.refresh} className="btn-outline !px-3 !py-1 text-sm mt-2" disabled={busy}>Retry</button>
+                                </Notice>
+                            )}
 
                             {fair && (fair.fits ? (
                                 <Notice kind="success" className="mb-4">

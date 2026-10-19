@@ -15,7 +15,7 @@
 import { useEffect, useState } from 'react';
 import { Calculator } from 'lucide-react';
 import { ARTIFACTS, P } from '../lib/protocol';
-import { CHAINS, EVM_CHAINS, formatNumber, formatUSD } from '../lib/constants';
+import { CHAINS, EVM_CHAINS, formatNumber, formatUSD, normalizeAmountInput } from '../lib/constants';
 import { useProtocol } from '../lib/hooks';
 import { Row } from './ui';
 import { xenMarketLive } from '../lib/market';
@@ -77,7 +77,7 @@ export default function BurnVsSell({ chainKey: chainProp, xenAmount: amountProp,
         return () => { alive = false; };
     }, []);
 
-    const xen = Number(amount.replace(/,/g, '')) || 0;
+    const xen = Number(normalizeAmountInput(amount) ?? 0) || 0;
     const s = Math.min(50, Math.max(0, Number(slippage) || 0)) / 100;
     const value = xenUsd !== null && xen > 0 ? xen * xenUsd : null;
     const boost = boostTier >= 0 ? ARTIFACTS[boostTier].boostPct / 100 : 0;
