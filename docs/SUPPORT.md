@@ -7,7 +7,7 @@ Moon Forge has no investors, no token and no treasury. The v2 code is written an
 | Need | Amount | Who can do it |
 |---|---|---|
 | Program upgrades | the whole binary's rent as a temporary buffer (≈ 6.9 XNT at the current size), returned in the same deploy, plus the permanent rent of any growth: net ≈ 3.3 XNT on 2026-10-07 and ≈ 1.0 XNT on 2026-10-12 | only the upgrade-authority wallet, so supporters send XNT to it |
-| EVM portals (one per chain) | gas: BSC ≈ $0.02, Polygon ≈ $0.03, Avalanche ≈ $0.05, Optimism/Base ≈ $0, PulseChain ≈ $0.01 (estimates as of 2026-10-07) | **anyone** — the portal has no owner |
+| EVM portals (one per chain) | gas: BSC ≈ $0.02, Polygon ≈ $0.03, Avalanche ≈ $0.05, Optimism/Base ≈ $0 (estimates as of 2026-10-07; all five are deployed) | **anyone** — the portal has no owner |
 | Reward pool (pays XEN burners) | any amount | anyone, via `donate`, Artifact forges, game volume |
 | Game bankroll | any amount | anyone, via Be the House (shares the bankroll's part of the house edge, and its risk) |
 

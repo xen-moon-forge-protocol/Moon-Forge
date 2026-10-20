@@ -31,8 +31,8 @@ export default function WhitepaperPage() {
                 <p>
                     XEN lives on many EVM chains; X1 is an SVM chain whose token is XNT. XEN cannot be bridged to X1: reaching XNT means selling XEN,
                     bridging USD and buying through thin pools, which is expensive for small holders. XEN Prime is announced for Ethereum XEN only.
-                    Moon Forge offers one path for seven chains (Ethereum, BSC, Polygon, Avalanche, Optimism, Base, PulseChain): burn XEN where it lives,
-                    receive XNT on X1. Portals are live on Base, Optimism, Polygon, BSC and Avalanche; the other chains follow as their portals are deployed.
+                    Moon Forge offers one path for the side chains (Base, Optimism, Polygon, BSC, Avalanche): burn XEN where it lives,
+                    receive XNT on X1. Portals are live on Base, Optimism, Polygon, BSC and Avalanche. Ethereum and PulseChain have no portal and none is planned by this project.
                 </p>
             </Section>
 
@@ -220,7 +220,7 @@ share        = score × budget / total_score               (Forge Drops included
                     <li><strong className="text-white">Keeper</strong>: permissionless; anyone can run it; it only triggers outcomes already determined. Runs can be delayed.</li>
                     <li><strong className="text-white">Architect key</strong>: its only privileged program action is setting the airdrop root once.</li>
                     <li><strong className="text-white">Session keys</strong>: house games only; they can never withdraw or enter Jackpot, Burn Lottery, Duels, Moon Wars or Predictions.</li>
-                    <li><strong className="text-white">EVM portals</strong>: live on Base, Optimism, Polygon, BSC and Avalanche (PulseChain and Ethereum to follow); no owner, fee, pause or upgrade.</li>
+                    <li><strong className="text-white">EVM portals</strong>: live on Base, Optimism, Polygon, BSC and Avalanche; no owner, fee, pause or upgrade.</li>
                 </ul>
             </Section>
 

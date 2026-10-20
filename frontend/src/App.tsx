@@ -75,8 +75,8 @@ function Home() {
                     Any XEN, any chain <span className="text-forge-gold">→ XNT on X1.</span>
                 </p>
                 <p className="text-lunar-400 max-w-2xl mx-auto mb-3">
-                    Burn XEN on Ethereum, BSC, Polygon, Avalanche, Optimism, Base or PulseChain and receive XNT on X1,
-                    with zero protocol fees on that path. XEN Prime is announced for Ethereum XEN only; Moon Forge is built for all seven chains.
+                    Burn XEN on Base, Optimism, Polygon, BSC or Avalanche and receive XNT on X1,
+                    with zero protocol fees on that path. XEN Prime is announced for Ethereum XEN only; Moon Forge is built for the side chains.
                 </p>
                 <p className="text-lunar-500 text-sm max-w-2xl mx-auto mb-10">
                     Every epoch, score and payout is published and can be recomputed by anyone.
@@ -90,7 +90,7 @@ function Home() {
             </section>
 
             <Notice kind="info" className="mb-6">
-                Launch status: the X1 program v2 is live; portals are live on Base, Optimism, Polygon, BSC and Avalanche; PulseChain and Ethereum follow. Epochs are built weekly (Sundays 00:00 UTC). The figures below are read live from X1.
+                Launch status: the X1 program v2 is live; portals are live on Base, Optimism, Polygon, BSC and Avalanche. Epochs are built weekly (Sundays 00:00 UTC). The figures below are read live from X1.
             </Notice>
             {error && <Notice kind="warn" className="mb-6">Could not read X1 right now ({error}). Values show "--" until the RPC answers.</Notice>}
             {data && !data.initialized && (
@@ -164,7 +164,7 @@ function Home() {
             <section className="py-10">
                 <h2 className="font-space text-3xl text-center mb-8">How it <span className="text-forge-orange">works</span></h2>
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-                    <StepCard step={1} title="Burn XEN" description="On one of the 7 supported EVM chains, through MoonForgePortal v2 (live on Base, Optimism, Polygon, BSC and Avalanche; PulseChain and Ethereum to follow). The burn records your X1 address and tier." />
+                    <StepCard step={1} title="Burn XEN" description="On Base, Optimism, Polygon, BSC or Avalanche, through MoonForgePortal v2. The burn records your X1 address and tier." />
                     <StepCard step={2} title="Epoch on X1" description={`The oracle publishes a Merkle root weekly (the program requires ≥ ${P.minEpochIntervalDays} days between epochs). The program caps the budget at ${P.epochBudgetBps / 100}% of the free pool and at the epoch rate cap.`} />
                     <StepCard step={3} title="Claim" description={`Claims are permissionless. When the keeper is running it usually submits them for you (${P.keeperTip} XNT tip per claim of ≥ ${P.keeperTipMinClaim} XNT, paid by the pool, never by you). You can always claim yourself.`} />
                     <StepCard step={4} title="Receive XNT" description='Launchpad is paid at claim. Orbit / Moon Landing vest linearly from the claim; vested XNT is not pushed automatically: use "Withdraw vested" whenever you like.' />

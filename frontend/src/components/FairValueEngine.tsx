@@ -122,7 +122,7 @@ export default function FairValueEngine({ compact = false }: { compact?: boolean
                                     <td className="py-2 pr-3 whitespace-nowrap">
                                         <span className="inline-block w-2 h-2 rounded-full mr-2" style={{ background: ch.color }} />{ch.name}
                                         <div className="text-[11px] text-lunar-500">
-                                            {live ? <span className="text-green-400">portal live</span> : <span className="text-amber-300">comparison · portal coming</span>}
+                                            {live ? <span className="text-green-400">portal live</span> : <span className="text-amber-300">comparison only · no portal</span>}
                                             {c.r !== 'loading' && c.r.supply !== null ? ` · supply ${big(c.r.supply)}` : ''}
                                             {stale ? <span className="text-amber-300"> · source busy, last value shown</span> : ''}
                                         </div>
@@ -151,7 +151,7 @@ export default function FairValueEngine({ compact = false }: { compact?: boolean
             <p className="text-xs text-lunar-500">
                 "Up to" = {P.rateCapK} × counted value × {mult} ({P.tiers[tier].name}), converted at today's XNT price{xntUsd ? ` ($${xntUsd.toFixed(3)})` : ''}: the most an epoch can pay for this burn.
                 The real payout is your share of the week's budget{budgetXnt !== null ? ` (now at most ${budgetXnt.toFixed(2)} XNT for everyone together)` : ''}, split by counted value among all burners.
-                Ethereum and PulseChain are shown for comparison until their portals launch (XEN Prime is announced for Ethereum XEN only).
+                Ethereum and PulseChain are shown for comparison only: Moon Forge has no portal there (XEN Prime is announced for Ethereum XEN only).
                 A quiet market (few trades) keeps a still price: the price shown is always the pools' current state.
             </p>
 

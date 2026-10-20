@@ -8,7 +8,7 @@ Copy-paste material for anyone who wants to talk about Moon Forge. Every claim b
 
 ## Short (≈280 characters)
 
-> Moon Forge: burn XEN on BSC, Polygon, Avalanche, Optimism, Base, PulseChain or Ethereum and receive XNT on X1. Each burn valued on its own chain's market, 0 fees on the burn path, part of each epoch's reward drawn as Lunar Dust NFTs with a 5 XNT+ floor. Live on Base, Optimism, Polygon, BSC and Avalanche; other chains follow.
+> Moon Forge: burn XEN on Base, Optimism, Polygon, BSC or Avalanche and receive XNT on X1. Each burn valued on its own chain's market, 0 fees on the burn path, part of each epoch's reward drawn as Lunar Dust NFTs with a 5 XNT+ floor. Live on Base, Optimism, Polygon, BSC and Avalanche.
 
 ## Paragraph
 
@@ -18,7 +18,7 @@ Copy-paste material for anyone who wants to talk about Moon Forge. Every claim b
 
 | | |
 |---|---|
-| Chains (input) | Ethereum, BSC, Polygon, Avalanche, Optimism, Base, PulseChain (XEN must have a market). Portals live on Base, Optimism, Polygon, BSC and Avalanche: `0x7b00f314aB48D223bee567181CA89c65126Bf6E9` (same address on every chain); other chains follow |
+| Chains (input) | Base, Optimism, Polygon, BSC, Avalanche: `0x7b00f314aB48D223bee567181CA89c65126Bf6E9` (same address on every chain). No portal on Ethereum or PulseChain |
 | Output | XNT on X1 (SVM) |
 | Program | `57UE1U1t23ztg2noLp8pcpGW1B1Xw25rLH6ra9Mchea9` (Anchor, open source, upgradeable during the test period) |
 | Fees on burn → claim | 0 |

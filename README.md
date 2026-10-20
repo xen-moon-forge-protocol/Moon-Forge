@@ -6,7 +6,7 @@
 
 🌐 **Site:** https://xen-moon-forge-protocol.github.io/Moon-Forge/
 
-Moon Forge lets XEN holders on Ethereum, Optimism, BSC, Polygon, Avalanche, Base and PulseChain burn their XEN (for real, through XEN's own `burn()`) and receive **XNT on X1**. XEN cannot be bridged to X1, and XEN Prime accepts only Ethereum XEN — Moon Forge is a path for everyone else, and an alternative for ETH-XEN holders. Portals are **live on Base, Optimism, Polygon, BSC and Avalanche** at the same address on every chain (`0x7b00f314aB48D223bee567181CA89c65126Bf6E9`); the other chains follow as their deploy gas is funded.
+Moon Forge lets XEN holders on Base, Optimism, Polygon, BSC and Avalanche burn their XEN (for real, through XEN's own `burn()`) and receive **XNT on X1**. XEN cannot be bridged to X1, and XEN Prime accepts only Ethereum XEN — Moon Forge is a path for side-chain holders. Portals are **live on Base, Optimism, Polygon, BSC and Avalanche** at the same address on every chain (`0x7b00f314aB48D223bee567181CA89c65126Bf6E9`). Ethereum and PulseChain have no portal, and none is planned by this project.
 
 ---
 
@@ -14,8 +14,8 @@ Moon Forge lets XEN holders on Ethereum, Optimism, BSC, Polygon, Avalanche, Base
 
 | Component | Status |
 |---|---|
-| X1 program `57UE1U1t23ztg2noLp8pcpGW1B1Xw25rLH6ra9Mchea9` | **v2 live on mainnet** since 2026-10-07 (slot 84,304,402); upgraded 2026-10-12 (slot 85,429,880) with real Moon Wars, Predictions and the Genesis-claim deadline. The bytes on-chain are identical to the tested build (sha256 `f22caea4…`). It replaced v1, which had critical bugs and was never used. |
-| EVM portals v2 | **Live on Base, Optimism, Polygon, BSC and Avalanche** at `0x7b00f314aB48D223bee567181CA89c65126Bf6E9` (same address on every chain; source verified on Sourcify, exact match; see [deployments/portals.json](deployments/portals.json)). PulseChain and Ethereum: launching as deploy gas is funded (Ethereum last) |
+| X1 program `57UE1U1t23ztg2noLp8pcpGW1B1Xw25rLH6ra9Mchea9` | **v2 live on mainnet** since 2026-10-07 (slot 84,304,402); upgraded 2026-10-12 (slot 85,429,880) with real Moon Wars, Predictions and the Genesis-claim deadline. The bytes on-chain are identical to the tested build (sha256 `f22caea4…`), built from tag [`program-2026-10-12`](https://github.com/xen-moon-forge-protocol/Moon-Forge/tree/program-2026-10-12) (commit be03ad8); later commits on main add code that is not deployed yet. It replaced v1, which had critical bugs and was never used. |
+| EVM portals v2 | **Live on Base, Optimism, Polygon, BSC and Avalanche** at `0x7b00f314aB48D223bee567181CA89c65126Bf6E9` (same address on every chain; source verified on Sourcify, exact match; see [deployments/portals.json](deployments/portals.json)). Ethereum and PulseChain: no portal, none planned by this project |
 | Oracle, keeper, announcements | Running from GitHub Actions: the oracle builds an epoch every Sunday 00:00 UTC (with a backup trigger; weeks without burns publish nothing); the public keeper stays up while time-sensitive upkeep is due (draws, Prediction locks, Moon Wars turns); weekly state-of-the-forge and epoch receipts on the project's own channels. Anyone can run the same commands |
 | Frontend | Live at the site above; every number is read from chain or public price sources (Start here, Fair Value Engine, Transparency) |
 | Upgrade authority | Held by the architect wallet during the test period, **to be burned** once the published conditions are met, not before 2026-11-01 ([IMMUTABILITY.md](IMMUTABILITY.md#when-the-upgrade-authority-will-be-burned); shown live on the Transparency page) |

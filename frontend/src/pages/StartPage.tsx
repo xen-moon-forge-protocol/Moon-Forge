@@ -62,7 +62,6 @@ export default function StartPage() {
     const drops = d ? toXnt(d.nextDropReserve) : null;
     const nextEpoch = now - ((now - SUNDAY_0) % WEEK) + WEEK;
     const live = EVM_CHAINS.filter((k) => isPortalDeployed(k)).map((k) => CHAINS[k]);
-    const soon = EVM_CHAINS.filter((k) => !isPortalDeployed(k)).map((k) => CHAINS[k].name);
     const authority = upg.data?.authority ?? null;
     const smallPool = budget !== null && budget < 5;
     const stats = d?.config?.stats;
@@ -125,7 +124,7 @@ export default function StartPage() {
             <section className="grid md:grid-cols-3 gap-4">
                 <div className="glass-card text-sm">
                     <div className="text-white font-medium mb-2">Your XEN is on a side chain</div>
-                    <p className="text-lunar-400">Portals are live on {live.map((c) => c.name).join(', ')}{soon.length ? `; ${soon.join(' and ')} follow` : ''}. XEN Prime is announced for Ethereum XEN only, and side-chain pools are thin. Each chain's XEN is valued at its own market price.</p>
+                    <p className="text-lunar-400">Portals are live on {live.map((c) => c.name).join(', ')}. XEN Prime is announced for Ethereum XEN only, and side-chain pools are thin. Each chain's XEN is valued at its own market price.</p>
                 </div>
                 <div className="glass-card text-sm">
                     <div className="text-white font-medium mb-2">You hold a small amount</div>
@@ -286,7 +285,7 @@ export default function StartPage() {
                 <h2 className="font-space text-xl mb-2">Questions people ask</h2>
                 <Faq q="Is this XEN Prime? Is it run by the X1 team?">
                     No to both. Moon Forge is an independent, open-source project. XEN Prime is announced for Ethereum XEN only; Moon Forge works with XEN on
-                    {' '}{live.map((c) => c.name).join(', ')}{soon.length ? ` (${soon.join(' and ')} follow)` : ''}. You can use both with different XEN.
+                    {' '}{live.map((c) => c.name).join(', ')}. You can use both with different XEN.
                 </Faq>
                 <Faq q="Do my old XEN burns count?">
                     No. Only burns made through the Moon Forge portal on a supported chain are paid. Burns you made before, or anywhere else (for example the

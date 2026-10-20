@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://xen-moon-forge-protocol.github.io/Moon-Forge/sitemap.xml
