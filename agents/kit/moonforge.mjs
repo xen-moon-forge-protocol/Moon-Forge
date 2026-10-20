@@ -207,7 +207,11 @@ export class MoonForge {
   async myArtifacts() {
     const records = await this.acc.artifactRecord.all();
     if (!records.length) return [];
-    const infos = await this.connection.getMultipleAccountsInfo(records.map((r) => r.account.asset));
+    // the RPC accepts at most 100 accounts per getMultipleAccounts call
+    const infos = [];
+    for (let i = 0; i < records.length; i += 100) {
+      infos.push(...await this.connection.getMultipleAccountsInfo(records.slice(i, i + 100).map((r) => r.account.asset)));
+    }
     const collection = PDA.collection();
     return records.filter((r, i) => {
       const d = infos[i]?.data;

@@ -345,7 +345,11 @@ export async function fetchMyLeaves(owner: PublicKey, connection: Connection = r
 export async function fetchMyArtifacts(owner: PublicKey, connection: Connection = readConnection) {
   const program = getProgram(null, connection);
   const records: any[] = await accs(program).artifactRecord.all();
-  const infos = await connection.getMultipleAccountsInfo(records.map((r) => r.account.asset));
+  // the RPC accepts at most 100 accounts per getMultipleAccounts call
+  const infos: Awaited<ReturnType<Connection['getMultipleAccountsInfo']>> = [];
+  for (let i = 0; i < records.length; i += 100) {
+    infos.push(...await connection.getMultipleAccountsInfo(records.slice(i, i + 100).map((r) => r.account.asset)));
+  }
   const collection = PDA.collection();
   return records
     .map((r, i) => ({ r, info: infos[i] }))
