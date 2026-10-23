@@ -17,6 +17,7 @@ import {
 } from '../lib/protocol';
 import { formatDuration, formatNumber } from '../lib/constants';
 import { AddrLink, Notice, Row, StatTile, TxStatus, Xnt } from './ui';
+import { DATED, NEUTRAL } from '../content/interim';
 
 export default function MissionControl() {
     const { x1Connected, x1Address, x1Provider, connectX1, isConnecting } = useWallet();
@@ -179,7 +180,7 @@ function Dashboard({ owner, readOnly, provider }: { owner: string; readOnly: boo
                     Estimate = your score × (epoch budget minus its Forge Drop reserve) ÷ total score (what the program pays). Launchpad goes
                     straight to your wallet (a payout that would leave a brand-new wallet below the rent-exempt minimum is credited to your game
                     balance instead); Orbit / Moon Landing open a vesting mission that starts vesting at the claim. Claims are permissionless:
-                    when the public keeper is running it usually submits them for you (runs can be delayed); its {P.keeperTip} XNT tip per claim of
+                    when the public keeper is running it may submit them for you (its runs are irregular and can be hours or days late); its {P.keeperTip} XNT tip per claim of
                     at least {P.keeperTipMinClaim} XNT is paid by the pool, never from your amount. Whoever submits a claim pays a small rent deposit:
                     the claim receipt's rent is refunded to them after the epoch closes, a vesting mission's rent when the mission ends (the game
                     wallet created at a first claim is not refundable). Unclaimed budgets return to the pool after {P.claimWindowDays} days.
@@ -190,10 +191,14 @@ function Dashboard({ owner, readOnly, provider }: { owner: string; readOnly: boo
                     is part of the epoch budget, not extra, and is paid in XNT if Lunar Dust is sold out. Your chance = your expected drop value
                     ÷ {P.dropBackingXnt} XNT, so it grows linearly with what you burned: splitting a burn across wallets never changes your expected
                     drop value. The draw uses the hash of a block produced after the epoch was published (not known to the oracle or the protocol
-                    at publication; its block producer could in theory influence it) and anyone can recompute every outcome. Leaves whose expected
+                    at publication; its block producer can influence it) and anyone can recompute every outcome. Leaves whose expected
                     value is at or above {P.dropBackingXnt} XNT always win and the whole value becomes the floor. When the public keeper is running
-                    it usually delivers the drop for you (runs can be delayed); otherwise press "Receive drop". A won drop must be received within
+                    it may deliver the drop for you (runs can be late); otherwise press "Receive drop". A won drop must be received within
                     the epoch's {P.claimWindowDays}-day window.
+                </p>
+                <p className="text-xs text-lunar-500 mt-2">
+                    {DATED}: {NEUTRAL.oracleRules} A drop already won keeps its {P.claimWindowDays}-day window here, and this column stays until then.
+                    Epoch 1's drop reserve drew no winner and returns to the pool when its window closes.
                 </p>
             </section>
 
@@ -298,7 +303,10 @@ function Dashboard({ owner, readOnly, provider }: { owner: string; readOnly: boo
                     Chips: {P.chipPerClaimedXnt} per XNT actually received from burns (Launchpad at claim; Orbit / Moon Landing as vested XNT is
                     withdrawn or at eject, never on the penalty part), 1 per {P.chipPerWageredXnt} XNT wagered in house games, plus weekly chips
                     per Artifact.
-                    Spend them in the <Link to="/games" className="text-forge-orange hover:underline">Burn Lottery</Link>.
+                    They can be used in the <Link to="/games" className="text-forge-orange hover:underline">Burn Lottery</Link>.
+                </p>
+                <p className="text-xs text-lunar-500 mt-2">
+                    {DATED}: {NEUTRAL.programRules}
                 </p>
             </section>
         </div>

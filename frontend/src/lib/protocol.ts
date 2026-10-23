@@ -9,10 +9,16 @@ import { Connection, Keypair, PublicKey, SystemProgram, SYSVAR_SLOT_HASHES_PUBKE
 import { ethers } from 'ethers';
 import { keccak_256 } from '@noble/hashes/sha3';
 import idl from '../idl/moon_forge.json';
+import { PROGRAM_ID_B58 } from './constants';
+import { applyCu, withCu, type CuBuilder } from './cu';
+
+/** Re-exported for callers that build their own transactions: measured compute-unit limits (lib/cu.ts). */
+export { withCu, applyCu };
 
 export const X1_RPC = 'https://rpc.mainnet.x1.xyz';
 export const X1_EXPLORER = 'https://explorer.mainnet.x1.xyz';
-export const PROGRAM_ID = new PublicKey((idl as any).address);
+/** Pinned in constants.ts (T9-37); constants.ts refuses to load when the bundled IDL carries another address. */
+export const PROGRAM_ID = new PublicKey(PROGRAM_ID_B58);
 export const ARCHITECT = new PublicKey('7PuG8ELKXzvZqVLawFnmjDJqq4KEyRhssKQEq7aQM6Qd');
 export const MPL_CORE = new PublicKey('CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d');
 export const XNT = 1_000_000_000;
@@ -367,6 +373,9 @@ export async function fetchArtifactsReady(connection: Connection = readConnectio
 // ── Actions (X1) ───────────────────────────────────────────────────────────
 type Prov = X1Provider;
 const me = (p: Prov) => new PublicKey(p.publicKey.toString());
+/** Every transaction goes through withCu (lib/cu.ts): the exact transaction is simulated and its measured units, plus 25%,
+ *  become the compute-unit limit; the per-instruction measurement is the fallback; a path never measured gets no limit. */
+const send = (p: Prov, name: string, builder: CuBuilder) => withCu(builder, name, me(p), readConnection);
 
 export async function claimLeaf(p: Prov, l: MyLeaf) {
   const program = getProgram(p);
@@ -377,26 +386,26 @@ export async function claimLeaf(p: Prov, l: MyLeaf) {
     playerState: PDA.player(player), rewardVault: PDA.rewardVault(), payer: player, systemProgram: SystemProgram.programId,
   };
   return l.tier === 0
-    ? program.methods.claimInstant(bn(l.epoch), l.tier, bn(l.score), proof).accountsPartial(common).rpc()
-    : program.methods.claimMission(bn(l.epoch), l.tier, bn(l.score), proof).accountsPartial({ ...common, mission: PDA.mission(l.epoch, player, l.tier) }).rpc();
+    ? send(p, 'claim_instant', program.methods.claimInstant(bn(l.epoch), l.tier, bn(l.score), proof).accountsPartial(common))
+    : send(p, 'claim_mission', program.methods.claimMission(bn(l.epoch), l.tier, bn(l.score), proof).accountsPartial({ ...common, mission: PDA.mission(l.epoch, player, l.tier) }));
 }
 
 export async function withdrawVested(p: Prov, m: { publicKey: PublicKey; account: any }) {
-  return getProgram(p).methods.withdrawVested().accountsPartial({
+  return send(p, 'withdraw_vested', getProgram(p).methods.withdrawVested().accountsPartial({
     mission: m.publicKey, player: m.account.player, playerState: PDA.player(m.account.player), rentPayer: m.account.rentPayer,
-  }).rpc();
+  }));
 }
 
 export async function eject(p: Prov, m: { publicKey: PublicKey; account: any }) {
-  return getProgram(p).methods.eject().accountsPartial({
+  return send(p, 'eject', getProgram(p).methods.eject().accountsPartial({
     config: PDA.config(), mission: m.publicKey, player: me(p), rewardVault: PDA.rewardVault(), rentPayer: m.account.rentPayer,
     playerState: PDA.player(me(p)),
-  }).rpc();
+  }));
 }
 
 export async function donate(p: Prov, target: 0 | 1 | 2, xnt: number) {
   const vault = [PDA.rewardVault(), PDA.bankrollVault(), PDA.drawVault()][target];
-  return getProgram(p).methods.donate(target, bn(fromXnt(xnt))).accountsPartial({ config: PDA.config(), donor: me(p), vault }).rpc();
+  return send(p, 'donate', getProgram(p).methods.donate(target, bn(fromXnt(xnt))).accountsPartial({ config: PDA.config(), donor: me(p), vault }));
 }
 
 // ── WXNT (wrapped XNT, native mint So111…112 on X1) ────────────────────────
@@ -429,28 +438,28 @@ export async function donateWxnt(p: Prov, target: 0 | 1 | 2) {
     data: Uint8Array.of(9) as any, // CloseAccount
   }));
   const vault = [PDA.rewardVault(), PDA.bankrollVault(), PDA.drawVault()][target];
-  return getProgram(p).methods.donate(target, bn(total)).accountsPartial({ config: PDA.config(), donor: owner, vault })
-    .preInstructions(closes).rpc();
+  return send(p, 'donate:wxnt', getProgram(p).methods.donate(target, bn(total)).accountsPartial({ config: PDA.config(), donor: owner, vault })
+    .preInstructions(closes));
 }
 
 export async function ensurePlayer(p: Prov) {
   const program = getProgram(p);
   const ps = PDA.player(me(p));
   if (await program.provider.connection.getAccountInfo(ps)) return ps;
-  await program.methods.openPlayer().accountsPartial({ playerState: ps, owner: me(p), systemProgram: SystemProgram.programId }).rpc();
+  await send(p, 'open_player', program.methods.openPlayer().accountsPartial({ playerState: ps, owner: me(p), systemProgram: SystemProgram.programId }));
   return ps;
 }
 
 export async function deposit(p: Prov, xnt: number) {
   const ps = await ensurePlayer(p);
-  return getProgram(p).methods.deposit(bn(fromXnt(xnt))).accountsPartial({ playerState: ps, payer: me(p), systemProgram: SystemProgram.programId }).rpc();
+  return send(p, 'deposit', getProgram(p).methods.deposit(bn(fromXnt(xnt))).accountsPartial({ playerState: ps, payer: me(p), systemProgram: SystemProgram.programId }));
 }
 export async function withdraw(p: Prov, lamports: number) {
-  return getProgram(p).methods.withdraw(bn(lamports)).accountsPartial({ playerState: PDA.player(me(p)), owner: me(p) }).rpc();
+  return send(p, 'withdraw', getProgram(p).methods.withdraw(bn(lamports)).accountsPartial({ playerState: PDA.player(me(p)), owner: me(p) }));
 }
 export async function setSession(p: Prov, key: PublicKey, hours: number, maxStakeXnt: number) {
   const exp = Math.floor(Date.now() / 1000) + Math.round(hours * 3600);
-  return getProgram(p).methods.setSession(key, bn(exp), bn(fromXnt(maxStakeXnt))).accountsPartial({ playerState: PDA.player(me(p)), owner: me(p) }).rpc();
+  return send(p, 'set_session', getProgram(p).methods.setSession(key, bn(exp), bn(fromXnt(maxStakeXnt))).accountsPartial({ playerState: PDA.player(me(p)), owner: me(p) }));
 }
 
 /** Mirrors utils.rs::slot_hash_at_or_after, including the Expired case (target older than the SlotHashes window). */
@@ -478,12 +487,169 @@ export interface BetResult {
   /** true once the bet account is closed on-chain (by this browser, a keeper, or anyone) */
   settled: boolean;
   bet: string; seed: string; slotHash: string; targetSlot: number; chanceBps: number; payoutIfWin: number;
+  /** why this page could not settle the placed bet (wallet rejection, timeout, RPC error); the bet is still open */
+  settleError?: string;
+}
+
+// ── Games: stake limits, LP guards, permissionless settlement, device check ──────────────────────
+// Every limit mirrors the integer math of games.rs (place_bet / house_deposit / house_withdraw); nothing is estimated.
+const BPS = 10_000n;
+/** constants.rs MAX_EXPOSURE_BPS: a single bet's net win is at most 0.25% of the free bankroll */
+const MAX_EXPOSURE_BPS = 25n;
+/** constants.rs MAX_TOTAL_EXPOSURE_BPS: all unsettled payouts together stay below 20% of the bankroll */
+const MAX_TOTAL_EXPOSURE_BPS = 2_000n;
+/** share of a stake that reaches the bankroll: 100% - 1% pool - 0.5% architect */
+const STAKE_TO_BANKROLL_BPS = 9_850n;
+/** one step of the stake input (4 decimals) */
+const STAKE_STEP = 100_000n;
+
+/**
+ * Largest stake (lamports) that place_bet accepts right now for a given payout multiplier, from the
+ * per-bet cap (payout - stake <= 0.25% of the free bankroll) and the aggregate cap
+ * (reserved + payout <= 20% of the bankroll after the stake lands). The caller still applies the
+ * player's game balance and MIN_STAKE. Rounded down to 4 decimals so a displayed value is always accepted.
+ */
+export function maxStakeFor(payoutBps: number, bankrollFree: number, bankrollReserved: number): bigint {
+  const m = BigInt(Math.floor(payoutBps));
+  if (m <= BPS) return 0n;
+  const free = BigInt(Math.max(0, Math.floor(bankrollFree)));
+  const reserved = BigInt(Math.max(0, Math.floor(bankrollReserved)));
+  const maxNet = (free * MAX_EXPOSURE_BPS) / BPS;
+  const cap1 = (maxNet * BPS) / (m - BPS);
+  // stake * (m*BPS - 2000*9850) <= BPS * (2000*(free+reserved) - reserved*BPS)
+  const lhs = m * BPS - MAX_TOTAL_EXPOSURE_BPS * STAKE_TO_BANKROLL_BPS;
+  const rhs = BPS * (MAX_TOTAL_EXPOSURE_BPS * (free + reserved) - reserved * BPS);
+  const cap2 = rhs <= 0n ? 0n : lhs <= 0n ? cap1 : rhs / lhs;
+  const cap = cap1 < cap2 ? cap1 : cap2;
+  return (cap / STAKE_STEP) * STAKE_STEP;
+}
+
+/** Lamports -> "0.1234" (4 decimals, trailing zeros trimmed, never scientific notation). */
+export function lamportsToInput(l: bigint): string {
+  const whole = l / 1_000_000_000n;
+  const frac = (l % 1_000_000_000n).toString().padStart(9, '0').slice(0, 4).replace(/0+$/, '');
+  return frac ? `${whole}.${frac}` : whole.toString();
+}
+
+/** Share of the bankroll reserved for open bets, in bps (games.rs prices LP moves off this reserve). */
+export function reservedBps(bankrollFree: number, bankrollReserved: number): number {
+  const total = Math.max(0, bankrollFree) + Math.max(0, bankrollReserved);
+  return total > 0 ? Math.floor((Math.max(0, bankrollReserved) * 10_000) / total) : 0;
+}
+/** H2 guard: above this reserve share, deposits overpay and withdrawals underpay noticeably. */
+export const LP_RESERVED_WARN_BPS = 100;
+
+export interface OpenBet { publicKey: PublicKey; account: any; ready: boolean }
+/** Every unsettled house bet; `ready` = its target slot passed, so settle_bet can run now. */
+export async function fetchOpenBets(connection: Connection = readConnection): Promise<OpenBet[]> {
+  const program = getProgram(null, connection);
+  const slot = BigInt(await connection.getSlot('confirmed'));
+  const all: any[] = await accs(program).bet.all();
+  return all.map((b) => ({ publicKey: b.publicKey as PublicKey, account: b.account, ready: BigInt(b.account.targetSlot.toString()) < slot }));
+}
+/** Permissionless settle_bet, the same accounts the public keeper sends (oracle/src/x1.ts keeperPass). The compute-unit
+ *  limit comes from the live simulation only: settle_bet has no static measurement (mainnet state cannot reach it). */
+export async function settleBet(p: Prov, bet: PublicKey, playerState: PublicKey, rentPayer: PublicKey): Promise<string> {
+  return send(p, 'settle_bet', getProgram(p).methods.settleBet().accountsPartial({
+    config: PDA.config(), bet, playerState, bankrollVault: PDA.bankrollVault(), slotHashes: SYSVAR_SLOT_HASHES_PUBKEY, rentPayer,
+  }));
+}
+/** Settle one bet by address; `settled: true` with no tx means someone else already closed it. */
+export async function settleBetNow(p: Prov, bet: PublicKey): Promise<{ settled: boolean; tx: string | null }> {
+  const b = await accs(getProgram(p)).bet.fetchNullable(bet);
+  if (!b) { clearPendingBet(bet.toBase58()); return { settled: true, tx: null }; }
+  const tx = await settleBet(p, bet, new PublicKey(b.playerState), new PublicKey(b.rentPayer));
+  clearPendingBet(bet.toBase58());
+  return { settled: true, tx };
+}
+/** Settle every ready bet, one signature each; returns the last signature (or null if there was nothing to do). */
+export async function settleReadyBets(p: Prov, bets: OpenBet[]): Promise<string | null> {
+  let last: string | null = null;
+  for (const b of bets.filter((x) => x.ready)) {
+    last = await settleBet(p, b.publicKey, new PublicKey(b.account.playerState), new PublicKey(b.account.rentPayer));
+    clearPendingBet(b.publicKey.toBase58());
+  }
+  return last;
+}
+
+/** Phone or tablet (coarse pointer or a mobile user agent). Evaluated locally; nothing leaves the browser. */
+export function isMobileDevice(): boolean {
+  try {
+    const coarse = typeof window !== 'undefined' && !!window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+    const ua = typeof navigator !== 'undefined' && /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+    return coarse || ua;
+  } catch {
+    return false;
+  }
+}
+
+// Feature flags: data the v3 oracle does not publish yet (default = v2 behaviour, nothing fetched).
+/** JSON feed { asOf, change7dBps, change30dBps, maxDrawdown30dBps, breakerTrips30d } with the bankroll's realised result. */
+export const LP_RESULTS_URL: string | null = null;
+/** JSON feed { asOf, lastPassTs, ok } with the public keeper's last pass. */
+export const KEEPER_STATUS_URL: string | null = null;
+
+// ── Placed-but-unsettled house bets (X-100 / R3) ─────────────────────────────────────────────────
+// Once place_bet lands the stake is locked, and a bet nobody settles within ~3 minutes counts as lost even on a
+// winning roll. The bet is written to this browser's localStorage BEFORE settling, so a rejected second pop-up, a
+// wallet timeout after an app switch, an RPC error or a reload never loses the "Settle now" path. Nothing is sent
+// anywhere; entries older than 15 minutes are ignored (by then the bet is settled or counts as lost).
+export interface PendingBet {
+  bet: string; seed: string; targetSlot: number; game: number; choice: number; param: number; stake: number;
+  placeTx: string; chanceBps: number; payoutIfWin: number; placedAt: number; owner: string;
+}
+const PENDING_BETS_KEY = 'moonforge_pending_bets_v1';
+const PENDING_MAX_AGE_S = 15 * 60;
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const fromHex = (h: string) => Uint8Array.from(h.match(/.{2}/g) ?? [], (x) => parseInt(x, 16));
+function readPendingBets(): PendingBet[] {
+  try {
+    const v = JSON.parse(localStorage.getItem(PENDING_BETS_KEY) || '[]');
+    return Array.isArray(v) ? v.filter((x) => x && typeof x.bet === 'string' && typeof x.seed === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+function writePendingBets(list: PendingBet[]) {
+  try { localStorage.setItem(PENDING_BETS_KEY, JSON.stringify(list.slice(-10))); } catch { /* private mode: the in-page state still holds the bet */ }
+}
+export function savePendingBet(b: PendingBet) { writePendingBets([...readPendingBets().filter((x) => x.bet !== b.bet), b]); }
+export function clearPendingBet(bet: string) { writePendingBets(readPendingBets().filter((x) => x.bet !== bet)); }
+/** Unsettled bets this browser placed for `owner` in the last 15 minutes, newest last. */
+export function pendingBets(owner?: string | null): PendingBet[] {
+  const cutoff = Math.floor(Date.now() / 1000) - PENDING_MAX_AGE_S;
+  return readPendingBets().filter((x) => x.placedAt >= cutoff && (!owner || x.owner === owner));
+}
+
+/** Current state of a pending bet, read from X1 (bet account + SlotHashes). Never throws: a failed read keeps it unsettled. */
+export async function pendingBetStatus(pb: PendingBet, connection: Connection = readConnection): Promise<BetResult> {
+  const betPk = new PublicKey(pb.bet);
+  let target = pb.targetSlot;
+  let chanceBps = pb.chanceBps;
+  let payoutIfWin = pb.payoutIfWin;
+  let settled = false;
+  try {
+    const b = await accs(getProgram(null, connection)).bet.fetchNullable(betPk);
+    if (!b) settled = true;
+    else { target = Number(b.targetSlot.toString()); chanceBps = Number(b.chanceBps); payoutIfWin = toXnt(b.payout); }
+  } catch { /* RPC error: unknown, keep it pending */ }
+  let look: { state: 'ready' | 'notYet' | 'expired'; hash?: Uint8Array } = { state: 'notYet' };
+  try { if (target > 0) look = await slotHashLookup(connection, BigInt(target)); } catch { /* keep notYet */ }
+  const h = look.state === 'ready' ? look.hash! : null;
+  const roll = h ? Number(rollFrom(h, betPk.toBytes(), fromHex(pb.seed)) % 10000n) : -1;
+  const won = roll >= 0 && isWin(pb.game, pb.choice, chanceBps, roll);
+  return {
+    won, roll, payout: won ? payoutIfWin : 0, stake: pb.stake, placeTx: pb.placeTx, settleTx: '', expired: look.state === 'expired' && !settled, settled,
+    bet: pb.bet, seed: pb.seed, slotHash: h ? toHex(h) : '', targetSlot: target, chanceBps, payoutIfWin,
+  };
 }
 
 /**
  * Places a house bet and settles it as soon as the target slot hash exists.
  * Settlement is permissionless; if this tab closes, the public keeper (or anyone) settles it.
  * Bets not settled within ~3 minutes count as lost — this keeps the game unskippable.
+ * After place_bet has landed this function never throws (R3): any later failure (second pop-up rejected, wallet
+ * timeout, RPC error) comes back as `settled: false` with `settleError`, and the bet stays in pendingBets().
  */
 export async function playHouse(p: Prov, game: number, param: number, choice: number, stakeXnt: number): Promise<BetResult> {
   const program = getProgram(p);
@@ -494,38 +660,57 @@ export async function playHouse(p: Prov, game: number, param: number, choice: nu
   const bet = PDA.bet(ps, nonce);
   const seed = crypto.getRandomValues(new Uint8Array(32));
   const stake = fromXnt(stakeXnt);
-  const placeTx = await program.methods.placeBet(game, bn(param), choice, bn(stake), Array.from(seed)).accountsPartial({
+  const [oddsChanceBps, oddsPayoutBps] = gameOdds(game, param);
+  const gameName = game === GAME.COINFLIP ? 'coinflip' : game === GAME.HIGHLOW ? 'highlow' : 'voidrush';
+  const placeTx = await send(p, `place_bet:${gameName}`, program.methods.placeBet(game, bn(param), choice, bn(stake), Array.from(seed)).accountsPartial({
     config: PDA.config(), playerState: ps, bet, bankrollVault: PDA.bankrollVault(), rewardVault: PDA.rewardVault(),
     architect: ARCHITECT, signer: owner, systemProgram: SystemProgram.programId,
-  }).rpc();
-  const b = await accs(program).bet.fetch(bet);
-  const target = BigInt(b.targetSlot.toString());
+  }));
+  // The stake is locked from here on: record the bet first (same integer payout math as games.rs until the account is read).
+  const pending: PendingBet = {
+    bet: bet.toBase58(), seed: toHex(seed), targetSlot: 0, game, choice, param, stake: stakeXnt, placeTx,
+    chanceBps: oddsChanceBps, payoutIfWin: toXnt((BigInt(stake) * BigInt(oddsPayoutBps)) / 10_000n),
+    placedAt: Math.floor(Date.now() / 1000), owner: owner.toBase58(),
+  };
+  savePendingBet(pending);
   const conn = program.provider.connection;
   let settleTx = '';
   let settled = false;
-  for (let i = 0; i < 60; i++) {
-    await new Promise((r) => setTimeout(r, 500));
-    if (BigInt(await conn.getSlot('confirmed')) <= target + 1n) continue;
-    try {
-      settleTx = await program.methods.settleBet().accountsPartial({
-        config: PDA.config(), bet, playerState: ps, bankrollVault: PDA.bankrollVault(), slotHashes: SYSVAR_SLOT_HASHES_PUBKEY, rentPayer: owner,
-      }).rpc();
-      settled = true;
-      break;
-    } catch (e: any) {
-      // a keeper (or anyone) may have settled it first: the bet account is then closed
-      if (!(await conn.getAccountInfo(bet))) { settled = true; break; }
-      if (!String(e).includes('NotReady')) throw e;
+  let settleError: string | undefined;
+  try {
+    let b: any = null;
+    for (let i = 0; i < 4 && !b; i++) {
+      b = await accs(program).bet.fetchNullable(bet).catch(() => null);
+      if (!b) await sleep(400);
     }
+    if (b) {
+      pending.targetSlot = Number(b.targetSlot.toString());
+      pending.chanceBps = Number(b.chanceBps);
+      pending.payoutIfWin = toXnt(b.payout);
+      savePendingBet(pending);
+    }
+    const target = BigInt(pending.targetSlot);
+    for (let i = 0; i < 60; i++) {
+      await sleep(500);
+      if (target > 0n && BigInt(await conn.getSlot('confirmed')) <= target + 1n) continue;
+      try {
+        settleTx = await settleBet(p, bet, ps, owner);
+        settled = true;
+        break;
+      } catch (e: any) {
+        // a keeper (or anyone) may have settled it first: the bet account is then closed (null; an RPC error is undefined)
+        const info = await conn.getAccountInfo(bet).catch(() => undefined);
+        if (info === null) { settled = true; break; }
+        if (!String(e).includes('NotReady')) throw e;
+      }
+    }
+    if (!settled) settleError = 'The next slot was not visible to this page in time.';
+  } catch (e) {
+    settleError = errorMessage(e);
   }
-  const look = await slotHashLookup(conn, target);
-  const h = look.state === 'ready' ? look.hash! : null;
-  const roll = h ? Number(rollFrom(h, bet.toBytes(), seed) % 10000n) : -1;
-  const won = roll >= 0 && isWin(game, choice, Number(b.chanceBps), roll);
-  return {
-    won, roll, payout: won ? toXnt(b.payout) : 0, stake: stakeXnt, placeTx, settleTx, expired: look.state === 'expired', settled,
-    bet: bet.toBase58(), seed: toHex(seed), slotHash: h ? toHex(h) : '', targetSlot: Number(target), chanceBps: Number(b.chanceBps), payoutIfWin: toXnt(b.payout),
-  };
+  if (settled) clearPendingBet(pending.bet);
+  const r = await pendingBetStatus(pending, conn);
+  return { ...r, settled: settled || r.settled, expired: !settled && r.expired, settleTx, settleError };
 }
 
 export async function enterJackpot(p: Prov, xnt: number) {
@@ -535,9 +720,9 @@ export async function enterJackpot(p: Prov, xnt: number) {
   const roundId = Number(cfg.jackpotRound);
   const round = await accs(program).jackpotRound.fetchNullable(PDA.jackpot(roundId));
   const idx = round ? round.entries : 0;
-  return program.methods.enterJackpot(bn(roundId), idx, bn(fromXnt(xnt))).accountsPartial({
+  return send(p, 'enter_jackpot', program.methods.enterJackpot(bn(roundId), idx, bn(fromXnt(xnt))).accountsPartial({
     config: PDA.config(), round: PDA.jackpot(roundId), entry: PDA.jpEntry(roundId, idx), playerState: ps, signer: me(p), systemProgram: SystemProgram.programId,
-  }).rpc();
+  }));
 }
 
 export async function fetchJackpot(connection: Connection = readConnection) {
@@ -558,10 +743,10 @@ export async function enterDraw(p: Prov, chips: number, tickets: number) {
   const roundId = Number(cfg.drawRound);
   const round = await accs(program).drawRound.fetchNullable(PDA.draw(roundId));
   const idx = round ? round.entries : 0;
-  return program.methods.enterDraw(bn(roundId), idx, bn(chips), bn(tickets)).accountsPartial({
+  return send(p, 'enter_draw', program.methods.enterDraw(bn(roundId), idx, bn(chips), bn(tickets)).accountsPartial({
     config: PDA.config(), round: PDA.draw(roundId), entry: PDA.drawEntry(roundId, idx), playerState: ps, rewardVault: PDA.rewardVault(),
     drawVault: PDA.drawVault(), architect: ARCHITECT, signer: me(p), systemProgram: SystemProgram.programId,
-  }).rpc();
+  }));
 }
 
 export async function fetchDraw(connection: Connection = readConnection) {
@@ -581,18 +766,18 @@ export async function claimDrop(p: Prov, l: MyLeaf) {
   const proof = l.proof.map((h) => Array.from(ethers.getBytes('0x' + h)));
   const cfg = await accs(program).config.fetch(PDA.config());
   if (Number(cfg.artifactsAlive[0]) >= ARTIFACTS[0].supply) {
-    return program.methods.claimDropXnt(bn(l.epoch), l.tier, bn(l.score), proof).accountsPartial({
+    return send(p, 'claim_drop_xnt', program.methods.claimDropXnt(bn(l.epoch), l.tier, bn(l.score), proof).accountsPartial({
       config: PDA.config(), epoch: PDA.epoch(l.epoch), receipt: PDA.drop(l.epoch, player, l.tier), player,
       playerState: PDA.player(player), rewardVault: PDA.rewardVault(), payer: player, systemProgram: SystemProgram.programId,
-    }).rpc();
+    }));
   }
   const serial = Number(cfg.artifactsMinted[0]);
   const asset = PDA.asset(0, serial);
-  return program.methods.claimDrop(bn(l.epoch), l.tier, serial, bn(l.score), proof).accountsPartial({
+  return send(p, 'claim_drop', program.methods.claimDrop(bn(l.epoch), l.tier, serial, bn(l.score), proof).accountsPartial({
     config: PDA.config(), epoch: PDA.epoch(l.epoch), receipt: PDA.drop(l.epoch, player, l.tier), player, asset, record: PDA.artifact(asset),
     collection: PDA.collection(), artifactAuthority: PDA.artifactAuthority(), rewardVault: PDA.rewardVault(), payer: player,
     coreProgram: MPL_CORE, systemProgram: SystemProgram.programId,
-  }).rpc();
+  }));
 }
 
 /** Jackpot rounds refunded because nobody settled in time, with the entries still to be paid back. */
@@ -611,9 +796,9 @@ export async function fetchPendingRefunds(connection: Connection = readConnectio
 }
 /** PERMISSIONLESS: pays back one entry of a refunded jackpot round into its player's game wallet. */
 export async function refundJackpotEntry(p: Prov, r: { round: number; index: number; player: PublicKey; rentPayer: PublicKey }) {
-  return getProgram(p).methods.closeJackpotEntry().accountsPartial({
+  return send(p, 'close_jackpot_entry', getProgram(p).methods.closeJackpotEntry().accountsPartial({
     round: PDA.jackpot(r.round), playerState: PDA.player(r.player), entry: PDA.jpEntry(r.round, r.index), rentPayer: r.rentPayer,
-  }).rpc();
+  }));
 }
 
 /**
@@ -633,8 +818,8 @@ export async function advanceRound(p: Prov, kind: 'jackpot' | 'draw'): Promise<s
   if (round.state === 0) {
     if (Number(round.endTs) === 0 || now < Number(round.endTs)) return null;
     return kind === 'jackpot'
-      ? program.methods.drawJackpot().accountsPartial({ config: PDA.config(), round: roundPk, firstPlayerState: PDA.player(round.firstPlayer) }).rpc()
-      : program.methods.drawDraw().accountsPartial({ config: PDA.config(), round: roundPk }).rpc();
+      ? send(p, 'draw_jackpot', program.methods.drawJackpot().accountsPartial({ config: PDA.config(), round: roundPk, firstPlayerState: PDA.player(round.firstPlayer) }))
+      : send(p, 'draw_draw', program.methods.drawDraw().accountsPartial({ config: PDA.config(), round: roundPk }));
   }
   if (round.state !== 1) return null;
   const look = await slotHashLookup(conn, BigInt(round.targetSlot.toString()));
@@ -656,8 +841,8 @@ export async function advanceRound(p: Prov, kind: 'jackpot' | 'draw'): Promise<s
   if (!e) return null;
   const common = { config: PDA.config(), round: roundPk, entry: pks[idx], winnerState: PDA.player(e.player), drawVault: PDA.drawVault(), slotHashes: SYSVAR_SLOT_HASHES_PUBKEY };
   return kind === 'jackpot'
-    ? program.methods.settleJackpot().accountsPartial({ ...common, rewardVault: PDA.rewardVault(), architect: ARCHITECT }).rpc()
-    : program.methods.settleDraw().accountsPartial({ ...common, rewardVault: PDA.rewardVault() }).rpc();
+    ? send(p, 'settle_jackpot', program.methods.settleJackpot().accountsPartial({ ...common, rewardVault: PDA.rewardVault(), architect: ARCHITECT }))
+    : send(p, 'settle_draw', program.methods.settleDraw().accountsPartial({ ...common, rewardVault: PDA.rewardVault() }));
 }
 
 /** Forges at the price shown: if someone forged first (+5%), the transaction fails instead of charging more. */
@@ -667,23 +852,23 @@ export async function forgeArtifact(p: Prov, tier: number, maxPriceLamports?: bi
   const serial = cfg.artifactsMinted[tier];
   const asset = PDA.asset(tier, serial);
   const maxPrice = maxPriceLamports ?? artifactPrice(cfg, tier);
-  return program.methods.forgeArtifact(tier, serial, bn(maxPrice)).accountsPartial({
+  return send(p, `forge_artifact:t${tier}`, program.methods.forgeArtifact(tier, serial, bn(maxPrice)).accountsPartial({
     config: PDA.config(), asset, record: PDA.artifact(asset), collection: PDA.collection(), artifactAuthority: PDA.artifactAuthority(),
     rewardVault: PDA.rewardVault(), drawVault: PDA.drawVault(), architect: ARCHITECT, buyer: me(p), coreProgram: MPL_CORE, systemProgram: SystemProgram.programId,
-  }).rpc();
+  }));
 }
 
 export async function recycleArtifact(p: Prov, asset: PublicKey) {
-  return getProgram(p).methods.recycleArtifact().accountsPartial({
+  return send(p, 'recycle_artifact', getProgram(p).methods.recycleArtifact().accountsPartial({
     config: PDA.config(), asset, record: PDA.artifact(asset), collection: PDA.collection(), owner: me(p), coreProgram: MPL_CORE, systemProgram: SystemProgram.programId,
-  }).rpc();
+  }));
 }
 
 export async function claimArtifactChips(p: Prov, asset: PublicKey) {
   await ensurePlayer(p);
-  return getProgram(p).methods.claimArtifactChips().accountsPartial({
+  return send(p, 'claim_artifact_chips', getProgram(p).methods.claimArtifactChips().accountsPartial({
     config: PDA.config(), asset, record: PDA.artifact(asset), collection: PDA.collection(), playerState: PDA.player(me(p)), owner: me(p),
-  }).rpc();
+  }));
 }
 
 export async function claimAirdrop(p: Prov) {
@@ -696,10 +881,10 @@ export async function claimAirdrop(p: Prov) {
   const cfg = await accs(program).config.fetch(PDA.config());
   const serial = cfg.artifactsMinted[0];
   const asset = PDA.asset(0, serial);
-  return program.methods.claimAirdrop(serial, proof.map((h) => Array.from(ethers.getBytes('0x' + h)))).accountsPartial({
+  return send(p, 'claim_airdrop', program.methods.claimAirdrop(serial, proof.map((h) => Array.from(ethers.getBytes('0x' + h)))).accountsPartial({
     config: PDA.config(), receipt: PDA.airdrop(me(p)), asset, record: PDA.artifact(asset), collection: PDA.collection(),
     artifactAuthority: PDA.artifactAuthority(), claimant: me(p), coreProgram: MPL_CORE, systemProgram: SystemProgram.programId,
-  }).rpc();
+  }));
 }
 
 // Artifact Duel
@@ -715,18 +900,18 @@ export async function createDuel(p: Prov, stakeXnt: number, element: number, tic
   const salt = crypto.getRandomValues(new Uint8Array(32));
   // the secret never leaves this browser until reveal
   localStorage.setItem(`moonforge_duel_${duel.toBase58()}`, JSON.stringify({ element, salt: Array.from(salt) }));
-  const tx = await program.methods.createDuel(bn(fromXnt(stakeXnt)), Array.from(duelCommitment(duel, element, salt))).accountsPartial({
+  const tx = await send(p, 'create_duel', program.methods.createDuel(bn(fromXnt(stakeXnt)), Array.from(duelCommitment(duel, element, salt))).accountsPartial({
     config: PDA.config(), creatorState: ps, duel, owner: me(p), asset: ticketAsset, record: PDA.artifact(ticketAsset), collection: PDA.collection(),
     systemProgram: SystemProgram.programId,
-  }).rpc();
+  }));
   return { tx, duel };
 }
 export async function joinDuel(p: Prov, duel: PublicKey, element: number, ticketAsset: PublicKey) {
   const asset = ticketAsset;
   await ensurePlayer(p);
-  return getProgram(p).methods.joinDuel(element).accountsPartial({
+  return send(p, 'join_duel', getProgram(p).methods.joinDuel(element).accountsPartial({
     config: PDA.config(), duel, opponentState: PDA.player(me(p)), opponent: me(p), asset, record: PDA.artifact(asset), collection: PDA.collection(),
-  }).rpc();
+  }));
 }
 function resolveAccounts(d: any, duel: PublicKey) {
   return {
@@ -739,17 +924,17 @@ export async function revealDuel(p: Prov, duel: PublicKey) {
   const d = await accs(program).duel.fetch(duel);
   const secret = JSON.parse(localStorage.getItem(`moonforge_duel_${duel.toBase58()}`) || 'null');
   if (!secret) throw new Error('Duel secret not found in this browser');
-  return program.methods.revealDuel(secret.element, secret.salt).accountsPartial({
+  return send(p, 'reveal_duel', program.methods.revealDuel(secret.element, secret.salt).accountsPartial({
     resolve: resolveAccounts(d, duel), creator: me(p),
-  }).rpc();
+  }));
 }
 export async function claimDuelTimeout(p: Prov, duel: PublicKey) {
   const program = getProgram(p);
   const d = await accs(program).duel.fetch(duel);
-  return program.methods.claimDuelTimeout().accountsPartial(resolveAccounts(d, duel)).rpc();
+  return send(p, 'claim_duel_timeout', program.methods.claimDuelTimeout().accountsPartial(resolveAccounts(d, duel)));
 }
 export async function cancelDuel(p: Prov, duel: PublicKey) {
-  return getProgram(p).methods.cancelDuel().accountsPartial({ duel, creatorState: PDA.player(me(p)), creator: me(p) }).rpc();
+  return send(p, 'cancel_duel', getProgram(p).methods.cancelDuel().accountsPartial({ duel, creatorState: PDA.player(me(p)), creator: me(p) }));
 }
 /** The creator's secret (element + salt) saved by createDuel in this browser, if any. */
 export function duelSecret(duel: PublicKey): { element: number; salt: number[] } | null {
@@ -806,55 +991,56 @@ export async function createWar(p: Prov, stakeXnt: number, ticketAsset: PublicKe
   const st = await accs(program).playerState.fetch(ps);
   const war = warPda(me(p), BigInt(st.nonce.toString()));
   const key = newMoveKey(war);
-  const tx = await program.methods.createWar(bn(fromXnt(stakeXnt)), key.publicKey).accountsPartial({
+  const tx = await send(p, 'create_war', program.methods.createWar(bn(fromXnt(stakeXnt)), key.publicKey).accountsPartial({
     config: PDA.config(), creatorState: ps, war, owner: me(p), asset: ticketAsset, record: PDA.artifact(ticketAsset), collection: PDA.collection(),
     systemProgram: SystemProgram.programId,
-  }).postInstructions([fundMoveKey(p, key)]).rpc();
+  }).postInstructions([fundMoveKey(p, key)]));
   return { tx, war };
 }
 export async function joinWar(p: Prov, war: PublicKey, ticketAsset: PublicKey) {
   await ensurePlayer(p);
   const key = newMoveKey(war);
-  return getProgram(p).methods.joinWar(key.publicKey).accountsPartial({
+  return send(p, 'join_war', getProgram(p).methods.joinWar(key.publicKey).accountsPartial({
     config: PDA.config(), war, opponentState: PDA.player(me(p)), opponent: me(p), asset: ticketAsset, record: PDA.artifact(ticketAsset), collection: PDA.collection(),
-  }).postInstructions([fundMoveKey(p, key)]).rpc();
+  }).postInstructions([fundMoveKey(p, key)]));
 }
 export async function cancelWar(p: Prov, war: PublicKey) {
-  return getProgram(p).methods.cancelWar().accountsPartial({ war, creatorState: PDA.player(me(p)), creator: me(p) }).rpc();
+  return send(p, 'cancel_war', getProgram(p).methods.cancelWar().accountsPartial({ war, creatorState: PDA.player(me(p)), creator: me(p) }));
 }
 /** PERMISSIONLESS: shuffles both decks with the hash of the block committed at join. */
 export async function startWar(p: Prov, war: PublicKey) {
-  return getProgram(p).methods.startWar().accountsPartial({ war, slotHashes: SYSVAR_SLOT_HASHES_PUBKEY }).rpc();
+  return send(p, 'start_war', getProgram(p).methods.startWar().accountsPartial({ war, slotHashes: SYSVAR_SLOT_HASHES_PUBKEY }));
 }
 /** A move signed by this browser's move key when it has one (no pop-up), else by the wallet. */
-async function warMove(p: Prov, war: PublicKey, build: (m: any) => any) {
+async function warMove(p: Prov, war: PublicKey, name: string, build: (m: any) => any) {
   const key = warMoveKey(war);
-  if (!key) return build(getProgram(p).methods).accountsPartial({ war, signer: me(p) }).rpc();
+  if (!key) return send(p, name, build(getProgram(p).methods).accountsPartial({ war, signer: me(p) }));
   const connection = readConnection;
   const program = getProgram(null, connection);
   const tx: Transaction = await build(program.methods).accountsPartial({ war, signer: key.publicKey }).transaction();
   tx.feePayer = key.publicKey;
+  await applyCu(connection, tx, key.publicKey, name);
   tx.recentBlockhash = (await connection.getLatestBlockhash('confirmed')).blockhash;
   tx.sign(key);
   const sig = await connection.sendRawTransaction(tx.serialize());
   await connection.confirmTransaction(sig, 'confirmed');
   return sig;
 }
-export const warSummon = (p: Prov, war: PublicKey, handIndex: number) => warMove(p, war, (m) => m.warSummon(handIndex));
+export const warSummon = (p: Prov, war: PublicKey, handIndex: number) => warMove(p, war, 'war_summon', (m) => m.warSummon(handIndex));
 /** target = enemy unit index, or 255 for the enemy player (only when its field is empty) */
-export const warAttack = (p: Prov, war: PublicKey, attacker: number, target: number) => warMove(p, war, (m) => m.warAttack(attacker, target));
-export const warEndTurn = (p: Prov, war: PublicKey) => warMove(p, war, (m) => m.warEndTurn());
+export const warAttack = (p: Prov, war: PublicKey, attacker: number, target: number) => warMove(p, war, 'war_attack', (m) => m.warAttack(attacker, target));
+export const warEndTurn = (p: Prov, war: PublicKey) => warMove(p, war, 'war_end_turn', (m) => m.warEndTurn());
 export async function claimWarTimeout(p: Prov, war: PublicKey) {
-  return getProgram(p).methods.claimWarTimeout().accountsPartial({ war }).rpc();
+  return send(p, 'claim_war_timeout', getProgram(p).methods.claimWarTimeout().accountsPartial({ war }));
 }
 /** PERMISSIONLESS once finished: winner paid (or both refunded on a draw); the move key's leftover goes back. */
 export async function settleWar(p: Prov, war: PublicKey) {
   const program = getProgram(p);
   const w = await accs(program).war.fetch(war);
-  const sig = await program.methods.settleWar().accountsPartial({
+  const sig = await send(p, 'settle_war', program.methods.settleWar().accountsPartial({
     config: PDA.config(), war, creatorState: PDA.player(w.creator), opponentState: PDA.player(w.opponent), rewardVault: PDA.rewardVault(),
     drawVault: PDA.drawVault(), architect: ARCHITECT, rentPayer: w.rentPayer,
-  }).rpc();
+  }));
   await sweepMoveKey(p, war).catch(() => undefined);
   return sig;
 }
@@ -867,6 +1053,7 @@ export async function sweepMoveKey(p: Prov, war: PublicKey) {
   if (lamports > 5000) {
     const tx = new Transaction().add(SystemProgram.transfer({ fromPubkey: key.publicKey, toPubkey: me(p), lamports: lamports - 5000 }));
     tx.feePayer = key.publicKey;
+    await applyCu(connection, tx, key.publicKey, 'system_transfer');
     tx.recentBlockhash = (await connection.getLatestBlockhash('confirmed')).blockhash;
     tx.sign(key);
     await connection.confirmTransaction(await connection.sendRawTransaction(tx.serialize()), 'confirmed');
@@ -946,25 +1133,25 @@ export async function fetchMyPredEntries(owner: PublicKey, connection: Connectio
 export async function enterPrediction(p: Prov, side: 0 | 1, xnt: number) {
   const ps = await ensurePlayer(p);
   const id = currentPredRound();
-  return getProgram(p).methods.enterPrediction(bn(id), side, bn(fromXnt(xnt))).accountsPartial({
+  return send(p, 'enter_prediction', getProgram(p).methods.enterPrediction(bn(id), side, bn(fromXnt(xnt))).accountsPartial({
     round: predPda(id), entry: predEntryPda(id, me(p)), playerState: ps, owner: me(p), systemProgram: SystemProgram.programId,
-  }).rpc();
+  }));
 }
 /** PERMISSIONLESS: moves a round forward (lock after its entry window, settle after its end time). */
 export async function advancePrediction(p: Prov, id: number) {
   const program = getProgram(p);
   const r = await accs(program).predRound.fetch(predPda(id));
-  if (r.state === PRED.state.OPEN) return program.methods.lockPrediction().accountsPartial({ round: predPda(id), observation: XDEX_OBSERVATION }).rpc();
-  return program.methods.settlePrediction().accountsPartial({
+  if (r.state === PRED.state.OPEN) return send(p, 'lock_prediction', program.methods.lockPrediction().accountsPartial({ round: predPda(id), observation: XDEX_OBSERVATION }));
+  return send(p, 'settle_prediction', program.methods.settlePrediction().accountsPartial({
     config: PDA.config(), round: predPda(id), observation: XDEX_OBSERVATION, rewardVault: PDA.rewardVault(), drawVault: PDA.drawVault(), architect: ARCHITECT,
-  }).rpc();
+  }));
 }
 /** PERMISSIONLESS: pays an entry (winner share or refund) into its owner's game wallet and closes it. */
 export async function claimPrediction(p: Prov, entry: { publicKey: PublicKey; account: any }) {
   const id = Number(entry.account.round);
-  return getProgram(p).methods.claimPrediction().accountsPartial({
+  return send(p, 'claim_prediction', getProgram(p).methods.claimPrediction().accountsPartial({
     config: PDA.config(), round: predPda(id), entry: entry.publicKey, playerState: PDA.player(entry.account.player), rentPayer: entry.account.rentPayer,
-  }).rpc();
+  }));
 }
 /** What an entry receives: winners share the prize pool pro-rata; a refunded round returns the stake. */
 export function predPayout(round: any, entry: any): bigint {
@@ -999,18 +1186,18 @@ export async function houseWithdrawQuote(shares: bigint, connection: Connection 
 /** Slippage limit: the transaction fails instead of executing more than 1% worse than quoted. */
 export async function houseDeposit(p: Prov, xnt: number) {
   const minShares = ((await houseDepositQuote(xnt)) * 99n) / 100n;
-  return getProgram(p).methods.houseDeposit(bn(fromXnt(xnt)), bn(minShares)).accountsPartial({
+  return send(p, 'house_deposit', getProgram(p).methods.houseDeposit(bn(fromXnt(xnt)), bn(minShares)).accountsPartial({
     config: PDA.config(), share: PDA.house(me(p)), bankrollVault: PDA.bankrollVault(), owner: me(p), systemProgram: SystemProgram.programId,
-  }).rpc();
+  }));
 }
 export async function houseRequestWithdraw(p: Prov, shares: bigint) {
-  return getProgram(p).methods.houseRequestWithdraw(bn(shares)).accountsPartial({ share: PDA.house(me(p)), owner: me(p) }).rpc();
+  return send(p, 'house_request_withdraw', getProgram(p).methods.houseRequestWithdraw(bn(shares)).accountsPartial({ share: PDA.house(me(p)), owner: me(p) }));
 }
 export async function houseWithdraw(p: Prov) {
   const share = await fetchHouseShare(me(p));
   const pending = share ? BigInt(share.pendingShares.toString()) : 0n;
   const minLamports = ((await houseWithdrawQuote(pending)) * 99n) / 100n;
-  return getProgram(p).methods.houseWithdraw(bn(minLamports)).accountsPartial({ config: PDA.config(), share: PDA.house(me(p)), bankrollVault: PDA.bankrollVault(), owner: me(p) }).rpc();
+  return send(p, 'house_withdraw', getProgram(p).methods.houseWithdraw(bn(minLamports)).accountsPartial({ config: PDA.config(), share: PDA.house(me(p)), bankrollVault: PDA.bankrollVault(), owner: me(p) }));
 }
 export async function fetchHouseShare(owner: PublicKey, connection: Connection = readConnection) {
   return accs(getProgram(null, connection)).houseShare.fetchNullable(PDA.house(owner));

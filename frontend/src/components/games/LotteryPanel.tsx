@@ -10,11 +10,13 @@ import { advanceRound, enterDraw, fetchDraw, P } from '../../lib/protocol';
 import { formatDuration, formatNumber } from '../../lib/constants';
 import { useNow, usePoll, useTx } from '../../lib/hooks';
 import { AddrLink, Notice, Row, TxStatus, Xnt } from '../ui';
+import KnownIssues from './KnownIssues';
 import type { GameCtx } from './types';
 
 const STATE = ['Open', 'Drawing', 'Settled'];
 
-export default function LotteryPanel({ ctx }: { ctx: GameCtx }) {
+/** `exitsOnly` (R1): shown only while a round waits to be closed or settled (permissionless); no Enter. */
+export default function LotteryPanel({ ctx, exitsOnly = false }: { ctx: GameCtx; exitsOnly?: boolean }) {
     const { provider, player, proto, refresh } = ctx;
     const dr = usePoll(() => fetchDraw(), [], 20_000);
     const tx = useTx();
@@ -36,6 +38,7 @@ export default function LotteryPanel({ ctx }: { ctx: GameCtx }) {
     const cost = t * P.ticketPrice * 1e9;
     const balance = player ? Number(player.balance) : 0;
     const valid = c >= 0 && t >= 0 && c + t > 0 && c <= myChips && cost <= balance;
+    if (exitsOnly && !(ended || drawing)) return null;
 
     return (
         <div className="glass-card">
@@ -65,6 +68,7 @@ export default function LotteryPanel({ ctx }: { ctx: GameCtx }) {
                     <Row label="Entries">{d ? (round ? round.entries : 0) : '--'}</Row>
                     <Row label="Your chips">{player ? formatNumber(myChips) : '--'}</Row>
 
+                    {!exitsOnly && <>
                     <div className="grid grid-cols-2 gap-2 mt-4">
                         <label className="text-xs text-lunar-400">Chips
                             <div className="flex gap-1 mt-1">
@@ -82,6 +86,7 @@ export default function LotteryPanel({ ctx }: { ctx: GameCtx }) {
                         onClick={() => provider && tx.run(`Entering with ${c} chips + ${t} tickets`, () => enterDraw(provider, c, t), () => { setChips(''); setTickets(''); dr.reload(); refresh(); })}>
                         Enter the draw
                     </button>
+                    </>}
                     {(ended || drawing) && (
                         <button className="btn-outline w-full !py-2 mt-2 text-sm" disabled={!provider || !!tx.busy}
                             onClick={() => provider && tx.run(ended ? 'Closing the round' : 'Settling the draw', async () => {
@@ -127,6 +132,7 @@ export default function LotteryPanel({ ctx }: { ctx: GameCtx }) {
                     </div>
                 </div>
             </div>
+            <KnownIssues ids={['GAM-1', 'GAM-8']} className="mt-4" />
         </div>
     );
 }

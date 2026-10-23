@@ -18,7 +18,7 @@ import { CHAINS, EVM_CHAINS, isPortalDeployed } from '../lib/constants';
 import { countedUsd, useChainMarkets, weekCapacity } from '../lib/market';
 import { P, toXnt } from '../lib/protocol';
 import { useProtocol } from '../lib/hooks';
-import { fetchXntUsd } from './ROICalculator';
+import { fetchXntUsd } from './BurnVsSell';
 
 const PRESETS = [1e9, 1e11, 1e12, 1e13, 1e14];
 const compactXen = (n: number) => (n >= 1e12 ? `${n / 1e12}T` : n >= 1e9 ? `${n / 1e9}B` : n >= 1e6 ? `${n / 1e6}M` : `${n}`);
@@ -29,7 +29,9 @@ const hhmm = (ms: number) => new Date(ms).toISOString().slice(11, 16);
 
 export default function FairValueEngine({ compact = false }: { compact?: boolean }) {
     const proto = useProtocol(60_000);
-    const { rows, updatedAt, refresh } = useChainMarkets();
+    // R10: Ethereum and PulseChain (no portal) are read only after an explicit click.
+    const [compare, setCompare] = useState(false);
+    const { rows, updatedAt, refresh } = useChainMarkets(300_000, compare);
     const [xntUsd, setXntUsd] = useState<number | null>(null);
     const [amount, setAmount] = useState(1e12);
     const [tier, setTier] = useState(0);
@@ -38,9 +40,9 @@ export default function FairValueEngine({ compact = false }: { compact?: boolean
     const budgetXnt = proto.data ? toXnt(proto.data.nextEpochBudget) : null;
     const cap = weekCapacity(rows, budgetXnt, xntUsd, P.rateCapK);
     const mult = P.tiers[tier].multiplier;
-    const calc = useMemo(() => EVM_CHAINS.map((k) => {
+    const calc = useMemo(() => EVM_CHAINS.filter((k) => compare || isPortalDeployed(k)).map((k) => {
         const r = rows[k];
-        if (r === 'loading' || !r.market) return { k, r, ok: false as const };
+        if (typeof r !== 'object' || !r.market) return { k, r, ok: false as const };
         const m = r.market, price = m.spotUsd, L = m.liquidityUsd;
         const weekUsd = (r.burnedWeek ?? 0) * price;
         const marketValue = amount * price;
@@ -48,7 +50,7 @@ export default function FairValueEngine({ compact = false }: { compact?: boolean
         const factor = marketValue > 0 ? counted / marketValue : 0;
         const capXnt = xntUsd ? (P.rateCapK * mult * counted) / xntUsd : null;
         return { k, r, ok: true as const, m, price, L, weekUsd, marketValue, factor, counted, capXnt };
-    }), [rows, amount, mult, xntUsd]);
+    }), [rows, amount, mult, xntUsd, compare]);
     const best = Math.max(0, ...calc.map((c) => (c.ok ? c.counted : 0)));
     const example = calc.filter((c) => c.ok && isPortalDeployed(c.k)).sort((a, b) => (b.ok && a.ok ? b.counted - a.counted : 0))[0];
     const loadingAny = EVM_CHAINS.some((k) => rows[k] === 'loading');
@@ -63,6 +65,7 @@ export default function FairValueEngine({ compact = false }: { compact?: boolean
                 </span>
                 <button onClick={refresh} className="text-xs text-forge-orange hover:underline inline-flex items-center gap-1" aria-label="Refresh market data"><RefreshCw className="w-3 h-3" />Refresh</button>
             </div>
+            <p className="text-xs text-lunar-500">Prices: XEN markets from GeckoTerminal, XNT from x1report.com (both see your IP address when this page loads; see the privacy list in links.json).</p>
             <p className="text-sm text-lunar-400">
                 XEN is the same token on every chain, but it is not worth the same: each chain has its own market, with its own price, depth and supply.
                 Moon Forge credits a burn with what that XEN is really worth on its own market, so the same amount weighs differently on each chain,
@@ -74,7 +77,7 @@ export default function FairValueEngine({ compact = false }: { compact?: boolean
                     <strong>Fair capacity this week:</strong> of the budget ({money(cap.budgetUsd)}), {money(cap.cashUsd)} is paid in XNT (the rest is drawn as Forge Drops),
                     so XNT can pay at least the value of a sale for up to {money(cap.cashUsd)} of counted value in total (vesting tiers count 2× / 3×).
                     {' '}Already burned this week: {money(cap.countedWeekUsd)}. <strong>Left: {money(cap.remainingUsd)}.</strong>
-                    {' '}Burns beyond that are still paid, but pro-rata, so they would likely earn less than selling. The capacity grows with the reward pool
+                    {' '}Burns beyond that are still paid, but pro-rata, so they would likely pay less than selling. The capacity grows with the reward pool
                     (every game stake, Artifact sale and donation adds to it).
                 </div>
             )}
@@ -115,7 +118,7 @@ export default function FairValueEngine({ compact = false }: { compact?: boolean
                             const ch = CHAINS[c.k];
                             const live = isPortalDeployed(c.k);
                             const loading = c.r === 'loading';
-                            const stale = c.r !== 'loading' && c.r.stale;
+                            const stale = typeof c.r === 'object' && c.r.stale;
                             const w = c.ok && best > 0 ? c.counted / best : 0;
                             return (
                                 <tr key={c.k} className="border-b border-white/5">
@@ -123,7 +126,7 @@ export default function FairValueEngine({ compact = false }: { compact?: boolean
                                         <span className="inline-block w-2 h-2 rounded-full mr-2" style={{ background: ch.color }} />{ch.name}
                                         <div className="text-[11px] text-lunar-500">
                                             {live ? <span className="text-green-400">portal live</span> : <span className="text-amber-300">comparison only · no portal</span>}
-                                            {c.r !== 'loading' && c.r.supply !== null ? ` · supply ${big(c.r.supply)}` : ''}
+                                            {typeof c.r === 'object' && c.r.supply !== null ? ` · supply ${big(c.r.supply)}` : ''}
                                             {stale ? <span className="text-amber-300"> · source busy, last value shown</span> : ''}
                                         </div>
                                     </td>
@@ -151,9 +154,18 @@ export default function FairValueEngine({ compact = false }: { compact?: boolean
             <p className="text-xs text-lunar-500">
                 "Up to" = {P.rateCapK} × counted value × {mult} ({P.tiers[tier].name}), converted at today's XNT price{xntUsd ? ` ($${xntUsd.toFixed(3)})` : ''}: the most an epoch can pay for this burn.
                 The real payout is your share of the week's budget{budgetXnt !== null ? ` (now at most ${budgetXnt.toFixed(2)} XNT for everyone together)` : ''}, split by counted value among all burners.
-                Ethereum and PulseChain are shown for comparison only: Moon Forge has no portal there (XEN Prime is announced for Ethereum XEN only).
                 A quiet market (few trades) keeps a still price: the price shown is always the pools' current state.
             </p>
+            <div className="text-xs text-lunar-500">
+                {compare ? (
+                    <>Ethereum and PulseChain are shown for comparison only: Moon Forge has no portal there and none is planned (XEN Prime is announced for Ethereum XEN only).{' '}
+                        <button className="text-forge-orange hover:underline" onClick={() => setCompare(false)}>Hide them</button></>
+                ) : (
+                    <>Only the five chains with a live portal are read.{' '}
+                        <button className="text-forge-orange hover:underline" onClick={() => setCompare(true)}>Compare with Ethereum and PulseChain</button>{' '}
+                        (no portal; this asks GeckoTerminal for their XEN markets and their public RPCs, ethereum-rpc.publicnode.com and rpc.pulsechain.com, for the XEN supply, so those two RPCs see your IP address).</>
+                )}
+            </div>
 
             {!compact && example && example.ok && (
                 <div className="bg-space-700/40 rounded-xl p-4 text-sm text-lunar-300 space-y-1">

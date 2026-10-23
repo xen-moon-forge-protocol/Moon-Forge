@@ -1,0 +1,11 @@
+Fonts bundled with the Moon Forge site (self-hosted so that no font CDN sees visitors).
+
+Orbitron (orbitron-latin.woff2, variable weight 400-900, latin subset)
+  Copyright 2009 The Orbitron Project Authors (https://github.com/theleagueof/orbitron)
+  Licensed under the SIL Open Font License, Version 1.1: https://openfontlicense.org
+
+JetBrains Mono (jetbrains-mono-latin.woff2, variable weight 100-800, latin subset)
+  Copyright 2020 The JetBrains Mono Project Authors (https://github.com/JetBrains/JetBrainsMono)
+  Licensed under the SIL Open Font License, Version 1.1: https://openfontlicense.org
+
+The OFL permits bundling and redistribution of the fonts; the font names are reserved by their authors.

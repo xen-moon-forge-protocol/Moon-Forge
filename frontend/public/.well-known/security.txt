@@ -1,0 +1,7 @@
+# Moon Forge Protocol - security contact (RFC 9116)
+# Project identity only: no personal names, no paid bounty. Please allow time for a fix before disclosure.
+Contact: mailto:xen-moon-forge-protocol@tutamail.com
+Expires: 2027-04-30T00:00:00.000Z
+Policy: https://github.com/xen-moon-forge-protocol/Moon-Forge/blob/main/SECURITY.md
+Canonical: https://xen-moon-forge-protocol.github.io/Moon-Forge/.well-known/security.txt
+Preferred-Languages: en

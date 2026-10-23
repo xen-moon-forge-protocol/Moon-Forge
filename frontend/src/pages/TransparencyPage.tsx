@@ -9,9 +9,11 @@ import {
     ARCHITECT, ARTIFACTS, fetchEpochAccounts, fetchEpochIndex, fetchUpgradeAuthority, FORGE_SPLIT, P, PDA, PROGRAM_ID, explorerTx,
     SECONDARY_ROYALTY_PCT, AIRDROP_MAX,
 } from '../lib/protocol';
-import { formatNumber, PROJECT_LINKS } from '../lib/constants';
+import { CHAINS, formatNumber, PROJECT_LINKS } from '../lib/constants';
+import { LINKS, LINKS_URL } from '../lib/links';
 import { AddrLink, Notice, Row, Xnt } from '../components/ui';
 import FairValueEngine from '../components/FairValueEngine';
+import { INTERIM } from '../content/interim';
 
 const n = (x: any): number | null => (x === null || x === undefined ? null : Number(x.toString()));
 const ts = (x: any) => (n(x) ? new Date(n(x)! * 1000).toLocaleString() : '--');
@@ -37,6 +39,21 @@ export default function TransparencyPage() {
                     Live state of the Moon Forge program on X1, the full list of who can do what, every fee, and how to verify each epoch yourself.
                 </p>
             </div>
+
+            {/* Verify you are on the real site (X-064 / T9-30): the facts come verbatim from public/links.json */}
+            <section className="glass-card">
+                <div className="flex items-center gap-2 mb-2"><FileCheck2 className="w-5 h-5 text-forge-gold" /><h2 className="font-space text-xl">Verify you are on the real site</h2></div>
+                <p className="text-xs text-lunar-400 mb-3">{LINKS.verify.note}</p>
+                <div className="grid md:grid-cols-2 gap-x-8">
+                    <Row label="Site"><span className="font-mono text-xs break-all">{LINKS.verify.site}</span></Row>
+                    <Row label="X1 program"><AddrLink address={LINKS.verify.programId} full /></Row>
+                    <Row label="Artifacts collection"><AddrLink address={LINKS.verify.collection} full /></Row>
+                    <Row label={`Burn portal (${LINKS.verify.portalChains.map((k) => CHAINS[k]?.name ?? k).join(', ')})`}><span className="font-mono text-xs break-all">{LINKS.verify.portal}</span></Row>
+                    <Row label="Program source">{LINKS.verify.releaseUrl ? <a href={LINKS.verify.releaseUrl} target="_blank" rel="noopener noreferrer" className="text-forge-orange hover:underline font-mono text-xs">{LINKS.verify.release ?? '--'}</a> : <span className="font-mono text-xs">{LINKS.verify.release ?? '--'}</span>}</Row>
+                    <Row label="Machine-readable copy"><a href={LINKS_URL} target="_blank" rel="noopener noreferrer" className="text-forge-orange hover:underline font-mono text-xs">links.json</a></Row>
+                </div>
+                <p className="text-xs text-lunar-500 mt-2">Any other program ID, portal, collection, site or "claim" page is not Moon Forge. {LINKS.notOfficial}</p>
+            </section>
 
             {/* Program & upgrade authority */}
             <section className="glass-card">
@@ -148,7 +165,7 @@ export default function TransparencyPage() {
                                 ['Session keys (bots)', 'House games only, from the owner\'s game balance. Cannot withdraw and cannot enter Jackpot, Burn Lottery, Duels, Moon Wars or Predictions: the program rejects them.'],
                                 ['Oracle key', `publish_epoch with the epoch rate cap (the budget = min(${P.epochBudgetBps / 100}% of the free pool, total_score × rate_cap) is computed on-chain; at most once per ${P.minEpochIntervalDays} days) and hand its role to a new key. Nothing else: it cannot move funds itself.`],
                                 ['Architect', `set_airdrop_root once. Nothing else. Receives only: ${P.edgeToArchitectPct}% of house-game stakes, ${P.rakeToArchitectPct}% of Jackpot / Duel / Moon Wars / Predictions pots with a winner and of every lottery ticket, ${FORGE_SPLIT.architectPct}% of the forge price, and a ${SECONDARY_ROYALTY_PCT}% secondary royalty where marketplaces honor Core royalties. Nothing from burns, claims or Forge Drops; while its wallet is below rent exemption, its cut goes to the reward pool.`],
-                                ['Upgrade authority', 'Held by the architect wallet during the test period, to be burned afterwards. Can replace the program code (see the live field above).'],
+                                ['Upgrade authority', `Held by the architect wallet during the test period; to be burned ${INTERIM.freezeWhen}. Can replace the program code until then (see the live field above).`],
                             ].map(([who, what]) => (
                                 <tr key={who} className="border-b border-white/5 align-top">
                                     <td className="py-2 pr-4 text-forge-gold whitespace-nowrap">{who}</td>
@@ -186,7 +203,7 @@ export default function TransparencyPage() {
                 <h2 className="font-space text-xl mb-4">Key constants (compile-time, <a href={PROJECT_LINKS.programConstants} target="_blank" rel="noopener noreferrer" className="text-forge-orange hover:underline">constants.rs</a>)</h2>
                 <div className="grid md:grid-cols-2 gap-x-8">
                     <Row label="Epoch budget">min({P.epochBudgetBps / 100}% of the free reward pool, total_score × rate_cap), computed on-chain</Row>
-                    <Row label="Time between epochs">weekly (Sundays 00:00 UTC); program minimum {P.minEpochIntervalDays} days</Row>
+                    <Row label="Time between epochs">weekly, scheduled Sunday 00:00 UTC (often later); program minimum {P.minEpochIntervalDays} days</Row>
                     <Row label="Claim window">{P.claimWindowDays} days, then unclaimed budget returns to the pool</Row>
                     <Row label="Forge Drops">
                         {P.dropBudgetPct}% of each epoch budget, capped at {P.maxDropsPerEpoch * P.dropBackingXnt} XNT ({P.maxDropsPerEpoch} × {P.dropBackingXnt} XNT), part of the budget,

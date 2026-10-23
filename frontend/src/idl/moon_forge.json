@@ -4,7 +4,7 @@
     "name": "moon_forge",
     "version": "2.0.0",
     "spec": "0.1.0",
-    "description": "Moon Forge Protocol v2 - burn XEN on any EVM chain, earn XNT on X1. Zero protocol fees on the burn path."
+    "description": "Moon Forge Protocol: burn XEN on a supported EVM chain, receive XNT on X1. Zero protocol fee on the burn path."
   },
   "instructions": [
     {

@@ -9,11 +9,13 @@ import { advanceRound, enterJackpot, fetchJackpot, fetchPendingRefunds, P, refun
 import { formatDuration } from '../../lib/constants';
 import { useNow, usePoll, useTx } from '../../lib/hooks';
 import { AddrLink, Notice, Row, TxStatus, Xnt } from '../ui';
+import KnownIssues from './KnownIssues';
 import type { GameCtx } from './types';
 
 const STATE = ['Open', 'Drawing', 'Settled', 'Refunded'];
 
-export default function JackpotPanel({ ctx }: { ctx: GameCtx }) {
+/** `exitsOnly` (R1): shown only when this wallet has a stake in the round or a refund to collect; close/settle/refund, no Enter. */
+export default function JackpotPanel({ ctx, exitsOnly = false }: { ctx: GameCtx; exitsOnly?: boolean }) {
     const { provider, owner, player, refresh } = ctx;
     const jp = usePoll(() => fetchJackpot(), [], 10_000);
     const refunds = usePoll(() => fetchPendingRefunds(), [], 60_000);
@@ -36,6 +38,8 @@ export default function JackpotPanel({ ctx }: { ctx: GameCtx }) {
     const canEnter = !!provider && open && amt >= P.minStake && lamports <= balance && !tx.busy;
 
     const prev = d?.previous;
+    const myRefunds = owner && refunds.data ? refunds.data.filter((r) => r.player.equals(owner)) : [];
+    if (exitsOnly && !(mine > 0) && myRefunds.length === 0) return null;
 
     return (
         <div className="glass-card">
@@ -66,14 +70,17 @@ export default function JackpotPanel({ ctx }: { ctx: GameCtx }) {
                     <Row label="Your stake / chance">{d && owner ? (mine > 0 ? <><Xnt lamports={mine} /> · {((mine / Math.max(1, total)) * 100).toFixed(2)}%</> : '--') : '--'}</Row>
                     <Row label="Winner receives">{d && total > 0 ? <Xnt lamports={total - Math.floor((total * P.p2pRakePct) / 100)} /> : '--'}</Row>
 
-                    <div className="flex gap-2 mt-4">
-                        <input className="input-forge !py-2" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="XNT" />
-                        <button className="btn-forge !px-4 !py-2 text-sm whitespace-nowrap" disabled={!canEnter}
-                            onClick={() => provider && tx.run(`Entering jackpot with ${amt} XNT`, () => enterJackpot(provider, amt), () => { jp.reload(); refresh(); })}>
-                            Enter
-                        </button>
-                    </div>
-                    {provider && lamports > balance && <p className="text-xs text-amber-400 mt-1">Above your game balance. Deposit first.</p>}
+                    {!exitsOnly && (
+                        <div className="flex gap-2 mt-4">
+                            <input className="input-forge !py-2" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="XNT" />
+                            <button className="btn-forge !px-4 !py-2 text-sm whitespace-nowrap" disabled={!canEnter}
+                                onClick={() => provider && tx.run(`Entering jackpot with ${amt} XNT`, () => enterJackpot(provider, amt), () => { jp.reload(); refresh(); })}>
+                                Enter
+                            </button>
+                        </div>
+                    )}
+                    {!exitsOnly && provider && lamports > balance && <p className="text-xs text-amber-400 mt-1">Above your game balance. Deposit first.</p>}
+                    {exitsOnly && open && mine > 0 && <p className="text-xs text-lunar-400 mt-3">Your stake is in the current round; it can be closed once the round ends.</p>}
                     {(ended || drawing) && (
                         <button className="btn-outline !px-4 !py-2 text-sm mt-3 w-full" disabled={!provider || !!tx.busy}
                             onClick={() => provider && tx.run(ended ? 'Closing the round' : 'Settling the round', async () => {
@@ -126,8 +133,9 @@ export default function JackpotPanel({ ctx }: { ctx: GameCtx }) {
                 entry instead of re-drawn, so nobody can wait for a "better" block; anyone (the public keeper included, when it is running) can pay
                 the refunds back.
                 Entries come from your game balance; prizes are credited to the winner's game balance. Only the wallet owner can enter: session
-                keys (bots) cannot.
+                keys (bots) cannot. Other entrants may be automated agents: the project's kit is public.
             </p>
+            <KnownIssues ids={['GAM-1']} className="mt-4" />
         </div>
     );
 }

@@ -8,14 +8,52 @@
  * 0x000…000 = portal not deployed yet = chain disabled (no burn can be sent).
  */
 
-export const GITHUB_URL = 'https://github.com/xen-moon-forge-protocol/Moon-Forge';
+import idl from '../idl/moon_forge.json';
+import { LINKS, officialUrl } from './links';
+
+// ═══════════════════════════════════════════════════════════════════════════
+//                     PROGRAM ID (pinned; T9-37 supply-chain check)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * The Moon Forge program on X1 mainnet, pinned here in source. The bundled IDL and public/links.json must carry
+ * the same address: the check below runs when the app loads (first import of this module, before any PDA is
+ * derived) and fails closed, so a swapped IDL or a tampered links file can never point the site at another
+ * program. The same three-way check must run in CI before `vite build` (see REQUESTS: check:program-id).
+ */
+export const PROGRAM_ID_B58 = '57UE1U1t23ztg2noLp8pcpGW1B1Xw25rLH6ra9Mchea9';
+export function assertProgramId(): void {
+    const idlAddress = (idl as { address?: string }).address;
+    if (idlAddress !== PROGRAM_ID_B58) {
+        throw new Error(`Moon Forge: the bundled IDL address (${idlAddress}) is not the pinned program ${PROGRAM_ID_B58}. Refusing to start.`);
+    }
+    if (LINKS.verify.programId !== PROGRAM_ID_B58) {
+        throw new Error(`Moon Forge: links.json verify.programId (${LINKS.verify.programId}) is not the pinned program ${PROGRAM_ID_B58}. Refusing to start.`);
+    }
+}
+assertProgramId();
+
+// ═══════════════════════════════════════════════════════════════════════════
+//                     OFFICIAL LINKS (single source: public/links.json)
+// ═══════════════════════════════════════════════════════════════════════════
+
+export const GITHUB_URL: string = officialUrl('github');
+export const SITE_URL: string = LINKS.site;
+export const X_URL: string = officialUrl('x');
 
 export const PROJECT_LINKS = {
     github: GITHUB_URL,
+    site: SITE_URL,
+    x: X_URL,
+    links: `${GITHUB_URL}/blob/main/frontend/public/links.json`,
     docs: `${GITHUB_URL}/tree/main/docs`,
     whitepaperMd: `${GITHUB_URL}/blob/main/docs/WHITEPAPER.md`,
     botsMd: `${GITHUB_URL}/blob/main/docs/BOTS.md`,
     securityMd: `${GITHUB_URL}/blob/main/SECURITY.md`,
+    /** Internal review record (formerly AUDIT-2026-10.md; the old name stays as a stub). */
+    reviewMd: `${GITHUB_URL}/blob/main/docs/REVIEW-2026-10.md`,
+    /** Register of known, unfixed findings with their status (ids GAM-n, DISC-n, …). */
+    knownIssuesMd: `${GITHUB_URL}/blob/main/docs/KNOWN-ISSUES.md`,
     program: `${GITHUB_URL}/tree/main/programs/moon-forge/src`,
     programLib: `${GITHUB_URL}/blob/main/programs/moon-forge/src/lib.rs`,
     programConstants: `${GITHUB_URL}/blob/main/programs/moon-forge/src/constants.rs`,

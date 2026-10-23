@@ -15,6 +15,7 @@ import {
 import { formatDuration } from '../../lib/constants';
 import { useNow, usePoll, useTx } from '../../lib/hooks';
 import { AddrLink, Notice, TxStatus, Xnt } from '../ui';
+import KnownIssues from './KnownIssues';
 import { ELEMENT_ICONS, type GameCtx } from './types';
 
 const STATE_LABEL = ['Waiting for an opponent', 'Starting (waiting for the seed block)', 'In progress', 'Finished, waiting for payout'];
@@ -136,9 +137,10 @@ function Match({ ctx, w, onDone }: { ctx: GameCtx; w: { publicKey: PublicKey; ac
     );
 }
 
-export default function MoonWarsReal({ ctx }: { ctx: GameCtx }) {
+/** `exitsOnly` (R1): only this wallet's existing matches (moves, start, cancel, timeout, payout); no create and no join. */
+export default function MoonWarsReal({ ctx, exitsOnly = false }: { ctx: GameCtx; exitsOnly?: boolean }) {
     const { provider, owner, player, refresh } = ctx;
-    const wars = usePoll(() => fetchWars(owner), [owner?.toBase58()], 4000);
+    const wars = usePoll(() => fetchWars(owner), [owner?.toBase58()], exitsOnly ? 15_000 : 4000);
     const arts = usePoll(() => (owner ? fetchMyArtifacts(owner) : Promise.resolve([])), [owner?.toBase58()], 60_000);
     const tx = useTx();
     const [stake, setStake] = useState('0.1');
@@ -150,6 +152,23 @@ export default function MoonWarsReal({ ctx }: { ctx: GameCtx }) {
     const list = wars.data ?? [];
     const mine = list.filter((w) => owner && (w.account.creator.equals(owner) || (w.account.state > 0 && w.account.opponent.equals(owner))));
     const open = list.filter((w) => w.account.state === WAR.state.OPEN && !(owner && w.account.creator.equals(owner)));
+
+    if (exitsOnly) {
+        if (mine.length === 0) return null;
+        return (
+            <div className="glass-card space-y-3">
+                <div className="flex items-center gap-2">
+                    <Swords className="w-5 h-5 text-forge-gold" />
+                    <h3 className="font-space text-lg">Your Moon Wars matches</h3>
+                </div>
+                <p className="text-xs text-lunar-500">
+                    Finish, cancel (full refund while nobody joined), claim a timeout or pay out the matches you are already in. Nothing new can be created or joined here.
+                </p>
+                {mine.map((w) => <Match key={w.publicKey.toBase58()} ctx={ctx} w={w} onDone={reload} />)}
+                <KnownIssues ids={['GAM-5']} />
+            </div>
+        );
+    }
 
     return (
         <div className="glass-card space-y-5">
@@ -177,7 +196,7 @@ export default function MoonWarsReal({ ctx }: { ctx: GameCtx }) {
 
             <div className="grid md:grid-cols-2 gap-6">
                 <div className="text-sm text-lunar-300 space-y-2">
-                    <p>Both players stake the same amount from their game wallets. Each side plays the same 10 cards (4 Lunar Dust, 3 Cosmic Shard, 2 Solar Core, 1 Void Anomaly), shuffled by the hash of a block produced after both joined. The draw order is public to both, so skill decides.</p>
+                    <p>Both players stake the same amount from their game wallets. Each side plays the same 10 cards (4 Lunar Dust, 3 Cosmic Shard, 2 Solar Core, 1 Void Anomaly), shuffled by the hash of a block produced after both joined. The draw order is public to both (perfect information), and the creator moves first, which gives the creator the edge today (GAM-4 below). Your opponent may be an automated agent: the project's kit is public, and agents move instantly.</p>
                     <p>{WAR.startHp} HP each. Mana = min(10, ⌈round ÷ 2⌉ + 1). Units attack from the next turn, enemy units must fall before the player can be hit, a Solar Core burns {WAR.solarBurn} HP when summoned, an empty deck deals 1 fatigue damage. Field limit {WAR.fieldMax} units.</p>
                     <p>A player who does not finish their turn within {WAR.turnSeconds / 60} minutes loses. After {WAR.maxRounds} rounds the match is a draw and both stakes are refunded.</p>
                 </div>
@@ -232,6 +251,7 @@ export default function MoonWarsReal({ ctx }: { ctx: GameCtx }) {
                 The winner takes both stakes minus a {P.p2pRakePct}% rake ({P.rakeToPoolPct}% reward pool, {P.rakeToArchitectPct}% architect, {P.rakeToDrawPct}% Burn Lottery).
                 Starting, timeouts and payouts are permissionless: either player, the public keeper or anyone can push them. Paid-out matches are closed on-chain.
             </p>
+            <KnownIssues ids={['GAM-1', 'GAM-4', 'GAM-5']} />
         </div>
     );
 }

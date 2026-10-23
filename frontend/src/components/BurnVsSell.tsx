@@ -159,6 +159,7 @@ export default function BurnVsSell({ chainKey: chainProp, xenAmount: amountProp,
                 The oracle prices each burn at the burn-hour price of this chain's XEN (a 24 h median), which can differ from the spot price.
                 An Artifact boost only raises your share of the same epoch, never the total: if you are the only burner, it gains nothing.
                 Forge Drops (part of the budget, drawn at random) make individual results vary.
+                {' '}Prices: XEN markets from GeckoTerminal, XNT from x1report.com.
                 {tier > 0 && ` ${P.tiers[tier].name} pays over ${P.tiers[tier].vestingDays} days.`}
                 {priceErr && ` (${priceErr})`}
             </p>

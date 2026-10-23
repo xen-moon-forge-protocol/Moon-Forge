@@ -13,13 +13,16 @@ import { PublicKey } from '@solana/web3.js';
 import { Flame, ArrowRight, Loader2 } from 'lucide-react';
 import { useWallet } from '../context/WalletContext';
 import { CHAINS, EVM_CHAINS, isPortalDeployed, formatNumber, normalizeAmountInput, PROJECT_LINKS } from '../lib/constants';
-import { burnXen, errorMessage, P, parseMissionStarted, x1ToBytes32, xenBalanceOf } from '../lib/protocol';
+import { burnXen, errorMessage, fetchMyArtifacts, P, parseMissionStarted, x1ToBytes32, xenBalanceOf } from '../lib/protocol';
 import { EvmTxLink, Notice, Row } from './ui';
-import BurnVsSell from './ROICalculator';
+import BurnVsSell from './BurnVsSell';
 import FairValueEngine, { money } from './FairValueEngine';
-import { fetchXntUsd } from './ROICalculator';
+import { fetchXntUsd } from './BurnVsSell';
 import { countedUsd, useChainMarkets, weekCapacity } from '../lib/market';
-import { useProtocol } from '../lib/hooks';
+import { usePoll, useProtocol } from '../lib/hooks';
+import { DATED, INTERIM, NEUTRAL } from '../content/interim';
+import { LINKS, LINKS_URL } from '../lib/links';
+import { deniedDestination, inspectDestination } from '../lib/destination';
 
 /** Below this free reward pool the UI warns burners that the next epoch can pay little. */
 const LOW_POOL_XNT = 100;
@@ -61,7 +64,8 @@ export default function TheForge() {
     useEffect(() => {
         let alive = true;
         setBalance(null);
-        if (!evmAddress) return;
+        // R10: no read on a chain without a portal (its RPC would see the visitor for no function).
+        if (!evmAddress || !isPortalDeployed(chainKey)) return;
         const rpc = new ethers.JsonRpcProvider(chain.rpcUrl, chain.chainId, { staticNetwork: true });
         xenBalanceOf(rpc, chain.xenToken, evmAddress)
             .then((b) => { if (alive) setBalance(b); })
@@ -86,6 +90,9 @@ export default function TheForge() {
             x1ToBytes32(dest);
             const pk = new PublicKey(dest.trim());
             if (pk.equals(PublicKey.default)) return { ok: false, msg: 'This is the all-zero address: nobody can ever use XNT sent to it.', warn: null };
+            // R5: programs, sysvars and protocol accounts can never be credited or sign: XNT sent there is lost for good.
+            const denied = deniedDestination(pk);
+            if (denied) return { ok: false, msg: `This is ${denied}, not a wallet: XNT sent there can never be received or used. Paste your own X1 wallet address.`, warn: null };
             const warn = !PublicKey.isOnCurve(pk.toBytes())
                 ? 'This is not a regular wallet key (off-curve / program address). It could receive XNT but never sign ejects or games.'
                 : x1Address && pk.toBase58() !== x1Address
@@ -97,11 +104,29 @@ export default function TheForge() {
         }
     }, [dest, x1Address]);
 
+    // Destination holds the Artifact? (X-157) Under the current rules the boost follows the burn's X1 destination, not the person.
+    // Read once per valid destination (no interval); null while unknown, so no warning is ever shown on a failed read.
+    const destKey = destCheck.ok ? dest.trim() : null;
+    const destArtifacts = usePoll(() => (destKey ? fetchMyArtifacts(new PublicKey(destKey)).then((a) => a.length) : Promise.resolve(null)), [destKey], 0);
+    const walletArtifacts = usePoll(
+        () => (x1Address && x1Address !== destKey ? fetchMyArtifacts(new PublicKey(x1Address)).then((a) => a.length) : Promise.resolve(null)),
+        [x1Address, destKey], 0,
+    );
+    const artifactElsewhere = !!destKey && !!x1Address && x1Address !== destKey && (walletArtifacts.data ?? 0) > 0 && destArtifacts.data === 0;
+    // R5: one read-only look-up of the destination account. A program (executable) is blocked; an account owned by
+    // another program needs a second, explicit confirmation; a missing account is a fresh wallet (normal).
+    const destAcct = usePoll(() => (destKey ? inspectDestination(new PublicKey(destKey)) : Promise.resolve(null)), [destKey], 0);
+    const destKind = destKey ? destAcct.data : null;
+    const destBlocked = destKind?.kind === 'executable';
+    const destUnusual = destKind?.kind === 'owned';
+    const [destRiskAck, setDestRiskAck] = useState(false);
+    useEffect(() => setDestRiskAck(false), [destKey]);
+
     // Fair capacity: does this burn fit what this week's budget can pay at least at the value of a sale?
     const fair = useMemo(() => {
         const cap = weekCapacity(markets.rows, poolNow ? Number(poolNow.nextEpochBudget) / 1e9 : null, xntUsd, P.rateCapK);
         const r = markets.rows[chainKey];
-        if (!cap || !amountWei || r === 'loading' || !r?.market) return null;
+        if (!cap || !amountWei || typeof r !== 'object' || !r.market) return null;
         const xen = Number(ethers.formatUnits(amountWei, 18));
         const counted = countedUsd(r.market, r.burnedWeek ?? 0, xen);
         const score = counted * P.tiers[tier].multiplier;
@@ -117,7 +142,8 @@ export default function TheForge() {
     const busy = step === 'switching' || step === 'approve' || step === 'burn';
     // Fail closed: without this chain's market and the week's capacity there is no quote to check the burn against.
     const quoteMissing = amountWei !== null && !fair;
-    const canBurn = !!evmAddress && portalReady && amountWei !== null && !overBalance && destCheck.ok && ack && !!fair && (fair.fits || overAck) && !busy;
+    const destSafe = destCheck.ok && destAcct.data !== null && !destAcct.loading && !destBlocked && (!destUnusual || destRiskAck);
+    const canBurn = !!evmAddress && portalReady && amountWei !== null && !overBalance && destSafe && ack && !!fair && (fair.fits || overAck) && !busy;
 
     const handleBurn = async () => {
         if (!amountWei || !window.ethereum) return;
@@ -198,6 +224,10 @@ export default function TheForge() {
                     the budget, not extra, and are paid in XNT if Lunar Dust is sold out (next epoch: up to ≈ {formatNumber(pool.nextDropReserve / 1e9)} XNT
                     of drops). Your chance grows linearly with what you burn; a winner can recycle the Artifact for its floor at once or keep it for a
                     +5% share boost (it counts once held at two consecutive epoch snapshots), weekly lottery chips and entry to Artifact Duel and Moon Wars.
+                    <div className="mt-2 text-xs text-lunar-300">
+                        {DATED}: {NEUTRAL.oracleRules} A drop already won stays claimable for its {P.claimWindowDays}-day window; an unused reserve
+                        returns to the pool.
+                    </div>
                 </Notice>
             )}
 
@@ -219,7 +249,7 @@ export default function TheForge() {
                             </div>
                             <p className="text-sm text-lunar-300 mb-6">
                                 Next: the burn is scored in the next epoch (built weekly, at least {P.minEpochIntervalDays} days apart). When the public keeper
-                                is running it usually submits your claim (runs can be delayed); you can always claim yourself in{' '}
+                                is running it may submit your claim for you (its runs are irregular and can be hours or days late); you can always claim yourself in{' '}
                                 <Link to="/missions" className="text-forge-orange hover:underline">Mission Control</Link> within {P.claimWindowDays} days
                                 of the epoch. For Orbit / Moon Landing, vesting starts at the claim and vested XNT is withdrawn with "Withdraw vested"
                                 (the keeper does not push it).
@@ -239,19 +269,19 @@ export default function TheForge() {
                                             key={k}
                                             onClick={() => setChainKey(k)}
                                             disabled={busy}
-                                            title={ok ? c.name : `${c.name}: portal not deployed yet`}
+                                            title={ok ? c.name : `${c.name}: no portal (not supported)`}
                                             className={`p-2 rounded-xl border-2 transition-all text-center ${chainKey === k ? 'border-forge-orange bg-forge-orange/10' : 'border-white/10 hover:border-white/20'} ${ok ? '' : 'opacity-50'}`}
                                         >
                                             <div className="w-3 h-3 rounded-full mb-1 mx-auto" style={{ backgroundColor: c.color }} />
                                             <div className="text-sm font-medium">{c.shortName}</div>
-                                            <div className={`text-[10px] ${ok ? 'text-green-400' : 'text-lunar-500'}`}>{ok ? 'live' : 'not deployed'}</div>
+                                            <div className={`text-[10px] ${ok ? 'text-green-400' : 'text-lunar-500'}`}>{ok ? 'live' : 'not supported'}</div>
                                         </button>
                                     );
                                 })}
                             </div>
                             {!portalReady && (
                                 <Notice kind="warn" className="mb-4">
-                                    {chain.name}: portal not deployed yet. Burns on this chain are disabled — no transaction can be sent.
+                                    {chain.name}: no portal (not supported; none is planned by this project). Burns on this chain are disabled and no transaction can be sent.
                                 </Notice>
                             )}
                             {portalReady && wrongNetwork && (
@@ -332,6 +362,50 @@ export default function TheForge() {
                                 </div>
                                 {destCheck.msg && <p className="mt-1 text-xs text-red-400">{destCheck.msg}</p>}
                                 {destCheck.warn && <p className="mt-1 text-xs text-amber-400">{destCheck.warn}</p>}
+                                {destKey && destAcct.loading && <p className="mt-1 text-xs text-lunar-400">Checking this address on X1…</p>}
+                                {destBlocked && (
+                                    <p className="mt-1 text-xs text-red-400">
+                                        This address is a program on X1, not a wallet: it can never receive XNT or sign. Burning is disabled for this destination.
+                                    </p>
+                                )}
+                                {destUnusual && destKind?.kind === 'owned' && (
+                                    <div className="mt-2 p-2 rounded-lg border border-red-500/50 bg-red-500/5 text-xs text-red-300">
+                                        This address already exists on X1 and is owned by {destKind.ownerName ?? <span className="font-mono break-all">{destKind.owner}</span>}, not by
+                                        the System program: it is not a regular wallet (for example a token account or a program's data account). XNT credited there may be
+                                        impossible to use, and claims, ejects and games need a wallet key.
+                                        <label className="flex items-start gap-2 mt-2 cursor-pointer">
+                                            <input type="checkbox" className="mt-0.5" checked={destRiskAck} onChange={(e) => setDestRiskAck(e.target.checked)} disabled={busy} />
+                                            <span>I checked this address: it is mine and I know how to use XNT sent to it.</span>
+                                        </label>
+                                    </div>
+                                )}
+                                {destKind?.kind === 'unknown' && (
+                                    <p className="mt-1 text-xs text-amber-400">This address could not be checked on X1 right now (RPC unavailable). Make sure it is your own X1 wallet.</p>
+                                )}
+                                {artifactElsewhere && (
+                                    <p className="mt-1 text-xs text-amber-400">
+                                        Your connected X1 wallet holds {walletArtifacts.data} Artifact{walletArtifacts.data === 1 ? '' : 's'} and this destination holds none.
+                                        Under the current rules the Artifact boost counts only for burns whose destination is the wallet holding the Artifact at two
+                                        consecutive epoch snapshots: a burn sent here gets no boost.
+                                    </p>
+                                )}
+                                {destKey && destArtifacts.data !== null && destArtifacts.data > 0 && (
+                                    <p className="mt-1 text-xs text-lunar-400">This destination holds {destArtifacts.data} Artifact{destArtifacts.data === 1 ? '' : 's'}.</p>
+                                )}
+                                <ul className="mt-2 text-xs text-lunar-500 list-disc list-inside space-y-0.5">
+                                    <li>
+                                        Use an X1 wallet whose private key you hold. Never an exchange deposit address, a contract or a program address: XNT lands
+                                        there, but claims, "Withdraw vested", ejects and games need this key's signature.
+                                    </li>
+                                    <li>
+                                        The same keypair works on X1 and Solana, but X1 is its own network: a Solana wallet app must be pointed at the X1 RPC to see
+                                        the XNT, and a Solana exchange address is not yours on X1.
+                                    </li>
+                                    <li>
+                                        Your EVM address and this X1 address are linked publicly and permanently: the portal event (MissionStarted) and the epoch
+                                        file record both. Use a fresh X1 address if you do not want that link.
+                                    </li>
+                                </ul>
                             </div>
 
                             {quoteMissing && portalReady && (
@@ -347,7 +421,7 @@ export default function TheForge() {
                             {fair && (fair.fits ? (
                                 <Notice kind="success" className="mb-4">
                                     Fits this week's fair capacity ({money(fair.remainingUsd)} left). This burn counts for about {money(fair.counted)}{tierInfo.multiplier > 1 ? ` (×${tierInfo.multiplier} for ${tierInfo.name})` : ''};
-                                    at today's numbers the epoch should pay about {money(fair.estimateUsd)} in XNT, at least what selling it would return, plus a chance at a Forge Drop.
+                                    at today's numbers the epoch should pay about {money(fair.estimateUsd)} in XNT, at least what selling it would return, plus (under the current rules) a chance at a Forge Drop.
                                     It can still drop if others burn before Sunday, and other people's Orbit / Moon Landing burns weigh 2× / 3×.
                                     {' '}Gas is paid separately (two transactions: approve, then burn) and your wallet shows it before you sign: if it is more than {money(fair.estimateUsd)}, this burn costs more than it pays.
                                 </Notice>
@@ -360,16 +434,22 @@ export default function TheForge() {
                                     </div>
                                     <label className="flex items-start gap-2 mt-2 cursor-pointer">
                                         <input type="checkbox" checked={overAck} onChange={(e) => setOverAck(e.target.checked)} className="mt-1" disabled={busy} />
-                                        <span>I understand this burn is above the fair capacity and will probably earn less than selling, and I still want to burn.</span>
+                                        <span>I understand this burn is above the fair capacity and will probably pay less than selling, and I still want to burn.</span>
                                     </label>
                                 </Notice>
                             ))}
 
+                            <p className="text-xs text-lunar-500 mb-3">
+                                Privacy: {LINKS.privacy.sentence} The services that see your IP address are listed in{' '}
+                                <a className="text-forge-orange hover:underline" href={LINKS_URL} target="_blank" rel="noopener noreferrer">links.json</a>.
+                            </p>
+
                             <label className="flex items-start gap-3 mb-5 cursor-pointer text-sm text-lunar-300">
                                 <input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} className="mt-1" disabled={busy} />
                                 <span>
-                                    I understand the burn is <strong className="text-white">irreversible</strong>, the XNT amount is <strong className="text-white">not fixed and can be small</strong>{' '}
-                                    (it is my share of an epoch budget), and the X1 address above is correct.
+                                    I understand the burn is <strong className="text-white">irreversible</strong> (it cannot be used in XEN Prime or any other program and will not count in any
+                                    future snapshot), the XNT amount is <strong className="text-white">not fixed and can be small</strong> (it is my share of an epoch budget, paid only if the
+                                    oracle publishes the epoch), and the X1 address above is correct and its key is mine.
                                 </span>
                             </label>
 
@@ -408,14 +488,18 @@ export default function TheForge() {
                             <li>Each epoch budget is at most {P.epochBudgetBps / 100}% of the free reward pool, split by score (Forge Drops are part of it).</li>
                             <li>An epoch pays at most {P.tiers.map((t) => `${P.rateCapK * t.multiplier}×`).join(' / ')} the liquidity-adjusted value burned ({P.tiers.map((t) => t.name).join(' / ')}), Forge Drops included, in XNT at the epoch price. Boosts only shift shares between burners of the same epoch, never the total. Whatever is not paid stays in the pool.</li>
                             <li>Launchpad is paid at claim. Orbit and Moon Landing vest linearly from the claim; vested XNT is withdrawn with "Withdraw vested" (anyone can push it; the keeper does not). Claim within {P.claimWindowDays} days of the epoch, or the amount returns to the pool.</li>
-                            <li>When the public keeper is running it usually submits your claim (runs can be delayed); its tip ({P.keeperTip} XNT per claim of at least {P.keeperTipMinClaim} XNT) is paid by the pool, never from your amount.</li>
+                            <li>When the public keeper is running it may submit your claim for you (its runs are irregular and can be hours or days late); its tip ({P.keeperTip} XNT per claim of at least {P.keeperTipMinClaim} XNT) is paid by the pool, never from your amount.</li>
+                            <li className="text-lunar-500">
+                                {DATED}: these are the current oracle rules. They are scheduled to be replaced ({INTERIM.rulesChangeWhen}); every burn made before that
+                                date is scored under the rules of the epoch it falls in. What replaces them is published with the announcement, not before.
+                            </li>
                         </ul>
                     </div>
                     <BurnVsSell chainKey={chainKey} xenAmount={amount} tier={tier} compact />
                     <div className="glass-card text-sm text-lunar-300">
                         <div className="text-white font-medium mb-1">Once your XNT arrives</div>
-                        Keep it, or put it to work: play (part of every stake refills the burners' pool), back the house, or forge an Artifact for a bigger share of future burns.
-                        <div className="mt-2 flex flex-wrap gap-3"><Link className="text-forge-orange hover:underline" to="/games">Games</Link><Link className="text-forge-orange hover:underline" to="/artifacts">Artifacts</Link><Link className="text-forge-orange hover:underline" to="/start">How it all fits</Link></div>
+                        It is an ordinary X1 balance in your wallet: keep it, move it, or use it anywhere on X1. Nothing here needs you to do anything else with it.
+                        <div className="mt-2 flex flex-wrap gap-3"><Link className="text-forge-orange hover:underline" to="/missions">Mission Control</Link><Link className="text-forge-orange hover:underline" to="/start">How it all fits</Link></div>
                     </div>
                 </div>
             </div>

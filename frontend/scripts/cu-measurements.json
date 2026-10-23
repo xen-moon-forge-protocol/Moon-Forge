@@ -1,0 +1,400 @@
+{
+  "rpc": "https://rpc.mainnet.x1.xyz",
+  "at": "2026-10-22T13:21:53.223Z",
+  "programId": "57UE1U1t23ztg2noLp8pcpGW1B1Xw25rLH6ra9Mchea9",
+  "programDataSlot": 85429880,
+  "rows": [
+    {
+      "name": "donate",
+      "ok": true,
+      "units": 16743,
+      "err": "",
+      "detail": "",
+      "note": ""
+    },
+    {
+      "name": "system_transfer",
+      "ok": true,
+      "units": 150,
+      "err": "",
+      "detail": "",
+      "note": "fund / sweep of the Moon Wars move key"
+    },
+    {
+      "name": "open_player",
+      "ok": true,
+      "units": 13928,
+      "err": "",
+      "detail": "",
+      "note": ""
+    },
+    {
+      "name": "deposit",
+      "ok": true,
+      "units": 8566,
+      "err": "",
+      "detail": "",
+      "note": ""
+    },
+    {
+      "name": "withdraw",
+      "ok": true,
+      "units": 6140,
+      "err": "",
+      "detail": "",
+      "note": "chain wallet ix#2"
+    },
+    {
+      "name": "set_session",
+      "ok": true,
+      "units": 6143,
+      "err": "",
+      "detail": "",
+      "note": ""
+    },
+    {
+      "name": "place_bet / enter_jackpot",
+      "ok": false,
+      "units": null,
+      "err": "not measurable on mainnet now",
+      "detail": "no PlayerState holds >= 0.01 XNT",
+      "note": ""
+    },
+    {
+      "name": "enter_draw",
+      "ok": true,
+      "units": 48467,
+      "err": "",
+      "detail": "",
+      "note": "1 chip, 0 tickets; chain chips+draw ix#3"
+    },
+    {
+      "name": "forge_artifact",
+      "ok": false,
+      "units": null,
+      "err": "not measurable on mainnet now",
+      "detail": "no read-only wallet holds >= 11 XNT",
+      "note": ""
+    },
+    {
+      "name": "recycle_artifact / claim_artifact_chips / create_duel",
+      "ok": false,
+      "units": null,
+      "err": "not measurable on mainnet now",
+      "detail": "no live Artifact on mainnet",
+      "note": ""
+    },
+    {
+      "name": "claim_airdrop",
+      "ok": true,
+      "units": 80648,
+      "err": "",
+      "detail": "",
+      "note": "proof depth 9"
+    },
+    {
+      "name": "claim_instant",
+      "ok": false,
+      "units": null,
+      "err": "not measurable on mainnet now",
+      "detail": "no unclaimed tier-0 leaf in an open epoch",
+      "note": ""
+    },
+    {
+      "name": "claim_mission",
+      "ok": false,
+      "units": null,
+      "err": "not measurable on mainnet now",
+      "detail": "no unclaimed tier-1/2 leaf in an open epoch",
+      "note": ""
+    },
+    {
+      "name": "withdraw_vested / eject",
+      "ok": false,
+      "units": null,
+      "err": "not measurable on mainnet now",
+      "detail": "no open Mission account on mainnet",
+      "note": ""
+    },
+    {
+      "name": "house_deposit",
+      "ok": true,
+      "units": 30004,
+      "err": "",
+      "detail": "",
+      "note": "1 XNT; chain house1 ix#0"
+    },
+    {
+      "name": "house_request_withdraw",
+      "ok": true,
+      "units": 5650,
+      "err": "",
+      "detail": "",
+      "note": "1 XNT; chain house1 ix#1"
+    },
+    {
+      "name": "house_withdraw",
+      "ok": false,
+      "units": null,
+      "err": "not measurable on mainnet now",
+      "detail": "no HouseShare with unlocked pending shares",
+      "note": ""
+    },
+    {
+      "name": "draw_jackpot",
+      "ok": false,
+      "units": null,
+      "err": "not measurable on mainnet now",
+      "detail": "no ended, undrawn jackpot round",
+      "note": ""
+    },
+    {
+      "name": "settle_jackpot",
+      "ok": false,
+      "units": null,
+      "err": "not measurable on mainnet now",
+      "detail": "no jackpot round in the drawing state",
+      "note": ""
+    },
+    {
+      "name": "close_jackpot_entry",
+      "ok": false,
+      "units": null,
+      "err": "not measurable on mainnet now",
+      "detail": "no refunded jackpot round with entries",
+      "note": ""
+    },
+    {
+      "name": "draw_draw",
+      "ok": false,
+      "units": null,
+      "err": "not measurable on mainnet now",
+      "detail": "no ended, undrawn lottery round",
+      "note": ""
+    },
+    {
+      "name": "settle_draw",
+      "ok": false,
+      "units": null,
+      "err": "not measurable on mainnet now",
+      "detail": "no lottery round in the drawing state",
+      "note": ""
+    },
+    {
+      "name": "settle_bet",
+      "ok": false,
+      "units": null,
+      "err": "not measurable on mainnet now",
+      "detail": "no open Bet account on mainnet",
+      "note": ""
+    },
+    {
+      "name": "cancel_duel / join_duel",
+      "ok": false,
+      "units": null,
+      "err": "not measurable on mainnet now",
+      "detail": "no open duel",
+      "note": ""
+    },
+    {
+      "name": "claim_duel_timeout",
+      "ok": false,
+      "units": null,
+      "err": "not measurable on mainnet now",
+      "detail": "no joined duel past its deadline",
+      "note": ""
+    },
+    {
+      "name": "reveal_duel",
+      "ok": true,
+      "units": 32495,
+      "err": "",
+      "detail": "",
+      "note": "two fake signers; chain duel-join-reveal ix#8"
+    },
+    {
+      "name": "cancel_war",
+      "ok": false,
+      "units": null,
+      "err": "not measurable on mainnet now",
+      "detail": "no open war",
+      "note": ""
+    },
+    {
+      "name": "start_war",
+      "ok": false,
+      "units": null,
+      "err": "not measurable on mainnet now",
+      "detail": "no war in the starting state",
+      "note": ""
+    },
+    {
+      "name": "war_summon / war_attack / war_end_turn / claim_war_timeout",
+      "ok": false,
+      "units": null,
+      "err": "not measurable on mainnet now",
+      "detail": "no active war",
+      "note": ""
+    },
+    {
+      "name": "settle_war",
+      "ok": false,
+      "units": null,
+      "err": "not measurable on mainnet now",
+      "detail": "no finished, unsettled war",
+      "note": ""
+    },
+    {
+      "name": "create_war / join_war",
+      "ok": false,
+      "units": null,
+      "err": "not measurable on mainnet now",
+      "detail": "real Moon Wars creation is PAUSED on the site (owner decision)",
+      "note": ""
+    },
+    {
+      "name": "enter_prediction",
+      "ok": false,
+      "units": null,
+      "err": "not measurable on mainnet now",
+      "detail": "Predictions are off the site (owner decision)",
+      "note": ""
+    },
+    {
+      "name": "claim_prediction",
+      "ok": false,
+      "units": null,
+      "err": "not measurable on mainnet now",
+      "detail": "no PredEntry account on mainnet",
+      "note": ""
+    },
+    {
+      "name": "lock_prediction",
+      "ok": false,
+      "units": null,
+      "err": "not measurable on mainnet now",
+      "detail": "no open round past its lock time",
+      "note": ""
+    },
+    {
+      "name": "settle_prediction",
+      "ok": false,
+      "units": null,
+      "err": "not measurable on mainnet now",
+      "detail": "no locked round past its end time",
+      "note": ""
+    },
+    {
+      "name": "claim_drop / claim_drop_xnt",
+      "ok": false,
+      "units": null,
+      "err": "not measurable on mainnet now",
+      "detail": "needs a drawn, won, unclaimed Forge Drop leaf (none found by the simple scan; v2 oracle seals drops)",
+      "note": ""
+    },
+    {
+      "name": "place_bet:coinflip",
+      "ok": true,
+      "units": 39489,
+      "err": "",
+      "detail": "",
+      "note": "stake 0.01 XNT; chain place_bet:coinflip ix#2"
+    },
+    {
+      "name": "place_bet:highlow",
+      "ok": true,
+      "units": 39511,
+      "err": "",
+      "detail": "",
+      "note": "stake 0.01 XNT; chain place_bet:highlow ix#2"
+    },
+    {
+      "name": "place_bet:voidrush",
+      "ok": true,
+      "units": 39510,
+      "err": "",
+      "detail": "",
+      "note": "stake 0.01 XNT; chain place_bet:voidrush ix#2"
+    },
+    {
+      "name": "enter_jackpot",
+      "ok": true,
+      "units": 36548,
+      "err": "",
+      "detail": "",
+      "note": "opens round 0; chain jackpot ix#2"
+    },
+    {
+      "name": "forge_artifact:t0",
+      "ok": true,
+      "units": 83417,
+      "err": "",
+      "detail": "",
+      "note": "Lunar Dust serial 0; chain forge0 ix#0"
+    },
+    {
+      "name": "recycle_artifact",
+      "ok": true,
+      "units": 32679,
+      "err": "",
+      "detail": "",
+      "note": "Lunar Dust serial 0; chain forge0 ix#1"
+    },
+    {
+      "name": "forge_artifact:t1",
+      "ok": true,
+      "units": 85543,
+      "err": "",
+      "detail": "",
+      "note": "serial 0, max 26.50 XNT; chain forge1 ix#0"
+    },
+    {
+      "name": "forge_artifact:t2",
+      "ok": true,
+      "units": 90016,
+      "err": "",
+      "detail": "",
+      "note": "serial 0, max 63.60 XNT; chain forge2 ix#0"
+    },
+    {
+      "name": "forge_artifact:t3",
+      "ok": true,
+      "units": 83820,
+      "err": "",
+      "detail": "",
+      "note": "serial 0, max 212.00 XNT; chain forge3 ix#0"
+    },
+    {
+      "name": "claim_artifact_chips",
+      "ok": true,
+      "units": 21383,
+      "err": "",
+      "detail": "",
+      "note": "1 chip, 0 tickets; chain chips+draw ix#2"
+    },
+    {
+      "name": "create_duel",
+      "ok": true,
+      "units": 29359,
+      "err": "",
+      "detail": "",
+      "note": "stake 0.1 XNT; chain duel-cancel ix#3"
+    },
+    {
+      "name": "cancel_duel",
+      "ok": true,
+      "units": 10455,
+      "err": "",
+      "detail": "",
+      "note": "stake 0.1 XNT; chain duel-cancel ix#4"
+    },
+    {
+      "name": "join_duel",
+      "ok": true,
+      "units": 23260,
+      "err": "",
+      "detail": "",
+      "note": "two fake signers; chain duel-join-reveal ix#7"
+    }
+  ]
+}

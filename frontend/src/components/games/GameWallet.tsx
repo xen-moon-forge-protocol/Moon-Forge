@@ -11,7 +11,8 @@ import { useTx, useNow } from '../../lib/hooks';
 import { Row, TxStatus, Xnt } from '../ui';
 import type { GameCtx } from './types';
 
-export default function GameWallet({ ctx }: { ctx: GameCtx }) {
+/** `exitsOnly` (R1): balance and Withdraw only, for "Your balances and exits" outside the play notice (no deposit, no session key). */
+export default function GameWallet({ ctx, exitsOnly = false }: { ctx: GameCtx; exitsOnly?: boolean }) {
     const { provider, player, refresh } = ctx;
     const tx = useTx();
     const now = useNow(10_000);
@@ -47,16 +48,18 @@ export default function GameWallet({ ctx }: { ctx: GameCtx }) {
                     <div className="font-space text-xl text-white">{player ? formatNumber(Number(player.chips)) : '--'}</div>
                 </div>
             </div>
-            {!player && provider && <p className="text-xs text-lunar-400 mb-3">No game wallet yet: your first deposit creates it (a small rent deposit, which is not refundable).</p>}
+            {!player && provider && <p className="text-xs text-lunar-400 mb-3">{exitsOnly ? 'No game wallet for this X1 wallet: nothing to withdraw.' : 'No game wallet yet: your first deposit creates it (a small rent deposit, which is not refundable).'}</p>}
 
-            <div className="grid md:grid-cols-2 gap-3">
-                <div className="flex gap-2">
-                    <input className="input-forge !py-2" inputMode="decimal" placeholder="Deposit XNT" value={dep} onChange={(e) => setDep(e.target.value)} />
-                    <button className="btn-forge !px-4 !py-2 text-sm" disabled={!provider || !(depVal > 0) || !!tx.busy}
-                        onClick={() => provider && tx.run(`Depositing ${depVal} XNT`, () => deposit(provider, depVal), () => { setDep(''); refresh(); })}>
-                        Deposit
-                    </button>
-                </div>
+            <div className={exitsOnly ? 'grid gap-3' : 'grid md:grid-cols-2 gap-3'}>
+                {!exitsOnly && (
+                    <div className="flex gap-2">
+                        <input className="input-forge !py-2" inputMode="decimal" placeholder="Deposit XNT" value={dep} onChange={(e) => setDep(e.target.value)} />
+                        <button className="btn-forge !px-4 !py-2 text-sm" disabled={!provider || !(depVal > 0) || !!tx.busy}
+                            onClick={() => provider && tx.run(`Depositing ${depVal} XNT`, () => deposit(provider, depVal), () => { setDep(''); refresh(); })}>
+                            Deposit
+                        </button>
+                    </div>
+                )}
                 <div className="flex gap-2">
                     <input className="input-forge !py-2" inputMode="decimal" placeholder="Withdraw XNT" value={wd} onChange={(e) => setWd(e.target.value)} />
                     <button className="text-xs text-lunar-400 hover:text-white" disabled={balance === null} onClick={() => balance !== null && setWd((balance / 1e9).toString())}>max</button>
@@ -67,7 +70,7 @@ export default function GameWallet({ ctx }: { ctx: GameCtx }) {
                 </div>
             </div>
 
-            <div className="mt-5 pt-4 border-t border-white/10">
+            {!exitsOnly && <div className="mt-5 pt-4 border-t border-white/10">
                 <button onClick={() => setShowSession(!showSession)} className="flex items-center gap-2 text-sm text-lunar-300 hover:text-white">
                     <Bot className="w-4 h-4" /> Session key (bots) {sessionActive ? <span className="text-green-400">· active</span> : <span className="text-lunar-500">· none</span>}
                 </button>
@@ -113,7 +116,16 @@ export default function GameWallet({ ctx }: { ctx: GameCtx }) {
                         </div>
                     </div>
                 )}
-            </div>
+            </div>}
+            {exitsOnly && sessionActive && (
+                <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-lunar-400">
+                    <Bot className="w-4 h-4" /> A session key (bot) is active on this game wallet.
+                    <button className="btn-outline !px-3 !py-1 text-xs" disabled={!provider || !!tx.busy}
+                        onClick={() => provider && tx.run('Revoking session key', () => setSession(provider, PublicKey.default, 0, 0), () => refresh())}>
+                        Revoke it
+                    </button>
+                </div>
+            )}
             <TxStatus busy={tx.busy} error={tx.error} lastTx={tx.lastTx} />
         </div>
     );

@@ -13,9 +13,11 @@ import {
 import { formatDuration } from '../../lib/constants';
 import { useNow, usePoll, useTx } from '../../lib/hooks';
 import { AddrLink, Notice, TxStatus, Xnt } from '../ui';
+import KnownIssues from './KnownIssues';
 import { ELEMENTS, ELEMENT_ICONS, GameCtx } from './types';
 
-export default function DuelPanel({ ctx }: { ctx: GameCtx }) {
+/** `exitsOnly` (R1): only this wallet's own duels (cancel, reveal, timeout), no create and no join. */
+export default function DuelPanel({ ctx, exitsOnly = false }: { ctx: GameCtx; exitsOnly?: boolean }) {
     const { provider, owner, player, refresh } = ctx;
     const duels = usePoll(() => fetchOpenDuels(), [], 15_000);
     const arts = usePoll(() => (owner ? fetchMyArtifacts(owner) : Promise.resolve([])), [owner?.toBase58()], 60_000);
@@ -33,15 +35,20 @@ export default function DuelPanel({ ctx }: { ctx: GameCtx }) {
     const canCreate = !!provider && !!ticket && stakeNum >= P.duelMinStake && Math.round(stakeNum * 1e9) <= balance && !tx.busy;
 
     const reload = () => { duels.reload(); refresh(); };
-    const list = duels.data ?? [];
+    const all = duels.data ?? [];
+    const list = exitsOnly
+        ? all.filter((d: any) => !!owner && (d.account.creator.equals(owner) || (d.account.state === 1 && d.account.opponent.equals(owner))))
+        : all;
+    if (exitsOnly && list.length === 0) return null;
 
     return (
         <div className="glass-card">
             <div className="flex items-center gap-2 mb-4">
                 <Swords className="w-5 h-5 text-forge-gold" />
-                <h3 className="font-space text-lg">Artifact Duel</h3>
+                <h3 className="font-space text-lg">{exitsOnly ? 'Your open Artifact Duels' : 'Artifact Duel'}</h3>
             </div>
 
+            {!exitsOnly && <>
             {provider && arts.data && !ticket && (
                 <Notice kind="warn" className="mb-4">An Artifact (any tier) is your ticket to the arena. Forge one on the Artifacts page to create or join duels.</Notice>
             )}
@@ -93,11 +100,12 @@ export default function DuelPanel({ ctx }: { ctx: GameCtx }) {
                     </Notice>
                 </div>
             </div>
+            </>}
 
             <TxStatus busy={tx.busy} error={tx.error} lastTx={tx.lastTx} />
             {duels.error && <Notice kind="error">{duels.error}</Notice>}
 
-            <div className="text-xs text-lunar-400 mb-2 mt-4">Open and joined duels ({list.length})</div>
+            <div className="text-xs text-lunar-400 mb-2 mt-4">{exitsOnly ? `Your duels (${list.length})` : `Open and joined duels (${list.length})`}</div>
             <div className="space-y-2">
                 {duels.data && list.length === 0 && <p className="text-sm text-lunar-500">No open duels right now.</p>}
                 {list.map((d: any) => {
@@ -121,7 +129,7 @@ export default function DuelPanel({ ctx }: { ctx: GameCtx }) {
                                     : <>Joined with {ELEMENT_ICONS[a.opponentElement]} {ELEMENTS[a.opponentElement]} · {now <= deadline ? `reveal in ${formatDuration(deadline - now)}` : 'reveal deadline passed'}</>}
                             </div>
                             <div className="ml-auto flex flex-wrap gap-2 items-center">
-                                {!isMine && a.state === 0 && provider && (
+                                {!exitsOnly && !isMine && a.state === 0 && provider && (
                                     <>
                                         <select className="input-forge !py-1 !px-2 !w-auto text-xs" value={je} onChange={(e) => setJoinEl({ ...joinEl, [key]: Number(e.target.value) })}>
                                             {ELEMENTS.map((e, i) => <option key={e} value={i}>{ELEMENTS[i]}</option>)}
@@ -158,11 +166,18 @@ export default function DuelPanel({ ctx }: { ctx: GameCtx }) {
                 })}
             </div>
 
-            <p className="text-xs text-lunar-500 mt-4">
+            {!exitsOnly && <p className="text-xs text-lunar-500 mt-4">
                 The winner takes both stakes minus a {P.p2pRakePct}% rake ({P.rakeToPoolPct}% reward pool, {P.rakeToArchitectPct}% architect, {P.rakeToDrawPct}% Burn Lottery).
                 Draws are refunded in full with no rake. If the creator does not reveal within {P.duelRevealMinutes} minutes, anyone can resolve the duel and the opponent wins.
                 Resolved duels are closed on-chain, so they disappear from this list; results are credited to game balances.
-            </p>
+                Your opponent may be an automated agent: the project's kit is public, and agents can join or reveal the moment a duel appears.
+            </p>}
+            {exitsOnly && (
+                <p className="text-xs text-lunar-500 mt-3">
+                    Cancel a duel nobody joined (full refund), reveal a joined one within {P.duelRevealMinutes} minutes (or it is lost), or resolve a timed-out one.
+                </p>
+            )}
+            <KnownIssues ids={['GAM-6']} className="mt-4" />
         </div>
     );
 }

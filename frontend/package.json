@@ -1,13 +1,19 @@
 {
     "name": "moonforge-frontend",
     "version": "2.0.0",
-    "description": "Moon Forge Protocol - Burn XEN on any EVM chain, earn XNT on X1",
+    "description": "Moon Forge Protocol: burn XEN on a supported EVM chain, receive XNT on X1. Zero protocol fee on the burn path.",
     "type": "module",
     "scripts": {
         "dev": "vite",
-        "build": "tsc && vite build",
+        "build": "node scripts/check-program-id.mjs && node scripts/check-repo-links.mjs && node scripts/prerender.mjs --check && tsc && vite build && node scripts/prerender.mjs",
+        "check:program-id": "node scripts/check-program-id.mjs",
+        "check:repo-links": "node scripts/check-repo-links.mjs",
+        "measure:cu": "node scripts/measure-cu.mjs",
+        "prerender": "node scripts/prerender.mjs",
+        "prerender:check": "node scripts/prerender.mjs --check",
+        "prerender:public": "node scripts/prerender.mjs --write-public",
         "preview": "vite preview",
-        "deploy": "npm run build && cp dist/index.html dist/404.html && gh-pages -d dist"
+        "deploy": "npm run build && gh-pages -d dist"
     },
     "dependencies": {
         "@coral-xyz/anchor": "^0.32.1",

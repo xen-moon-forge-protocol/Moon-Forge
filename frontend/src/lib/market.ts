@@ -135,11 +135,18 @@ export function burnedInPublishedEpochs(): Promise<Map<number, number>> {
 
 /** `marketError`: the market could not be read (as opposed to a chain that has no eligible market). */
 export type ChainMarket = { market: XenMarketLive | null; supply: number | null; burnedWeek: number | null; stale: boolean; marketError: boolean };
+/** 'off' = a chain without a portal that was not read (comparison not requested). */
+export type ChainRow = ChainMarket | 'loading' | 'off';
 
-/** All chains' market and burn state, refreshed every `refreshMs`. A source that fails keeps its last good
- *  value, marked stale, instead of going blank. */
-export function useChainMarkets(refreshMs = 300_000) {
-    const [rows, setRows] = useState<Record<string, ChainMarket | 'loading'>>(() => Object.fromEntries(EVM_CHAINS.map((k) => [k, 'loading' as const])));
+/** True for a chain the page reads by default: only chains with a live portal (R10, data minimisation). */
+const readByDefault = (k: string) => isPortalDeployed(k);
+const initialRow = (k: string, compare: boolean): ChainRow => (readByDefault(k) || compare ? 'loading' : 'off');
+
+/** Market and burn state of the live-portal chains, refreshed every `refreshMs`. A source that fails keeps its last
+ *  good value, marked stale, instead of going blank. Chains without a portal (Ethereum, PulseChain) are read only when
+ *  `compare` is true, that is after an explicit click: otherwise their RPCs and markets are never contacted. */
+export function useChainMarkets(refreshMs = 300_000, compare = false) {
+    const [rows, setRows] = useState<Record<string, ChainRow>>(() => Object.fromEntries(EVM_CHAINS.map((k) => [k, initialRow(k, compare)])));
     const [updatedAt, setUpdatedAt] = useState<number | null>(null);
     const [tick, setTick] = useState(0);
     useEffect(() => {
@@ -147,10 +154,14 @@ export function useChainMarkets(refreshMs = 300_000) {
         return () => clearInterval(id);
     }, [refreshMs]);
     useEffect(() => {
+        setRows((prev) => Object.fromEntries(EVM_CHAINS.map((k) => [k, readByDefault(k) ? prev[k] : (compare ? (prev[k] === 'off' ? 'loading' : prev[k]) : 'off')])));
+    }, [compare]);
+    useEffect(() => {
         let alive = true;
         (async () => {
             const counted = await burnedInPublishedEpochs().catch(() => new Map<number, number>());
             for (const k of EVM_CHAINS) {
+                if (!readByDefault(k) && !compare) continue;
                 const [m, state] = await Promise.all([
                     xenMarketLive(k).then((market) => ({ market, err: false }), () => ({ market: null, err: true })),
                     chainBurnState(k).catch(() => ({ supply: null, burnedAllTime: null })),
@@ -159,14 +170,15 @@ export function useChainMarkets(refreshMs = 300_000) {
                 const burnedWeek = state.burnedAllTime === null ? null : Math.max(0, state.burnedAllTime - (counted.get(CHAINS[k].chainId) ?? 0));
                 setRows((prev) => {
                     const old = prev[k];
-                    if (m.err && old !== 'loading' && old.market) return { ...prev, [k]: { ...old, stale: true } };
-                    return { ...prev, [k]: { market: m.market, supply: state.supply ?? (old !== 'loading' ? old.supply : null), burnedWeek, stale: false, marketError: m.err } };
+                    const oldRow = typeof old === 'object' ? old : null;
+                    if (m.err && oldRow?.market) return { ...prev, [k]: { ...oldRow, stale: true } };
+                    return { ...prev, [k]: { market: m.market, supply: state.supply ?? oldRow?.supply ?? null, burnedWeek, stale: false, marketError: m.err } };
                 });
             }
             if (alive) setUpdatedAt(Date.now());
         })();
         return () => { alive = false; };
-    }, [tick]);
+    }, [tick, compare]);
     const refresh = () => { invalidateMarketCache(); setTick((t) => t + 1); };
     return { rows, updatedAt, refresh };
 }
@@ -186,7 +198,7 @@ export function countedUsd(m: XenMarketLive, burnedWeekXen: number, xen: number)
  * Approximate before the epoch: other people's tiers (Orbit / Moon Landing count 2× / 3×) and the burn-hour
  * prices are known only when it is built, so other burns are counted at 1× here.
  */
-export function weekCapacity(rows: Record<string, ChainMarket | 'loading'>, budgetXnt: number | null, xntUsd: number | null, rateCapK: number) {
+export function weekCapacity(rows: Record<string, ChainRow>, budgetXnt: number | null, xntUsd: number | null, rateCapK: number) {
     if (budgetXnt === null || !xntUsd) return null;
     let counted = 0;
     for (const k of EVM_CHAINS) {
@@ -194,7 +206,7 @@ export function weekCapacity(rows: Record<string, ChainMarket | 'loading'>, budg
         const r = rows[k];
         // Unknown until every live chain is read: a burn on a chain whose market failed to load would
         // otherwise count as $0 and overstate what is left.
-        if (r === 'loading' || r.burnedWeek === null) return null;
+        if (r === 'loading' || r === 'off' || r.burnedWeek === null) return null;
         if (!r.burnedWeek) continue;
         if (!r.market) {
             if (r.marketError) return null;

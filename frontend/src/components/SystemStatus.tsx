@@ -8,6 +8,7 @@ import { Link } from 'react-router-dom';
 import { usePoll, useProtocol } from '../lib/hooks';
 import { readConnection, X1_RPC } from '../lib/protocol';
 import { formatNumber } from '../lib/constants';
+import { LINKS_URL, MAILBOX, PUBLIC_PLACES } from '../lib/links';
 import { AddrLink } from './ui';
 
 export default function SystemStatus() {
@@ -57,9 +58,12 @@ export default function SystemStatus() {
                         </div>
                     </div>
                     <div className="container mx-auto max-w-4xl mt-3 flex flex-wrap gap-x-5 gap-y-1 text-xs text-lunar-400">
-                        <a href="https://x.com/MoonXenForge" target="_blank" rel="noopener noreferrer" className="hover:text-forge-orange">X: @MoonXenForge</a>
-                        <a href="https://github.com/xen-moon-forge-protocol/Moon-Forge" target="_blank" rel="noopener noreferrer" className="hover:text-forge-orange">GitHub</a>
-                        <span>Contact: xen-moon-forge-protocol@tutamail.com</span>
+                        {PUBLIC_PLACES.map((l) => (
+                            <a key={l.id} href={l.url} target="_blank" rel="noopener noreferrer" className="hover:text-forge-orange">{l.label}{l.handle ? `: ${l.handle}` : ''}</a>
+                        ))}
+                        <span>Contact: {MAILBOX}</span>
+                        <a href={`${import.meta.env.BASE_URL}.well-known/security.txt`} target="_blank" rel="noopener noreferrer" className="hover:text-forge-orange">Security: /.well-known/security.txt</a>
+                        <a href={LINKS_URL} target="_blank" rel="noopener noreferrer" className="hover:text-forge-orange">Official links: links.json</a>
                     </div>
                 </div>
             )}

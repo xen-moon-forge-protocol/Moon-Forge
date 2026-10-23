@@ -3,9 +3,12 @@
  * Single NFT page (also served at /nft and /marketplace).
  */
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { PublicKey } from '@solana/web3.js';
 import { Gem, Recycle, Ticket, Gift, Store } from 'lucide-react';
 import { useWallet } from '../context/WalletContext';
+import { DATED, INTERIM, NEUTRAL } from '../content/interim';
+import { PROJECT_LINKS } from '../lib/constants';
 import { useNow, usePoll, useProtocol, useTx } from '../lib/hooks';
 import {
     AIRDROP_DEADLINE, AIRDROP_MAX, ARTIFACTS, artifactPrice, claimAirdrop, DYNAMIC_PRICE, nextArtifactPrice, claimArtifactChips, fetchArtifactsReady, fetchMyArtifacts, forgeArtifact, FORGE_SPLIT,
@@ -42,7 +45,9 @@ export default function ArtifactsPage() {
     const minted: number[] | null = cfg ? (cfg.artifactsMinted as number[]).map(Number) : null;
     const currentWeek = Math.floor(now / WEEK_SECONDS);
     const provider = x1Connected ? x1Provider : null;
-    const canForge = !!provider && !!cfg && ready.data === true;
+    // T3-21: forging and the Genesis claim are paused on this site until the final upgrade; recycling and chips stay open.
+    const canForge = !INTERIM.forgePaused && !!provider && !!cfg && ready.data === true;
+    const claimPaused = INTERIM.genesisClaimPaused;
 
     const reload = () => { proto.reload(); mine.reload(); };
 
@@ -51,21 +56,44 @@ export default function ArtifactsPage() {
             <div className="text-center mb-8">
                 <h1 className="font-space text-4xl font-bold mb-2"><Gem className="inline w-8 h-8 text-forge-gold mr-2" />Artifacts</h1>
                 <p className="text-lunar-400 max-w-3xl mx-auto">
-                    Metaplex Core NFTs minted by the Moon Forge program. Each one can boost its holder's burn score, grants weekly lottery chips,
+                    Metaplex Core NFTs minted by the Moon Forge program. Under the current rules each one can boost its holder's burn score, grants weekly lottery chips,
                     is a ticket to the Artifact Duel and Moon Wars arenas, and may hold an XNT floor you get back when you recycle it (forged: half of the price paid;
                     Lunar Dust from a Forge Drop: the drop value, ≥ {P.dropBackingXnt} XNT; Genesis airdrop: none).
                     Lunar Dust has a fixed price of {ARTIFACTS[0].price} XNT; the rarer tiers rise 5% with every forge and fall ÷1.05 (−4.76%) for every full week
-                    without a forge, never below the base price and never above 100× base.
+                    without a forge, never below the base price and never above 100× base. These rules are being replaced: see the notice below.
                 </p>
             </div>
 
             {proto.error && <Notice kind="warn" className="mb-4">Live data unavailable: {proto.error}</Notice>}
+            {(INTERIM.forgePaused || INTERIM.genesisClaimPaused) && (
+                <Notice kind="warn" className="mb-4">
+                    <div className="font-bold text-white mb-1">Forging and the Genesis claim are paused on this site until the final program upgrade ({DATED})</div>
+                    <ul className="list-disc list-inside space-y-1">
+                        <li>
+                            The current Artifact rules (boost, weekly chips, arena ticket, the {FORGE_SPLIT.floorPct}/{FORGE_SPLIT.poolPct}/{FORGE_SPLIT.drawPct}/{FORGE_SPLIT.architectPct} split and the
+                            rising price) are being replaced. Artifacts reopen on this site after the final upgrade, {INTERIM.upgradeWhen}. Until then this page
+                            shows the live program as it is: nothing about the new rules is final before that changelog.
+                        </li>
+                        <li>
+                            The program is permissionless, so a script can still forge under the current rules without this site. An Artifact forged before the
+                            upgrade keeps its floor (recyclable at any time), but the rules that replace the current ones are written for Artifacts forged after it,
+                            and its on-chain attribute texts may be refreshed by the upgrade.
+                        </li>
+                        <li>Recycling and the weekly chips claim keep working here. Genesis: see the notice in the Genesis card below.</li>
+                    </ul>
+                    <div className="mt-2 text-xs">
+                        Current rules: <Link to="/whitepaper" className="underline">Whitepaper</Link> ·{' '}
+                        <a href={`${PROJECT_LINKS.github}/blob/main/docs/NFT.md`} target="_blank" rel="noopener noreferrer" className="underline">docs/NFT.md</a>.
+                        The upgrade notice will be linked here when it is published.
+                    </div>
+                </Notice>
+            )}
             {cfg && ready.data === false && (
                 <Notice kind="warn" className="mb-4">The Artifacts collection has not been created on X1 yet (permissionless <code>init_artifacts</code>). Forging opens once it exists.</Notice>
             )}
             {!x1Connected && (
                 <div className="glass-card text-center mb-6">
-                    <p className="text-lunar-300 mb-3">Connect your X1 wallet to forge, claim chips or recycle.</p>
+                    <p className="text-lunar-300 mb-3">{INTERIM.forgePaused ? 'Connect your X1 wallet to claim chips or recycle (forging is paused on this site).' : 'Connect your X1 wallet to forge, claim chips or recycle.'}</p>
                     <button onClick={connectX1} disabled={isConnecting} className="btn-forge">{isConnecting ? 'Connecting…' : 'Connect X1 Wallet'}</button>
                 </div>
             )}
@@ -99,9 +127,11 @@ export default function ArtifactsPage() {
                                 <Row label="Arena ticket">Artifact Duel (element chosen freely) and Moon Wars real matches</Row>
                             </div>
                             <button className="btn-forge w-full mt-3 !py-2" disabled={!canForge || soldOut || !!tx.busy}
-                                onClick={() => provider && tx.run(`Forging ${a.name} for at most ${fmt(price)} XNT`, () => forgeArtifact(provider, a.tier, priceL), reload)}>
-                                {soldOut ? 'All alive — recycle frees slots' : `Forge for ${fmt(price)} XNT`}
+                                title={INTERIM.forgePaused ? `Paused on this site until the final upgrade (${DATED})` : undefined}
+                                onClick={() => canForge && provider && tx.run(`Forging ${a.name} for at most ${fmt(price)} XNT`, () => forgeArtifact(provider, a.tier, priceL), reload)}>
+                                {INTERIM.forgePaused ? 'Forging paused until the final upgrade' : soldOut ? 'All alive — recycle frees slots' : `Forge for ${fmt(price)} XNT`}
                             </button>
+                            {INTERIM.forgePaused && <p className="text-[11px] text-lunar-500 mt-1">Boost, chips and ticket shown are the current rules ({DATED}; see the notice above).</p>}
                         </div>
                     );
                 })}
@@ -132,6 +162,10 @@ export default function ArtifactsPage() {
                     The boost only shifts shares between burners of the same epoch: it never raises the epoch total, and a burner alone gains nothing from it.
                     It counts only for an Artifact held by the same owner at both the previous and the current epoch snapshot (no flash forging or renting for
                     the snapshot), and only the best one per wallet counts.
+                </p>
+                <p className="text-xs text-lunar-500 mt-2">
+                    {DATED}: this is the split of the live program and the boost of the current oracle. {NEUTRAL.oracleRules} The split is a program
+                    rule and applies until the final upgrade ({INTERIM.upgradeWhen}). {NEUTRAL.programRules}
                 </p>
             </div>
 
@@ -167,7 +201,8 @@ export default function ArtifactsPage() {
                                         {confirmRecycle === key && (
                                             <div className="mt-2 p-2 rounded-lg border border-amber-500/40 bg-amber-500/5 text-xs">
                                                 Burns this NFT and returns its floor <strong><Xnt lamports={m.backing} /></strong> plus the record's rent to your wallet.
-                                                You lose its boost, weekly chips and arena ticket.
+                                                You lose its boost, weekly chips and arena ticket (the current rules, until they are replaced).
+                                                {m.origin === 1 && <> A Genesis Lunar Dust has no floor: recycling it returns only the record's rent.</>}
                                                 <div className="flex gap-2 mt-2">
                                                     <button className="px-3 py-1 rounded-lg bg-amber-500 text-space-900 font-bold" disabled={!!tx.busy}
                                                         onClick={() => provider && tx.run('Recycling', () => recycleArtifact(provider, m.asset), () => { setConfirmRecycle(null); reload(); })}>
@@ -197,11 +232,30 @@ export default function ArtifactsPage() {
                     </p>
                     <Row label="List published on-chain">{cfg ? (cfg.airdropRootSet ? 'yes' : 'not yet') : '--'}</Row>
                     <Row label="Claimed">{cfg ? `${Number(cfg.airdropClaimed)} / ${AIRDROP_MAX}` : '--'}</Row>
-                    <Row label="Claims close">{Date.now() / 1000 < AIRDROP_DEADLINE ? '31 Dec 2026 (00:00 UTC on 1 Jan 2027)' : 'closed'}</Row>
+                    <Row label="Claims close">{Date.now() / 1000 < AIRDROP_DEADLINE ? '31 Dec 2026 (00:00 UTC on 1 Jan 2027) on the live program' : 'closed'}</Row>
                     <Row label="Your connected X1 wallet">{!owner ? 'connect to check' : airdropList.data ? (airdropList.data.includes(owner.toBase58()) ? <span className="text-green-400">on the list</span> : 'not on the list') : '--'}</Row>
-                    <button className="btn-forge w-full mt-3 !py-2" disabled={!provider || !cfg?.airdropRootSet || ready.data !== true || Date.now() / 1000 >= AIRDROP_DEADLINE || !!tx.busy}
-                        onClick={() => provider && tx.run('Claiming the Genesis airdrop', () => claimAirdrop(provider), reload)}>
-                        Claim my Genesis Lunar Dust
+                    <Notice kind="warn" className="mt-3">
+                        <div className="font-bold text-white mb-1">Genesis notice ({DATED}), read before claiming</div>
+                        <ul className="list-disc list-inside space-y-1 text-xs">
+                            <li>
+                                The claim is paused on this site until the final program upgrade ({INTERIM.upgradeWhen}). {NEUTRAL.genesisDeadline} If the
+                                upgrade does not happen, the live deadline stands.
+                            </li>
+                            <li>
+                                What a Genesis Lunar Dust is after the upgrade: a free collectible with a cosmetic badge. No floor, no rebate, no burn boost,
+                                no chips, no ticket, and it is not needed to play any game. Recycling it returns only the record's rent. (This bullet is about
+                                Genesis Lunar Dust only; for every other Artifact see the notice at the top.)
+                            </li>
+                            <li>
+                                This page is the only Genesis claim, and the claimant must be the listed withdraw authority itself. Moon Forge never messages,
+                                e-mails or DMs anyone about Genesis, and never asks for a seed phrase or key: any "Genesis claim" link sent to you is a scam.
+                            </li>
+                        </ul>
+                    </Notice>
+                    <button className="btn-forge w-full mt-3 !py-2" disabled={claimPaused || !provider || !cfg?.airdropRootSet || ready.data !== true || Date.now() / 1000 >= AIRDROP_DEADLINE || !!tx.busy}
+                        title={claimPaused ? `Paused on this site until the final upgrade (${DATED})` : undefined}
+                        onClick={() => !claimPaused && provider && tx.run('Claiming the Genesis airdrop', () => claimAirdrop(provider), reload)}>
+                        {claimPaused ? 'Genesis claim paused until the final upgrade' : 'Claim my Genesis Lunar Dust'}
                     </button>
                 </div>
                 <div className="glass-card">
@@ -215,7 +269,9 @@ export default function ArtifactsPage() {
                     <p className="text-xs text-lunar-500 mt-2">
                         Weekly chips follow the current holder: one claim per Artifact per week (1 chip = the weight of one {P.ticketPrice}-XNT lottery ticket); weeks reset
                         on Thursdays 00:00 UTC and missed weeks do not accumulate. The burn boost needs the same owner at two consecutive epoch snapshots, so a newly
-                        bought Artifact boosts from its second snapshot on.
+                        bought Artifact boosts from its second snapshot on. Both are current rules ({DATED}): the boost is an oracle rule and the weekly chips a
+                        program rule, both scheduled to be replaced (see the notice at the top); what replaces them is published with the announcement and the
+                        upgrade changelog, not before. Do not buy an Artifact counting on its boost, chips or ticket lasting.
                     </p>
                 </div>
             </div>

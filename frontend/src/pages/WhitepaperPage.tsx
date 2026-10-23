@@ -6,6 +6,7 @@ import { Link } from 'react-router-dom';
 import { BookOpen, ExternalLink } from 'lucide-react';
 import { AIRDROP_MAX, ARTIFACTS, FORGE_SPLIT, P, SECONDARY_ROYALTY_PCT } from '../lib/protocol';
 import { PROJECT_LINKS } from '../lib/constants';
+import { INTERIM } from '../content/interim';
 
 function Section({ n, title, children }: { n: number; title: string; children: ReactNode }) {
     return (
@@ -39,8 +40,8 @@ export default function WhitepaperPage() {
             <Section n={2} title="Flow">
                 <ol className="list-decimal list-inside space-y-1">
                     <li><strong className="text-white">Burn</strong> on an EVM chain through MoonForgePortal v2 (live on Base, Optimism, Polygon, BSC and Avalanche; no owner, fee, pause or upgrade). XEN's own burn runs; the portal emits MissionStarted with your tier and 32-byte X1 key.</li>
-                    <li><strong className="text-white">Epoch</strong> (weekly, Sundays 00:00 UTC; the program requires ≥ {P.minEpochIntervalDays} days between epochs): the oracle reads final burns, values them, builds a Merkle tree and publishes epoch-N.json, the root and the rate cap on X1. The program computes the budget.</li>
-                    <li><strong className="text-white">Claim</strong>: permissionless. When the keeper is running it usually submits every claim for you (Launchpad pays at once; an Orbit / Moon Landing claim opens the vesting mission); XNT always goes to the key in the leaf. Vesting starts when the leaf is claimed; vested XNT is not pushed automatically: use "Withdraw vested" (anyone can push it).</li>
+                    <li><strong className="text-white">Epoch</strong> (weekly, at least {P.minEpochIntervalDays} days after the previous epoch; scheduled Sunday 00:00 UTC and often later; weeks without burns publish nothing): the oracle reads final burns, values them, builds a Merkle tree and publishes epoch-N.json, the root and the rate cap on X1. The program computes the budget.</li>
+                    <li><strong className="text-white">Claim</strong>: permissionless. The public keeper may submit claims for you (its runs are irregular; Launchpad pays at once; an Orbit / Moon Landing claim opens the vesting mission); XNT always goes to the key in the leaf. Vesting starts when the leaf is claimed; vested XNT is not pushed automatically: use "Withdraw vested" (anyone can push it).</li>
                 </ol>
             </Section>
 
@@ -110,7 +111,7 @@ share        = score × budget / total_score               (Forge Drops included
                         unclaimed or expired epoch budgets, cancelled Forge Drops, expired lottery prizes, orphan-Artifact floors, the v1 sweep, and the architect's cut while its
                         wallet is below rent exemption. Outflows: epoch claims, Forge Drops and keeper tips.
                     </li>
-                    <li>No token, no inflation, no promised return. If nobody funds the pool, burns earn nothing — the live pool is shown before you burn.</li>
+                    <li>No token, no inflation, no promised return. If nobody funds the pool, burns pay nothing — the live pool is shown before you burn.</li>
                 </ul>
             </Section>
 
@@ -118,7 +119,7 @@ share        = score × budget / total_score               (Forge Drops included
                 <p>
                     All XNT games are instructions of the program. A bet locks the stake and commits to the next slot; settlement (anyone can do it) computes
                     <code className="text-forge-orange"> keccak("MOONFORGE_RNG" ‖ slotHash ‖ bet ‖ seed) mod 10000</code>. The result is not known to the player or the protocol
-                    when the stake is locked (the block producer of that slot could in theory influence it). A bet not settled within ~3 minutes counts as lost even if its
+                    when the stake is locked (the block producer of that slot can influence it). A bet not settled within ~3 minutes counts as lost even if its
                     roll was a win (the site settles immediately; the keeper is a safety net), so nobody can skip a bad result.
                 </p>
                 <ul className="list-disc list-inside space-y-1">
@@ -216,7 +217,7 @@ share        = score × budget / total_score               (Forge Drops included
                         {' '}{P.epochBudgetBps / 100}% of the free pool and by total_score × rate_cap, at least {P.minEpochIntervalDays} days apart, with every input published and
                         hash-committed so anyone can recompute it. A dishonest oracle could still direct up to that budget to false burns; the verifier would show the mismatch.
                     </li>
-                    <li><strong className="text-white">Upgrade authority</strong>: held by the architect wallet during the public test period, to be burned afterwards. Until then it can replace the program code. Its live value is on the Transparency page.</li>
+                    <li><strong className="text-white">Upgrade authority</strong>: held by the architect wallet during the public test period; to be burned {INTERIM.freezeWhen}. Until then it can replace the program code. Its live value is on the Transparency page.</li>
                     <li><strong className="text-white">Keeper</strong>: permissionless; anyone can run it; it only triggers outcomes already determined. Runs can be delayed.</li>
                     <li><strong className="text-white">Architect key</strong>: its only privileged program action is setting the airdrop root once.</li>
                     <li><strong className="text-white">Session keys</strong>: house games only; they can never withdraw or enter Jackpot, Burn Lottery, Duels, Moon Wars or Predictions.</li>
@@ -232,7 +233,7 @@ share        = score × budget / total_score               (Forge Drops included
                         Smart-contract bugs: the code is open and was tested locally (unit tests, integration against the real Metaplex Core, a randomized solvency stress test,
                         internal adversarial reviews that are not independent), but there has been no third-party audit. The program is upgradeable during the test period.
                     </li>
-                    <li>The block producer of a bet's slot could in theory influence its result (each bet can win at most {P.maxExposurePct}% of the free bankroll). Be the House deposits can lose value when players win. XNT is volatile.</li>
+                    <li>The block producer of a bet's slot can influence its result (each bet can win at most {P.maxExposurePct}% of the free bankroll). Be the House deposits can lose value when players win. XNT is volatile.</li>
                 </ul>
             </Section>
         </div>

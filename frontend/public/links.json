@@ -1,0 +1,57 @@
+{
+  "version": 1,
+  "updated": "2026-10-22",
+  "site": "https://xen-moon-forge-protocol.github.io/Moon-Forge/",
+  "official": [
+    { "id": "site", "label": "Site", "url": "https://xen-moon-forge-protocol.github.io/Moon-Forge/", "note": "The only place to burn, claim, forge or play. Check the address bar: xen-moon-forge-protocol.github.io/Moon-Forge/." },
+    { "id": "github", "label": "GitHub", "url": "https://github.com/xen-moon-forge-protocol/Moon-Forge", "note": "Source code, documents, epoch files, releases, issues." },
+    { "id": "x", "label": "X", "url": "https://x.com/MoonXenForge", "handle": "@MoonXenForge", "note": "Announcements only. The account never sends DMs first." },
+    { "id": "mailbox", "label": "Project mailbox", "url": "mailto:xen-moon-forge-protocol@tutamail.com", "note": "Security and support only; this is also the private channel for vulnerability reports (see /.well-known/security.txt). Nobody writes to you first from this address." }
+  ],
+  "securityTxt": {
+    "url": "https://xen-moon-forge-protocol.github.io/Moon-Forge/.well-known/security.txt",
+    "note": "The site is a GitHub project page, so the RFC 9116 root location (https://xen-moon-forge-protocol.github.io/.well-known/security.txt) is not available to it; the file lives under the site path above."
+  },
+  "pending": [
+    { "id": "security-advisories", "label": "GitHub private vulnerability reporting", "url": null, "note": "Not enabled on the repository yet. Until it is listed under official, send vulnerability reports to the project mailbox only." },
+    { "id": "telegram", "label": "Telegram announcement channel", "url": null, "note": "Not decided yet. Until a channel is listed here, no Telegram channel or group is official." }
+  ],
+  "notOfficial": "No group, chat, forum, DM or e-mail is official. Nobody from Moon Forge contacts you first. Anything not listed here is not Moon Forge, even when it uses the name, the images or looks like this site.",
+  "never": [
+    "Message you first, or ask for a seed phrase, a private key or a wallet connection outside this site.",
+    "Sell a token, a presale or a \"whitelist\": Moon Forge has no token.",
+    "Promise payouts, price targets or any outcome.",
+    "Rush you with a countdown, a \"last chance\" or a private deadline: every rule change is announced on this site, ahead of time, with its date.",
+    "Announce a new program ID, a migration, a token, a claim site, or ask for an approval to any address other than the portals and program listed under \"verify\": not even when the post comes from our own accounts.",
+    "Contact you about the Genesis airdrop: the only claim is the Artifacts page of this site, until its deadline.",
+    "Ask you to link a wallet, sign a message or pay a fee to \"claim old burns\": old burns are not counted.",
+    "Pay anyone to promote Moon Forge, or post about it as someone else."
+  ],
+  "verify": {
+    "note": "The four facts that identify the real Moon Forge. Compare them on the Transparency page, in the repository README and in the wallet before signing.",
+    "site": "https://xen-moon-forge-protocol.github.io/Moon-Forge/",
+    "github": "https://github.com/xen-moon-forge-protocol/Moon-Forge",
+    "programId": "57UE1U1t23ztg2noLp8pcpGW1B1Xw25rLH6ra9Mchea9",
+    "programExplorer": "https://explorer.mainnet.x1.xyz/address/57UE1U1t23ztg2noLp8pcpGW1B1Xw25rLH6ra9Mchea9",
+    "collection": "7Re1n5DsnvyJnDTiaaZZ1f9G9REPRwb2Br7SYVYCfpzK",
+    "portal": "0x7b00f314aB48D223bee567181CA89c65126Bf6E9",
+    "portalChains": ["base", "optimism", "polygon", "bsc", "avalanche"],
+    "release": "program-2026-10-12",
+    "releaseUrl": "https://github.com/xen-moon-forge-protocol/Moon-Forge/releases/tag/program-2026-10-12"
+  },
+  "privacy": {
+    "sentence": "A burn links your EVM address and your X1 address in a public, permanent on-chain record. This site keeps no accounts, cookies, analytics or logs; the services it reads from see your IP address and, for wallet reads, the address you connect.",
+    "thirdParties": [
+      { "name": "GitHub Pages", "hosts": ["xen-moon-forge-protocol.github.io"], "sees": "IP address, pages loaded", "when": "always (hosts the site, the epoch files and this list)" },
+      { "name": "X1 RPC", "hosts": ["rpc.mainnet.x1.xyz"], "sees": "IP address, the X1 address you connect, the transactions you send", "when": "every page that reads the program; every X1 transaction" },
+      { "name": "EVM RPCs", "hosts": ["mainnet.base.org", "optimism-rpc.publicnode.com", "polygon-bor-rpc.publicnode.com", "bsc-dataseed.binance.org", "api.avax.network"], "sees": "IP address; for a burn, also the EVM address you connect and the burn you send", "when": "XEN supply and portal totals of the five live portal chains on Start, The Forge and Transparency; the burn on the chain you select" },
+      { "name": "Ethereum and PulseChain RPCs", "hosts": ["ethereum-rpc.publicnode.com", "rpc.pulsechain.com"], "sees": "IP address", "when": "only after you click \"Compare with Ethereum and PulseChain\" in the chain-weights table (no portal on either chain)" },
+      { "name": "GeckoTerminal", "hosts": ["api.geckoterminal.com"], "sees": "IP address", "when": "XEN market prices on Start, The Forge and Transparency (attribution shown there)" },
+      { "name": "x1report", "hosts": ["x1report.com"], "sees": "IP address", "when": "the XNT price on Start, The Forge and Transparency" },
+      { "name": "Block explorers and Sourcify", "hosts": ["explorer.mainnet.x1.xyz", "basescan.org", "optimistic.etherscan.io", "polygonscan.com", "bscscan.com", "snowtrace.io", "repo.sourcify.dev"], "sees": "IP address and the address or transaction you open", "when": "only when you click an explorer or verified-source link" },
+      { "name": "Your wallet extension", "hosts": [], "sees": "whatever its own privacy policy says", "when": "when you connect" }
+    ]
+  },
+  "signature": null,
+  "signatureNote": "Signed with the architect vault authority key from the final upgrade on; until then verify this file against the repository copy."
+}

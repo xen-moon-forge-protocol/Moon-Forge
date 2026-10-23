@@ -31,6 +31,7 @@ function App() {
                     <Routes>
                         <Route path="/" element={<Home />} />
                         <Route path="/start" element={<StartPage />} />
+                        <Route path="/faq" element={<StartPage />} />
                         <Route path="/forge" element={<TheForge />} />
                         <Route path="/missions" element={<MissionControl />} />
                         <Route path="/artifacts" element={<ArtifactsPage />} />
@@ -90,7 +91,7 @@ function Home() {
             </section>
 
             <Notice kind="info" className="mb-6">
-                Launch status: the X1 program v2 is live; portals are live on Base, Optimism, Polygon, BSC and Avalanche. Epochs are built weekly (Sundays 00:00 UTC). The figures below are read live from X1.
+                Launch status: the X1 program v2 is live; portals are live on Base, Optimism, Polygon, BSC and Avalanche. Epochs are published weekly, at least 6 days after the previous one (the cron often fires late); weeks without burns publish nothing. The figures below are read live from X1.
             </Notice>
             {error && <Notice kind="warn" className="mb-6">Could not read X1 right now ({error}). Values show "--" until the RPC answers.</Notice>}
             {data && !data.initialized && (
@@ -136,7 +137,7 @@ function Home() {
             {/* Tiers */}
             <section className="py-10">
                 <h2 className="font-space text-3xl text-center mb-2">Choose your <span className="text-forge-gold">mission</span></h2>
-                <p className="text-center text-lunar-400 text-sm mb-8">The tier multiplies your score. Longer vesting = bigger share of each epoch.</p>
+                <p className="text-center text-lunar-400 text-sm mb-8">The tier multiplies your score inside the same epoch budget; the total never grows.</p>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                     {P.tiers.map((t) => (
                         <div key={t.id} className={`glass-card ${t.id === 2 ? 'border-forge-gold glow-gold' : ''}`}>
@@ -166,7 +167,7 @@ function Home() {
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
                     <StepCard step={1} title="Burn XEN" description="On Base, Optimism, Polygon, BSC or Avalanche, through MoonForgePortal v2. The burn records your X1 address and tier." />
                     <StepCard step={2} title="Epoch on X1" description={`The oracle publishes a Merkle root weekly (the program requires ≥ ${P.minEpochIntervalDays} days between epochs). The program caps the budget at ${P.epochBudgetBps / 100}% of the free pool and at the epoch rate cap.`} />
-                    <StepCard step={3} title="Claim" description={`Claims are permissionless. When the keeper is running it usually submits them for you (${P.keeperTip} XNT tip per claim of ≥ ${P.keeperTipMinClaim} XNT, paid by the pool, never by you). You can always claim yourself.`} />
+                    <StepCard step={3} title="Claim" description={`Claims are permissionless. The public keeper may submit them for you (its runs are irregular; ${P.keeperTip} XNT tip per claim of ≥ ${P.keeperTipMinClaim} XNT, paid by the pool, never by you). Claim yourself on Missions if it has not.`} />
                     <StepCard step={4} title="Receive XNT" description='Launchpad is paid at claim. Orbit / Moon Landing vest linearly from the claim; vested XNT is not pushed automatically: use "Withdraw vested" whenever you like.' />
                 </div>
             </section>
@@ -181,7 +182,7 @@ function Home() {
                             <p className="text-lunar-400">No fee on burns, claims, vesting or withdrawals. Your payout is your share of the epoch budget.</p>
                         </div>
                         <div>
-                            <p className="text-forge-gold font-bold mb-2">The architect earns only from optional activity:</p>
+                            <p className="text-forge-gold font-bold mb-2">The architect receives only the disclosed cuts, from optional activity:</p>
                             <ul className="text-lunar-400 space-y-1 list-disc list-inside">
                                 <li>{P.edgeToArchitectPct}% of house-game stakes (part of the {P.houseEdgePct}% edge)</li>
                                 <li>{P.rakeToArchitectPct}% of Jackpot / Duel / Moon Wars / Predictions pots when someone wins, and of every lottery ticket (part of the {P.p2pRakePct}% rake)</li>

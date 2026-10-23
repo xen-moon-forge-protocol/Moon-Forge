@@ -9,10 +9,13 @@ import { CheckCircle2, AlertTriangle, XCircle, ShieldCheck, Compass } from 'luci
 import { usePoll, useNow, useProtocol } from '../lib/hooks';
 import { ARCHITECT, fetchUpgradeAuthority, FORGE_SPLIT, P, PDA, PROGRAM_ID, explorerAddress, toXnt } from '../lib/protocol';
 import { CHAINS, EVM_CHAINS, isPortalDeployed, PROJECT_LINKS, formatDuration } from '../lib/constants';
-import { fetchXntUsd } from '../components/ROICalculator';
+import { fetchXntUsd } from '../components/BurnVsSell';
 import { useChainMarkets, weekCapacity } from '../lib/market';
 import { money } from '../components/FairValueEngine';
 import { AddrLink, Notice, Xnt } from '../components/ui';
+import { DATED, INTERIM } from '../content/interim';
+import { LINKS, LINKS_URL, PUBLIC_PLACES } from '../lib/links';
+import { faq as FAQ } from '../facts';
 
 const WEEK = 7 * 86_400;
 const SUNDAY_0 = 3 * 86_400; // 1970-01-04 00:00 UTC
@@ -39,6 +42,21 @@ function Step({ n, title, children }: { n: number; title: string; children: Reac
     );
 }
 
+/** The official places (site, GitHub, X), rendered from public/links.json. */
+function Places() {
+    return (
+        <>
+            {PUBLIC_PLACES.map((l, i) => (
+                <span key={l.id}>
+                    {i > 0 && ', '}
+                    <a className="text-forge-orange hover:underline" href={l.url} target="_blank" rel="noopener noreferrer">{l.label}{l.handle ? ` ${l.handle}` : ''}</a>
+                </span>
+            ))}
+        </>
+    );
+}
+
+/** One FAQ entry. The list itself comes from src/facts.ts so the static pages and the FAQPage JSON-LD match it exactly. */
 function Faq({ q, children }: { q: string; children: React.ReactNode }) {
     return (
         <details className="group border-b border-white/5 py-3">
@@ -73,11 +91,35 @@ export default function StartPage() {
             <header className="text-center space-y-3">
                 <h1 className="font-space text-4xl font-bold"><Compass className="inline w-8 h-8 text-forge-orange mr-2" />Start here</h1>
                 <p className="text-lunar-300 max-w-2xl mx-auto">
-                    Moon Forge burns XEN that is hard to sell and pays XNT on X1. Every rule is public, every payout can be recomputed,
-                    and nothing here asks you to trust anyone. This page shows what it can really pay this week, how to use it, and how to check it yourself.
+                    Moon Forge burns XEN that is hard to sell and pays XNT on X1. Every rule is public and every payout can be recomputed. Trust is limited to a
+                    bounded oracle (it can only publish within the program's caps) and, until it is burned, the upgrade key. This page shows what it can really pay
+                    this week, how to use it, and how to check it yourself.
                 </p>
-                <p className="text-xs text-lunar-500">An independent community project. Not run by the XEN or X1 teams, not XEN Prime, and not X1 Forge.</p>
+                <p className="text-xs text-lunar-500">
+                    Independent and open-source, run by one anonymous builder who receives only the disclosed cuts (Artifact sales and game edges). Not run by the XEN or
+                    X1 teams; not XEN Prime, not Moon Party, not X1 Forge.
+                </p>
             </header>
+
+            {/* ── what is changing (dated interim notice) ── */}
+            <Notice kind="warn">
+                <div className="font-bold text-white mb-1">What is changing ({DATED})</div>
+                <ul className="list-disc list-inside space-y-1 text-xs">
+                    <li>
+                        <strong>Oracle rules change</strong>, {INTERIM.rulesChangeWhen}. Until that date every burn is scored under the current rules described on this page
+                        (linear shares, Artifact boost, Forge Drops). What replaces them is published with the announcement, not before.
+                    </li>
+                    <li>
+                        <strong>Final program upgrade</strong>, {INTERIM.upgradeWhen}. The upgrade key is to be burned {INTERIM.freezeWhen}. Until then forging Artifacts and the Genesis claim
+                        are paused on this site (recycling works), and the current Artifact rules (split, weekly chips, arena ticket) stay live.
+                    </li>
+                    <li>
+                        <strong>Already decided:</strong> only the five live portal chains ({live.map((c) => c.name).join(', ')}) are supported; burns made before Moon Forge or
+                        elsewhere are not counted; Predictions are in the program but not offered on this site; real-XNT Moon Wars matches are paused; house games stay open.
+                        Burning, claiming and vesting are not affected by the pause.
+                    </li>
+                </ul>
+            </Notice>
 
             {/* ── this week, in real numbers ── */}
             <section className="glass-card space-y-4">
@@ -96,7 +138,7 @@ export default function StartPage() {
                     <div className="bg-space-700/40 rounded-xl p-4">
                         <div className="text-lunar-400 text-xs mb-1">Next epoch is built</div>
                         <div className="font-mono text-2xl text-white">{formatDuration(Math.max(0, nextEpoch - now))}</div>
-                        <div className="text-lunar-500 text-xs">Sundays 00:00 UTC · XNT {xntUsd ? usd(xntUsd) : '--'}</div>
+                        <div className="text-lunar-500 text-xs">Scheduled Sunday 00:00 UTC, often later · XNT {xntUsd ? usd(xntUsd) : '--'}</div>
                     </div>
                 </div>
                 {smallPool && (
@@ -109,7 +151,7 @@ export default function StartPage() {
                 {cap && (
                     <p className="text-sm text-lunar-300">
                         <strong className="text-white">Fair capacity left this week: {money(cap.remainingUsd)}</strong> of counted value. Within it, a burn should pay at least what selling
-                        that XEN would return, in XNT alone (the liquidity discount is the same math as selling into the pool); beyond it, burns are paid pro-rata and likely earn less.
+                        that XEN would return, in XNT alone (the liquidity discount is the same math as selling into the pool); beyond it, burns are paid pro-rata and likely pay less.
                         Vesting tiers count 2× / 3× toward it.
                         The Forge checks your burn against it before you sign.
                     </p>
@@ -118,6 +160,7 @@ export default function StartPage() {
                     Why so careful: an epoch pays at most {P.epochBudgetBps / 100}% of the free reward pool and at most {P.rateCapK}× the liquidity-adjusted value burned (×2 Orbit, ×3 Moon Landing).
                     That keeps the pool from ever being emptied, and it means nobody can promise you a return. We don't.
                 </p>
+                <p className="text-xs text-lunar-500">Prices: XEN markets from GeckoTerminal, XNT from x1report.com (both see your IP address when this page loads).</p>
             </section>
 
             {/* ── is it for me ── */}
@@ -148,7 +191,7 @@ export default function StartPage() {
                     <span className="px-2 py-1 rounded bg-forge-orange/20 text-forge-orange">reward pool</span><span>→</span>
                     <span className="px-2 py-1 rounded bg-space-600">weekly budget (≤ {P.epochBudgetBps / 100}%)</span><span>→</span>
                     <span className="px-2 py-1 rounded bg-space-600">XEN burners</span><span>→</span>
-                    <span className="px-2 py-1 rounded bg-space-600">XNT to play, forge, back the house</span>
+                    <span className="px-2 py-1 rounded bg-space-600">XNT in the burners' wallets</span>
                 </div>
                 <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3 text-sm">
                     <div className="bg-space-700/40 rounded-xl p-4">
@@ -158,17 +201,17 @@ export default function StartPage() {
                     </div>
                     <div className="bg-space-700/40 rounded-xl p-4">
                         <div className="text-white font-medium mb-1">I hold XNT and want to play</div>
-                        <p className="text-lunar-400 mb-2">House games and player-vs-player games. {P.edgeToPoolPct}% of every house stake and {P.rakeToPoolPct}% of every P2P pot go to the burners' pool. Lost XNT? If you hold XEN, burning it is a way to earn XNT back.</p>
+                        <p className="text-lunar-400 mb-2">House games and player-vs-player games, with a house edge and a rake you can read on the Games page. {P.edgeToPoolPct}% of every house stake and {P.rakeToPoolPct}% of every P2P pot go to the burners' pool. Stake only what you can lose.</p>
                         <Link className="text-forge-orange hover:underline" to="/games">Games →</Link>
                     </div>
                     <div className="bg-space-700/40 rounded-xl p-4">
                         <div className="text-white font-medium mb-1">I want to back the house</div>
-                        <p className="text-lunar-400 mb-2">Deposit XNT into the game bankroll and share its result: {P.edgeToBankrollPct}% of every house stake stays in it, and it pays the winners. A bigger bankroll allows bigger bets. Withdraw with a {P.houseWithdrawHours} h cooldown; you can lose.</p>
+                        <p className="text-lunar-400 mb-2">You take the house side: your share of the bankroll rises when players lose and falls when they win; no rate, no promised payout. {P.edgeToBankrollPct}% of every house stake stays in the bankroll, which pays the winners. Withdraw with a {P.houseWithdrawHours} h cooldown; you can lose part of your deposit.</p>
                         <Link className="text-forge-orange hover:underline" to="/games">Be the House →</Link>
                     </div>
                     <div className="bg-space-700/40 rounded-xl p-4">
                         <div className="text-white font-medium mb-1">I want an Artifact</div>
-                        <p className="text-lunar-400 mb-2">{FORGE_SPLIT.floorPct}% of the price stays inside the NFT as a floor you can take back, {FORGE_SPLIT.poolPct}% goes to the burners' pool. It boosts your burn share, earns weekly lottery chips and is your arena ticket. Recycle it any time to take the floor back: the slot is forged again at the new price, and another {FORGE_SPLIT.poolPct}% flows into the pool.</p>
+                        <p className="text-lunar-400 mb-2">Under the current rules {FORGE_SPLIT.floorPct}% of the price stays inside the NFT as a floor you can take back and {FORGE_SPLIT.poolPct}% goes to the burners' pool; it boosts your burn share, grants weekly lottery chips and is your arena ticket. Recycle it any time to take the floor back. {INTERIM.forgePaused && <strong className="text-amber-300">Forging is paused on this site until the final upgrade; recycling works.</strong>}</p>
                         <Link className="text-forge-orange hover:underline" to="/artifacts">Artifacts →</Link>
                     </div>
                     <div className="bg-space-700/40 rounded-xl p-4">
@@ -212,7 +255,7 @@ export default function StartPage() {
                         The oracle values every burn of the week at its chain's market price and publishes the result on X1, with the full data file anyone can recompute.
                     </Step>
                     <Step n={6} title="Receive XNT">
-                        The public keeper usually submits your claim for you; you can also claim on <Link className="text-forge-orange hover:underline" to="/missions">Missions</Link>.
+                        When the public keeper is running it may submit your claim for you (its runs are irregular and can be hours or days late); you can always claim on <Link className="text-forge-orange hover:underline" to="/missions">Missions</Link>.
                         Launchpad XNT lands in your X1 wallet; for Orbit and Moon Landing use "Withdraw vested" as it unlocks. Claim within {P.claimWindowDays} days.
                     </Step>
                 </ol>
@@ -233,7 +276,7 @@ export default function StartPage() {
                     ))}.
                 </Check>
                 <Check state="ok" title="Zero fee on the burn path">
-                    Burn, claim, vesting and Forge Drops pay nothing to anyone. The architect earns only from games and Artifact sales; every split is on the{' '}
+                    Burn, claim, vesting and Forge Drops pay nothing to anyone. The architect receives only the disclosed cuts from games and Artifact sales; every split is on the{' '}
                     <Link className="text-forge-orange hover:underline" to="/transparency">Transparency</Link> page and in <a className="text-forge-orange hover:underline" href={PROJECT_LINKS.programConstants} target="_blank" rel="noopener noreferrer">constants.rs</a>.
                 </Check>
                 <Check state="ok" title="The money is where the site says it is">
@@ -245,15 +288,15 @@ export default function StartPage() {
                     <code className="text-xs">cd oracle && npm run verify -- epoch-N.json --full</code> from the <a className="text-forge-orange hover:underline" href={PROJECT_LINKS.github} target="_blank" rel="noopener noreferrer">open source</a> and get the same result.
                 </Check>
                 <Check state="ok" title="No token, no presale, no team allocation">
-                    There is nothing to buy from us. The program can only pay what is in its vaults, within the limits above.
+                    There is no token. The only thing sold here is an Artifact, sold by the program itself at a public price ({FORGE_SPLIT.architectPct}% of it to the architect; forging is paused on this site until the final upgrade). The program can only pay what is in its vaults, within the limits above.
                 </Check>
-                <Check state={authority ? 'warn' : 'ok'} title={authority ? 'The program can still be upgraded (test period)' : 'The program can no longer be upgraded'}>
+                <Check state={authority ? 'warn' : 'ok'} title={authority ? 'The program can still be upgraded (one final upgrade is planned)' : 'The program can no longer be upgraded'}>
                     {authority
-                        ? <>Upgrade authority: <AddrLink address={authority} />{authority.equals(ARCHITECT) ? ' (the architect wallet)' : ''}. It will be burned after the public test period, and this line will turn green on its own. Program <a className="text-forge-orange hover:underline" href={explorerAddress(PROGRAM_ID)} target="_blank" rel="noopener noreferrer">on the explorer</a>.</>
+                        ? <>Upgrade authority: <AddrLink address={authority} />{authority.equals(ARCHITECT) ? ' (the architect wallet)' : ''}. One final upgrade is planned ({INTERIM.upgradeWhen}); the authority is to be burned {INTERIM.freezeWhen}, and this line turns green on its own when it is. Program <a className="text-forge-orange hover:underline" href={explorerAddress(PROGRAM_ID)} target="_blank" rel="noopener noreferrer">on the explorer</a>.</>
                         : upg.data ? 'The upgrade authority has been burned: the code on-chain is final.' : 'Reading the program account…'}
                 </Check>
                 <Check state="no" title="No third-party audit yet">
-                    The internal reviews (not independent) and every finding are public in <a className="text-forge-orange hover:underline" href={`${PROJECT_LINKS.github}/blob/main/docs/AUDIT-2026-10.md`} target="_blank" rel="noopener noreferrer">AUDIT-2026-10.md</a>. Use amounts you can afford to lose.
+                    The internal reviews (not independent) and every finding are public in <a className="text-forge-orange hover:underline" href={PROJECT_LINKS.reviewMd} target="_blank" rel="noopener noreferrer">REVIEW-2026-10.md</a>. Use amounts you can afford to lose.
                 </Check>
             </section>
 
@@ -262,12 +305,12 @@ export default function StartPage() {
                 <div className="glass-card text-sm">
                     <h2 className="font-space text-lg mb-2">What Moon Forge will never do</h2>
                     <ul className="list-disc list-inside space-y-1 text-lunar-300">
-                        <li>Message you first, or ask for a seed phrase or private key.</li>
-                        <li>Sell you a token, a presale or a "whitelist".</li>
-                        <li>Promise returns or price targets.</li>
-                        <li>Rush you: there is no deadline and no prize for burning first.</li>
+                        {LINKS.never.map((n) => <li key={n}>{n}</li>)}
                     </ul>
-                    <p className="text-xs text-lunar-500 mt-3">Official places only: this site, the GitHub repository and X <a className="text-forge-orange hover:underline" href="https://x.com/MoonXenForge" target="_blank" rel="noopener noreferrer">@MoonXenForge</a>.</p>
+                    <p className="text-xs text-lunar-500 mt-3">
+                        Official places only: <Places />. {LINKS.notOfficial}{' '}
+                        <a className="text-forge-orange hover:underline" href={LINKS_URL} target="_blank" rel="noopener noreferrer">This list as a file (links.json)</a>.
+                    </p>
                 </div>
                 <div className="glass-card text-sm">
                     <h2 className="font-space text-lg mb-2">Risks, plainly</h2>
@@ -280,58 +323,41 @@ export default function StartPage() {
                 </div>
             </section>
 
-            {/* ── FAQ ── */}
+            {/* ── verify you are on the real site (X-064 / T9-30): the facts come verbatim from public/links.json ── */}
+            <section className="glass-card text-sm">
+                <h2 className="font-space text-lg mb-2">Verify you are on the real site</h2>
+                <p className="text-xs text-lunar-400 mb-3">{LINKS.verify.note}</p>
+                <dl className="grid sm:grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-xs">
+                    <dt className="text-lunar-500">Site</dt>
+                    <dd className="font-mono break-all text-lunar-200">{LINKS.verify.site}</dd>
+                    <dt className="text-lunar-500">X1 program</dt>
+                    <dd className="font-mono break-all text-lunar-200"><a className="hover:underline" href={LINKS.verify.programExplorer} target="_blank" rel="noopener noreferrer">{LINKS.verify.programId}</a></dd>
+                    <dt className="text-lunar-500">Artifacts collection</dt>
+                    <dd className="font-mono break-all text-lunar-200">{LINKS.verify.collection}</dd>
+                    <dt className="text-lunar-500">Burn portal</dt>
+                    <dd className="font-mono break-all text-lunar-200">{LINKS.verify.portal} <span className="font-sans text-lunar-500">(the same address on {LINKS.verify.portalChains.map((k) => CHAINS[k]?.name ?? k).join(', ')})</span></dd>
+                    <dt className="text-lunar-500">Program source</dt>
+                    <dd className="font-mono break-all text-lunar-200">{LINKS.verify.releaseUrl ? <a className="hover:underline" href={LINKS.verify.releaseUrl} target="_blank" rel="noopener noreferrer">{LINKS.verify.release ?? '--'}</a> : (LINKS.verify.release ?? '--')}</dd>
+                </dl>
+                <p className="text-xs text-lunar-500 mt-3">
+                    Any other program ID, portal, collection, site or "claim" page is not Moon Forge. The same facts are on the{' '}
+                    <Link className="text-forge-orange hover:underline" to="/transparency">Transparency</Link> page, in the repository README and in{' '}
+                    <a className="text-forge-orange hover:underline" href={LINKS_URL} target="_blank" rel="noopener noreferrer">links.json</a>.
+                </p>
+            </section>
+
+            {/* ── FAQ: rendered from src/facts.ts (the same list as the static /start/ and /faq/ pages and the FAQPage JSON-LD) ── */}
             <section className="glass-card">
                 <h2 className="font-space text-xl mb-2">Questions people ask</h2>
-                <Faq q="Is this XEN Prime? Is it run by the X1 team?">
-                    No to both. Moon Forge is an independent, open-source project. XEN Prime is announced for Ethereum XEN only; Moon Forge works with XEN on
-                    {' '}{live.map((c) => c.name).join(', ')}. You can use both with different XEN.
-                </Faq>
-                <Faq q="Do my old XEN burns count?">
-                    No. Only burns made through the Moon Forge portal on a supported chain are paid. Burns you made before, or anywhere else (for example the
-                    records tracked by xen.pub, or the 2024 plan to redeem Ethereum XEN burns), are not counted and cannot be claimed here. Moon Forge never asks
-                    you to link a wallet, sign a message or pay a fee to "claim old burns": anyone who does is running a scam.
-                </Faq>
-                <Faq q="My X1 wallet is brand new. Where does a tiny payout go?">
-                    To your wallet, as long as it ends with at least about 0.00089 XNT (the chain's minimum for an account). A smaller payment to an empty wallet is
-                    credited to your game balance instead; move it with Withdraw in the Games page (that needs your signature and a little XNT for the fee).
-                </Faq>
-                <Faq q="Is this X1 Forge?">
-                    No. X1 Forge ($FORGE) is a separate, unrelated project on X1. Moon Forge has no token at all: if you see a "Moon Forge" token, presale or
-                    airdrop claim anywhere, it is not us. Official places: this site, the GitHub repository and the project's X account.
-                </Faq>
-                <Faq q="Can I calculate what I will get?">
-                    Yes, after the fact, exactly: the epoch file lists every burn, its price and your share, and the program checks the totals. Before the epoch you can only
-                    estimate, because your share depends on what others burn that week. The estimator on <Link className="text-forge-orange hover:underline" to="/forge">The Forge</Link> shows the
-                    upper bound, and the <Link className="text-forge-orange hover:underline" to="/transparency">Transparency</Link> page shows, chain by chain, what the same burn is worth right now and why (Fair Value Engine).
-                </Faq>
-                <Faq q="What do I gain burning a little when others burn trillions?">
-                    Exactly your share of the value: 1% of the week's value earns 1% of the budget, whatever the size. Small burners also enter the Forge Drops draw with a chance
-                    equal to their expected drop value ÷ {P.dropBackingXnt} XNT.
-                </Faq>
-                <Faq q="Is there a minimum?">
-                    Any amount above zero can be burned. A burn worth less than a millionth of a dollar after the liquidity discount scores zero, so in practice every real burn counts.
-                </Faq>
-                <Faq q="Why not just sell my XEN?">
-                    You can, and sometimes that is better. On thin side-chain pools a sale loses a lot to slippage, and moving the dollars to X1 costs bridge fees and minimums.
-                    The estimator compares both routes for your amount.
-                </Faq>
-                <Faq q="Does splitting my XEN across wallets help?">No. Scores and drop chances are linear, so splitting changes nothing except your gas bill.</Faq>
-                <Faq q="My XEN is on an exchange that is delisting it. What do I do?">
-                    Withdraw it to a wallet you control before the deadline. Then decide: hold, sell, or burn it here if its chain is supported.
-                </Faq>
-                <Faq q="When and how am I paid?">
-                    After the Sunday epoch is published. The keeper usually submits the claim; otherwise claim on Missions within {P.claimWindowDays} days, or the amount returns to the pool for everyone.
-                </Faq>
-                <Faq q="Can AI agents play?">
-                    Yes, with their own keypair, like anyone: the games are on-chain instructions. Moon Wars is perfect information and every move is checked by the program,
-                    so a better policy wins. The <a className="text-forge-orange hover:underline" href={`${PROJECT_LINKS.github}/tree/main/agents`} target="_blank" rel="noopener noreferrer">agent kit</a> has
-                    a skill file, a JavaScript client and examples. Part of every pot goes to the burners' pool.
-                </Faq>
-                <Faq q="Where do I ask for help?">
-                    X <a className="text-forge-orange hover:underline" href="https://x.com/MoonXenForge" target="_blank" rel="noopener noreferrer">@MoonXenForge</a> or an issue on{' '}
-                    <a className="text-forge-orange hover:underline" href={PROJECT_LINKS.github} target="_blank" rel="noopener noreferrer">GitHub</a>. Nobody from Moon Forge will contact you first.
-                </Faq>
+                {FAQ.map((f) => <Faq key={f.q} q={f.q}>{f.a}</Faq>)}
+                <p className="text-xs text-lunar-500 mt-3">
+                    Where to go next: <Link className="text-forge-orange hover:underline" to="/forge">The Forge</Link> (estimator and burn) ·{' '}
+                    <Link className="text-forge-orange hover:underline" to="/missions">Missions</Link> (claims) ·{' '}
+                    <Link className="text-forge-orange hover:underline" to="/artifacts">Artifacts</Link> (Genesis) ·{' '}
+                    <Link className="text-forge-orange hover:underline" to="/transparency">Transparency</Link> (chain weights) ·{' '}
+                    <a className="text-forge-orange hover:underline" href={`${PROJECT_LINKS.github}/tree/main/agents`} target="_blank" rel="noopener noreferrer">agent kit</a>.
+                    Official places only: <Places />.
+                </p>
             </section>
 
             <p className="text-center text-xs text-lunar-500">Numbers on this page are read live from X1 and public price sources. Rules: <Link className="text-forge-orange hover:underline" to="/whitepaper">Whitepaper</Link>.</p>
