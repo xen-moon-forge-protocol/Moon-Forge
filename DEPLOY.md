@@ -1,6 +1,8 @@
 # Deploying Moon Forge v2
 
-Order: **(1) upgrade the X1 program → (2) initialize → (3) deploy EVM portals → (4) start the oracle → (5) seed pools → (6) airdrop list → (7) burn the upgrade authority after the test period.**
+*Status 2026-10-22: this is the record of the v2 deploy done on 2026-10-07 and 2026-10-12 (tag `program-2026-10-12`) and of how the automation is set up. The final program upgrade (earliest 2026-11-11) gets its own sequence in `docs/UPGRADE-2026-11.md`, published at least 7 days before it; section 7 below describes the freeze that follows it.*
+
+Order: **(1) upgrade the X1 program → (2) initialize → (3) deploy EVM portals → (4) start the oracle → (5) seed pools → (6) airdrop list → (7) burn the upgrade authority after the final upgrade, the mainnet proof plan and 14 stable days.**
 
 Tooling used: solana-cli 3.1.x (Agave), anchor-cli 0.32.1, Rust stable, Node 20+. Build on Linux/WSL in a path without non-ASCII characters (a rustc diagnostics bug crashes on accented paths).
 
@@ -28,7 +30,7 @@ The upgrade-authority wallet must hold **≈ 9.2 XNT at the moment of the deploy
 
 ```bash
 URL=https://rpc.mainnet.x1.xyz
-KEY=~/.config/solana/deploy-wallet.json             # = 7PuG8ELK… (current upgrade authority)
+KEY=~/.config/solana/deploy-wallet.json             # the current upgrade authority (address: SECURITY.md, Upgrade authority)
 solana program deploy target/deploy/moon_forge.so --program-id 57UE1U1t23ztg2noLp8pcpGW1B1Xw25rLH6ra9Mchea9 \
   --upgrade-authority $KEY -k $KEY -u $URL --with-compute-unit-price 0
 anchor idl upgrade --filepath target/idl/moon_forge.json 57UE1U1t23ztg2noLp8pcpGW1B1Xw25rLH6ra9Mchea9 \
@@ -50,9 +52,11 @@ ORACLE_PRIVATE_KEY="$(cat ~/.config/solana/deploy-wallet.json)" npm run init   #
 ```bash
 npm install && npx hardhat test
 cp .env.example .env                                 # PRIVATE_KEY of a gas-only deployer
-npx hardhat run scripts/deploy_portal.ts --network bsc   # repeat: polygon, avalanche, optimism, base, pulsechain, (mainnet)
+npx hardhat run scripts/deploy_portal.ts --network bsc   # done on exactly five chains: bsc, polygon, avalanche, optimism, base (2026-10-07)
 # Check each chain still has a XEN market first: `cd oracle && npm run market` (a chain without one scores zero —
 # Moonbeam had none on 2026-10-07, so no portal there).
+# No further portal is planned by this project: Ethereum and PulseChain are left to the community as forks (FORK.md),
+# and no chain is added after the freeze. A portal deployed elsewhere is not read by this oracle.
 ```
 
 For each chain record the portal address and its deployment block, then set:
@@ -67,6 +71,8 @@ Verify on the explorers: `npx hardhat verify --network <chain> <portal> <xen>`.
 - GitHub secret `ORACLE_PRIVATE_KEY`; variable `ORACLE_ENABLED=true`. First run: Actions → "Oracle epoch" → dry run.
 - Keeper: enable the GitHub Actions keeper (variable `KEEPER_ENABLED=true`, secret `KEEPER_PRIVATE_KEY`, falling back to `ORACLE_PRIVATE_KEY`) and, because scheduled GitHub runs can be delayed, preferably also run `npm run keeper` on an always-on machine (any funded key; keeping is permissionless).
 
+**Late or missed Sunday run (rule in force today, `epochDue` in `oracle/src/index.ts`).** The oracle publishes only inside the 48 hours after a weekly slot opens (Sundays 00:00 UTC) and only if nothing was published since the slot opened; the program itself enforces ≥ 6 days between epochs and refuses an empty epoch. If GitHub fires no run inside that window (cron misfires, an outage longer than 48 h), nothing is published that week: burns are not lost — the next published epoch reads from the last paid mission onward and values them by the same rules — but their burners wait a week. Inside the window the operator can start the "Oracle epoch" workflow by hand with `dry = false` (the keeper also triggers it). The epoch-2 window is 2026-10-25 00:00 → 2026-10-27 00:00 UTC, and nothing else on the repository changes during it. Operational detail: [OPERATORS.md](OPERATORS.md).
+
 ## 5. Seed the pools
 
 - Bankroll: `house_deposit` from the site (Be the House). Max net win per bet = 0.25% of the free bankroll, so 4,000 XNT allows ~10 XNT wins.
@@ -74,20 +80,24 @@ Verify on the explorers: `npx hardhat verify --network <chain> <portal> <xen>`.
 
 ## 6. Genesis airdrop
 
-The committed `airdrop.json` is a draft (validators only). Rebuild it with the Genesis supporters right before setting the root — `set_airdrop_root` can be called only once and is final:
+The committed `airdrop.json` is the published list: 444 X1 validator withdraw authorities, set on-chain on 2026-10-12 (no outside supporter qualified, see [docs/SUPPORT.md](docs/SUPPORT.md#genesis-airdrop-published-final-under-the-live-program)). `set_airdrop_root` can be called only once, and the live program has no instruction to change the root. It was built with:
 
 ```bash
 node scripts/airdrop/collect-validators.mjs > validators.txt
 node scripts/airdrop/collect-donors.mjs > donors.txt
 cat donors.txt validators.txt > wallets.txt
 node scripts/airdrop/build-airdrop.mjs wallets.txt         # writes frontend/public/airdrop/airdrop.json
-# then, once, with the architect key:  set_airdrop_root(<root>)
+# then, once, with the architect key:  set_airdrop_root(<root>)   (done 2026-10-12)
 ```
 
-## 7. End of the test period
+## 7. The freeze (after the final upgrade)
+
+Conditions and dates: [IMMUTABILITY.md](IMMUTABILITY.md#when-the-upgrade-authority-will-be-burned) — the final upgrade live with its announced hash, the mainnet proof plan complete, 14 consecutive daily health runs with no FAIL, the metadata on Arweave; earliest 2026-11-25, no later than 2026-12-31. Before signing, compare the on-chain bytes with a reproducible build of the published source. Then, in one session:
 
 ```bash
+anchor idl erase-authority --program-id 57UE1U1t23ztg2noLp8pcpGW1B1Xw25rLH6ra9Mchea9 --provider.cluster $URL --provider.wallet $KEY
 solana program set-upgrade-authority 57UE1U1t23ztg2noLp8pcpGW1B1Xw25rLH6ra9Mchea9 --final -k $KEY -u $URL
+solana program show 57UE1U1t23ztg2noLp8pcpGW1B1Xw25rLH6ra9Mchea9 -u $URL      # Authority: none
 ```
 
-After this nothing in the program can change, including fees and the architect address.
+After this nothing in the program can change, including fees and the architect address. Both signatures are recorded in SECURITY.md, IMMUTABILITY.md and the README, and the key is deleted from every machine.

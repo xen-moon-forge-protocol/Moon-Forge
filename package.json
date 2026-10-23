@@ -1,7 +1,7 @@
 {
     "name": "moon-forge-protocol",
     "version": "2.0.0",
-    "description": "Moon Forge Protocol - burn XEN on any EVM chain, earn XNT on X1",
+    "description": "Moon Forge Protocol - burn XEN on Base, Optimism, Polygon, BSC or Avalanche and receive XNT on X1",
     "license": "MIT",
     "scripts": {
         "test": "hardhat test",
