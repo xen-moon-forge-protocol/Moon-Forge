@@ -40,10 +40,12 @@ jobs:
         working-directory: frontend
         run: |
           npm run build
-          cp dist/index.html dist/404.html
-          # one copy per route so deep links (shared links, crawlers, agents) answer HTTP 200 instead of the 404 fallback
-          for r in start forge missions artifacts nft marketplace games donate whitepaper transparency; do
-            mkdir -p "dist/$r" && cp dist/index.html "dist/$r/index.html"
+          # the build prerenders every route (dist/<route>/index.html, with its own text, canonical and FAQ) and
+          # dist/404.html; never overwrite those, only fill a route the prerender did not write, so deep links
+          # (shared links, crawlers, agents) still answer HTTP 200
+          [ -f dist/404.html ] || cp dist/index.html dist/404.html
+          for r in start faq forge missions artifacts nft marketplace games donate whitepaper transparency; do
+            [ -f "dist/$r/index.html" ] || { mkdir -p "dist/$r" && cp dist/index.html "dist/$r/index.html"; }
           done
         env:
           NODE_ENV: production
