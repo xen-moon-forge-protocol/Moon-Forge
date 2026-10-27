@@ -22,8 +22,11 @@ export const INTERIM = {
     programUpgraded: false,
     /** When the oracle rules change: a planned window, announced ahead, never a promise. */
     rulesChangeWhen: 'planned for November 2026 and announced on this page and on the project\u2019s X account at least one full epoch ahead, with the date and the last publish transaction under the current rules',
-    /** When the final program upgrade happens. */
-    upgradeWhen: 'not before mid-November 2026; its code hash and full changelog are published at least 7 days before it',
+    /**
+     * When the final program upgrade happens (round 4, option B of 2026-10-25: the source and changelog at least 7 days
+     * ahead, the binary hash at least 48 hours ahead; this notice said 7 days for the hash until then).
+     */
+    upgradeWhen: 'not before mid-November 2026; its source and full changelog are published at least 7 days before it, and its binary hash at least 48 hours before; earlier versions of this notice said 7 days for the hash too',
     /** When the upgrade key is burned (IMMUTABILITY.md: a separate, conditional step after the final upgrade). */
     freezeWhen: 'after the final upgrade, on the published freeze conditions (no later than 2026-12-31)',
 } as const;

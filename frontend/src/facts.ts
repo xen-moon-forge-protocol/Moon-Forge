@@ -227,7 +227,7 @@ export const notices: readonly NoticeFact[] = [
     {
         // T3-23: the one Genesis-specific notice; "no chips, no ticket" is scoped to Genesis Lunar Dust only.
         date: INTERIM.noticeDate, id: 'genesis',
-        text: `Genesis Lunar Dust: ${INTERIM.genesisClaimPaused ? 'the claim is paused on this site until the final program upgrade. ' : ''}${NEUTRAL.genesisDeadline} After the upgrade a Genesis Lunar Dust is a free collectible with a cosmetic badge: no floor, no rebate, no burn boost, no chips, no ticket, and it is not needed to play any game; recycling it gives back only the record’s rent. Moon Forge never messages anyone about Genesis.`,
+        text: `Genesis Lunar Dust: ${INTERIM.genesisClaimPaused ? 'the claim is paused on this site until the final program upgrade. ' : ''}${NEUTRAL.genesisDeadline} After the upgrade a Genesis Lunar Dust is a collectible with a cosmetic badge: no floor, no rebate, no burn boost, no chips, no ticket, and it is not needed to play any game; recycling it gives back only the record’s rent. Moon Forge never messages anyone about Genesis.`,
     },
     {
         date: '2026-10-22', id: 'upgrade-pending',

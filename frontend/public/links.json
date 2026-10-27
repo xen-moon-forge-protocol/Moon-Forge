@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated": "2026-10-22",
+  "updated": "2026-10-24",
   "site": "https://xen-moon-forge-protocol.github.io/Moon-Forge/",
   "official": [
     { "id": "site", "label": "Site", "url": "https://xen-moon-forge-protocol.github.io/Moon-Forge/", "note": "The only place to burn, claim, forge or play. Check the address bar: xen-moon-forge-protocol.github.io/Moon-Forge/." },
@@ -13,10 +13,9 @@
     "note": "The site is a GitHub project page, so the RFC 9116 root location (https://xen-moon-forge-protocol.github.io/.well-known/security.txt) is not available to it; the file lives under the site path above."
   },
   "pending": [
-    { "id": "security-advisories", "label": "GitHub private vulnerability reporting", "url": null, "note": "Not enabled on the repository yet. Until it is listed under official, send vulnerability reports to the project mailbox only." },
-    { "id": "telegram", "label": "Telegram announcement channel", "url": null, "note": "Not decided yet. Until a channel is listed here, no Telegram channel or group is official." }
+    { "id": "security-advisories", "label": "GitHub private vulnerability reporting", "url": null, "note": "Not enabled on the repository yet. Until it is listed under official, send vulnerability reports to the project mailbox only." }
   ],
-  "notOfficial": "No group, chat, forum, DM or e-mail is official. Nobody from Moon Forge contacts you first. Anything not listed here is not Moon Forge, even when it uses the name, the images or looks like this site.",
+  "notOfficial": "No group, chat, forum, DM or e-mail is official. Moon Forge has no Telegram channel, group or bot, and none is planned. Nobody from Moon Forge contacts you first. Anything not listed here is not Moon Forge, even when it uses the name, the images or looks like this site.",
   "never": [
     "Message you first, or ask for a seed phrase, a private key or a wallet connection outside this site.",
     "Sell a token, a presale or a \"whitelist\": Moon Forge has no token.",
@@ -53,5 +52,5 @@
     ]
   },
   "signature": null,
-  "signatureNote": "Signed with the architect vault authority key from the final upgrade on; until then verify this file against the repository copy."
+  "signatureNote": "Not signed. Verify this file against the copy in the GitHub repository (frontend/public/links.json)."
 }
