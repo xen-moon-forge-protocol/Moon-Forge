@@ -50,7 +50,7 @@ Rules that matter for bots:
 
 Everything time-based is permissionless: `settle_bet`, `draw_jackpot` / `settle_jackpot`, `close_jackpot_entry` (pays back refunded entries), `draw_draw` / `settle_draw`, `claim_duel_timeout`, Moon Wars starts, timeouts and payouts, Prediction locks, settlements and payouts of rounds that exist, `seal_drop`, `claim_drop` / `claim_drop_xnt` (deliver Forge Drops, v2), `withdraw_vested`, `expire_epoch`, and claims for anyone. Funds always go to the player recorded on-chain, never to the caller.
 
-Tips are paid **by the reward pool**, never by the user: 0.002 XNT per claim of ≥ 0.02 XNT submitted for someone else, and 0.01 XNT per Forge Drop delivered for someone else. Nothing pays a third party for settling bets, draws, Moon Wars or Predictions today; the final upgrade adds upkeep tips from the architect's game cut.
+Tips are paid **by the reward pool**, never by the user: 0.002 XNT per claim of ≥ 0.02 XNT submitted for someone else, and 0.01 XNT per Forge Drop delivered for someone else. Nothing pays a third party for settling bets, draws, Moon Wars or Predictions today. From the final upgrade (dated; round 4 of its source, 2026-10-25) only the registered house keeper receives a settle tip, at most 0.0005 XNT per settled house bet and never more than half of that bet's 1% pool share; nobody else is paid for upkeep, and the claim tip is paid only on claims of at least 0.2 XNT submitted by someone other than the player or the oracle.
 
 ```bash
 cd oracle && npm install

@@ -29,20 +29,20 @@ Details for every step: [DEPLOY.md](DEPLOY.md). Status as of 2026-10-22. The v2 
 - [x] First epoch published (epoch 1, 2026-10-18; one burn) and matched against the on-chain epoch account; `cd oracle && npm run verify -- ../frontend/public/epochs/epoch-1.json --full`
 - [x] Keeper: variable `KEEPER_ENABLED=true` + secret `KEEPER_PRIVATE_KEY` (GitHub Actions)
 - [ ] A keeper that meets the games' deadlines for a week (GitHub cron fires only a few percent of its ticks; house games stay on the site behind the known-issues notice today; delisting them until a keeper meets its service level for a week is planned with the final upgrade)
-- [ ] Late-run rule rehearsed: the oracle publishes only inside the 48 h after a Sunday 00:00 UTC slot; the epoch-2 window is 2026-10-25 00:00 → 10-27 00:00 UTC (see [DEPLOY.md §4](DEPLOY.md#4-oracle) and [OPERATORS.md](OPERATORS.md))
+- [ ] Late-run rule rehearsed: the oracle publishes only inside the 48 h after a Sunday 00:00 UTC slot; the epoch-2 window was 2026-10-25 00:00 → 10-27 00:00 UTC (the oracle ran inside it at 00:26 and 02:46 UTC on 10-25; no new burn, so nothing was published) (see [DEPLOY.md §4](DEPLOY.md#4-oracle) and [OPERATORS.md](OPERATORS.md))
 
 ## Pools & NFTs
 - [x] Bankroll seeded (Be the House)
 - [x] Reward pool seeded (Donate)
 - [x] Genesis airdrop list rebuilt and `set_airdrop_root` called once (2026-10-12; final under the live program)
-- [ ] Genesis notice published before the first of the 120 claims (what a Genesis Lunar Dust is after the final upgrade: a free collectible with a cosmetic badge)
+- [ ] Genesis notice published before the first of the 120 claims (what a Genesis Lunar Dust is after the final upgrade: a collectible with no floor and a cosmetic badge; the claimant pays the account rent)
 
 ## Communication
 - [ ] Post in XEN communities of the five supported chains: "XEN Prime is for ETH-XEN; Base, Optimism, Polygon, BSC and Avalanche XEN → Moon Forge"; official links only; warn about clones; no paid promotion, nobody posting as someone else
 - [x] Test period and the conditions for burning the upgrade authority published ([IMMUTABILITY.md](IMMUTABILITY.md#when-the-upgrade-authority-will-be-burned)); rewritten on 2026-10-22 (proof plan + 14 stable days, with or without external users; no later than 2026-12-31)
 - [ ] v3 switch notice: the date of the first v3 epoch (planned for November 2026) and the last v2 publish transaction, published at least one full epoch ahead
 - [ ] Final-upgrade announcement ≥ 7 days before the upgrade (`docs/UPGRADE-2026-11.md`: commit, hash procedure, changelog)
-- [ ] Before any release of copy: `node scripts/wording-check.mjs` passes (the `Wording` CI job, once published: [docs/WORDING.md §6](docs/WORDING.md#6-the-ci-check)) and every new public claim has a row in [docs/CLAIMS.md](docs/CLAIMS.md)
+- [ ] Before any release of copy: `node scripts/wording-check.mjs` passes (the `Wording` CI job: [docs/WORDING.md §6](docs/WORDING.md#6-the-ci-check)) and every new public claim has a row in [docs/CLAIMS.md](docs/CLAIMS.md)
 
 ## Final upgrade and freeze
 - [ ] Final upgrade deployed with the announced hash (earliest 2026-11-11)

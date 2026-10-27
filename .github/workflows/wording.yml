@@ -1,0 +1,37 @@
+name: Wording
+
+# Scans the public texts (README, docs, site source and public files, agent kit, NFT metadata, announce bot,
+# program description) for the words docs/WORDING.md forbids and for personal-data patterns.
+# Exits 1 on any hit that is not allow-listed in docs/WORDING.md. No secrets are needed; the two optional
+# repository secrets below let the operator deny extra strings or hashed tokens without writing them into the repo.
+
+on:
+  push:
+    paths-ignore:
+      - 'frontend/public/epochs/**'   # oracle commits (epoch files) never carry copy
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wording-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  wording:
+    name: Wording and personal-data check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      # Node 22 like every other workflow, not whichever Node the runner image ships (no cache: nothing to install)
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+      - name: Run the check (the script has no dependencies)
+        env:
+          WORDING_DENY: ${{ secrets.WORDING_DENY }}
+          WORDING_DENY_SHA256: ${{ secrets.WORDING_DENY_SHA256 }}
+        run: node scripts/wording-check.mjs
