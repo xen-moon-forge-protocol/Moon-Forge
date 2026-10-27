@@ -1,0 +1,13 @@
+{
+  "name": "moon-forge-nft-metadata",
+  "private": true,
+  "description": "Artifact metadata texts, the Arweave upload and its gateway check (see upload-arweave.mjs)",
+  "license": "MIT",
+  "scripts": {
+    "test": "node --test test/metadata.test.mjs",
+    "check": "node check-gateways.mjs"
+  },
+  "dependencies": {
+    "@ardrive/turbo-sdk": "2.1.1"
+  }
+}

@@ -1,44 +1,169 @@
-# Uploads the Artifact images and metadata to Arweave (permanent storage) through ArDrive Turbo's
-# free tier, signed by a throwaway key generated inside the run. Run "sandbox" first (ar.io testnet,
-# data purged after a few days), then "mainnet" once. The resulting manifest ids are in the run
-# summary and in the artifact; the metadata manifest goes into METADATA_BASE_URI (constants.rs).
+# Artifact metadata on Arweave (permanent storage) through ArDrive Turbo's free tier, signed by a throwaway key
+# generated inside the run (it owns nothing and pays nothing). Texts: scripts/nft-metadata/texts-final.mjs, linted by
+# lint-permanent.mjs (docs/WORDING.md section 4) before anything is uploaded.
+#   dry-run  (default) builds the 13 JSON per image gateway, scans the images, prints the whole manifest; uploads
+#            nothing and installs nothing.
+#   sandbox  rehearsal on the ar.io testnet sandbox (data purged after a few days); never a record to commit.
+#   mainnet  the permanent upload; needs confirm = PERMANENT and a green wording check (docs/WORDING.md section 4).
+#            Commit the run artifact's result.json as deployments/nft-arweave-final.json.
+#   check    gateway + Arweave L1 check of deployments/nft-arweave-final.json (also runs daily on the schedule).
+# METADATA_BASE_URI (constants.rs) is set at S2 only from a metadata set with 7 consecutive passing daily checks.
+# Actions are pinned to commit SHAs (version in the comment); runner image pinned; Node 22.
 name: NFT metadata to Arweave
 
 on:
   workflow_dispatch:
     inputs:
-      network:
-        description: "sandbox = rehearsal (ephemeral) / mainnet = permanent upload"
+      mode:
+        description: "dry-run (uploads nothing) / sandbox (ephemeral rehearsal) / mainnet (permanent) / check (gateway + L1 check of the committed record)"
         required: true
-        default: sandbox
+        default: dry-run
         type: choice
-        options: [sandbox, mainnet]
+        options: [dry-run, sandbox, mainnet, check]
+      images_manifest:
+        description: "optional: reuse this images manifest id (refused unless all 12 images serve with a matching sha256 on every image gateway and on Arweave L1)"
+        required: false
+        default: ""
+      confirm:
+        description: "type PERMANENT to allow a mainnet upload"
+        required: false
+        default: ""
+  schedule:
+    - cron: "41 4 * * *" # the daily check; a no-op until deployments/nft-arweave-final.json exists
 
 permissions:
   contents: read
 
+# Every run step uses `bash --noprofile --norc -eo pipefail {0}`. Without `shell: bash` GitHub runs `bash -e {0}`
+# (no pipefail): `node ... | tee` then takes tee's exit code and a failed lint, refused reuse or failed upload shows
+# green.
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: nft-arweave
+  cancel-in-progress: false
+
 jobs:
   upload:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
+    if: github.event_name == 'workflow_dispatch' && inputs.mode != 'check'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 20
-      - name: Install the Turbo SDK (pinned)
-        run: npm install --prefix scripts/nft-metadata --no-save --no-audit --no-fund @ardrive/turbo-sdk@2.1.1
-      - name: Upload images, then metadata
-        run: node scripts/nft-metadata/upload-arweave.mjs out ${{ inputs.network == 'sandbox' && '--sandbox' || '' }}
+          node-version: 22
+      - name: Offline tests (texts, lint, program constants, L1 reader, verdict)
+        run: node --test scripts/nft-metadata/test/metadata.test.mjs
+      - name: Refuse a mainnet upload without the confirmation
+        if: inputs.mode == 'mainnet' && inputs.confirm != 'PERMANENT'
+        run: |
+          echo "::error::a mainnet upload is permanent: dispatch again with confirm = PERMANENT"
+          exit 1
+      # docs/WORDING.md section 4: the Arweave re-upload is blocked until the Wording CI job is green. This runs the
+      # same script on the same commit (the Wording job itself also applies the optional deny-list secrets, so it
+      # must be green on this commit too: see the runbook). The sandbox rehearses the same gate.
+      - name: Wording check (docs/WORDING.md section 4 gate)
+        if: inputs.mode == 'mainnet' || inputs.mode == 'sandbox'
+        run: |
+          for f in scripts/wording-check.mjs .github/workflows/wording.yml; do
+            if [ ! -f "$f" ]; then
+              echo "::error::$f is missing on this commit: the Arweave upload is blocked until the Wording CI job exists and is green (docs/WORDING.md section 4)"
+              exit 1
+            fi
+          done
+          node scripts/wording-check.mjs
+      - name: Install the Turbo SDK from the lockfile (no install scripts)
+        if: inputs.mode != 'dry-run'
+        run: npm ci --prefix scripts/nft-metadata --ignore-scripts --no-audit --no-fund
+      - name: Build, scan, lint, then upload (dry-run uploads nothing)
+        env:
+          MODE: ${{ inputs.mode }}
+          IMAGES_MANIFEST: ${{ inputs.images_manifest }}
+        run: |
+          set -o pipefail # also set by `shell: bash`; kept here so the exit code of the upload, not of tee, decides
+          mkdir -p out
+          args=(out)
+          if [ "$MODE" = dry-run ]; then args+=(--dry-run); fi
+          if [ "$MODE" = sandbox ]; then args+=(--sandbox); fi
+          if [ -n "$IMAGES_MANIFEST" ]; then args+=(--images "$IMAGES_MANIFEST"); fi
+          node scripts/nft-metadata/upload-arweave.mjs "${args[@]}" | tee out/run.txt
       - name: Summary
         if: always()
+        env:
+          MODE: ${{ inputs.mode }}
         run: |
-          if [ -f out/result.json ]; then
-            { echo '### Arweave upload (${{ inputs.network }})'; echo '```json'; cat out/result.json; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
-          fi
-      - uses: actions/upload-artifact@v4
+          {
+            echo "### Arweave upload ($MODE)"
+            echo '```'
+            head -n 120 out/run.txt 2>/dev/null || true
+            echo '```'
+            if [ -f out/result.json ]; then echo 'Record (commit as deployments/nft-arweave-final.json after a mainnet run):'; echo '```json'; cat out/result.json; echo '```'; fi
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
-          name: nft-arweave-${{ inputs.network }}
-          path: out/result.json
+          name: nft-arweave-${{ inputs.mode }}-${{ github.run_id }}
+          path: |
+            out/run.txt
+            out/result.json
+            out/dry-run.json
+            out/metadata/
           if-no-files-found: ignore
+          retention-days: 90
+
+  check:
+    if: github.event_name == 'schedule' || inputs.mode == 'check'
+    runs-on: ubuntu-24.04
+    # A healthy record takes minutes. A failing one retries every path (3 attempts, 20 s + 60 s backoff): the void
+    # 2026-10-14 record (one set, 4/27 + 4/27 + 0/27) took 41 min on 2026-10-24, and the final record has two sets.
+    # The timeout must not cut off the very report that shows the counts (the 48 h L1 re-upload rule reads them).
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+      - name: Restore the check log (convenience; the run artifacts are the record)
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: out/gateway-log.jsonl
+          key: nft-gateway-log-${{ github.run_id }}
+          restore-keys: nft-gateway-log-
+      - name: Gateway + Arweave L1 check of deployments/nft-arweave-final.json
+        id: check
+        run: |
+          mkdir -p out
+          set +e
+          node scripts/nft-metadata/check-gateways.mjs --json out/check.json --log out/gateway-log.jsonl | tee out/check.txt
+          echo "status=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+      - name: Summary and 7-day verdict
+        if: always()
+        run: |
+          {
+            echo '### Artifact metadata: gateway + Arweave L1 check'
+            echo '```'
+            cat out/check.txt 2>/dev/null || true
+            if [ -s out/gateway-log.jsonl ]; then echo; node scripts/nft-metadata/check-gateways.mjs --verdict out/gateway-log.jsonl || true; fi
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Save the check log
+        if: always() && hashFiles('out/gateway-log.jsonl') != ''
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: out/gateway-log.jsonl
+          key: nft-gateway-log-${{ github.run_id }}
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: nft-gateway-check-${{ github.run_id }}
+          path: |
+            out/check.json
+            out/check.txt
+          if-no-files-found: ignore
+          retention-days: 90
+      - name: Fail when no metadata set passed today
+        if: steps.check.outputs.status != '0'
+        run: exit 1
