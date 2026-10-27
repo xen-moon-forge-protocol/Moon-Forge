@@ -2,7 +2,21 @@ name: Oracle epoch (weekly)
 
 # Builds and publishes the next epoch, auto-claims it for burners, commits the public
 # epoch file and redeploys the site. Everything it does is reproducible with
-# `npm run verify -- frontend/public/epochs/epoch-N.json --full`.
+# `npm run verify -- frontend/public/epochs/epoch-N.json --full`. On the upgraded program only, it then
+# publishes the week's extra epoch once its file is pushed (`npm run publish-extra`); before the upgrade that
+# step finds the extra pot not live and does nothing.
+#
+# The second job writes and commits ops/heartbeat.json (UTC time, last epoch, balances) on every
+# scheduled or real run, epoch or not (at most once a day). That weekly commit, made with the GITHUB_TOKEN,
+# is what keeps the repository "active": GitHub disables every scheduled workflow of a public repository
+# after 60 days without a commit, and weeks without burns produce none. The keeper and the health check
+# start this workflow with heartbeat=true when the last commit is getting old, because GitHub fires only a
+# small share of cron ticks. ops/ is outside frontend/, so the commit does not trigger a site deploy.
+# The same job is the second push path for the epoch files: when the epoch job published on-chain but
+# could not push its commit, the files it kept as a run artifact are committed from here.
+# Nothing here needs a person, a personal access token or a paid service.
+# Actions pinned to commit SHAs (version in the comment), runner image pinned, Node 22, `npm ci --ignore-scripts`
+# (no oracle dependency needs an install script; see keeper.yml).
 
 on:
   schedule:
@@ -13,10 +27,13 @@ on:
         description: 'Dry run (build only, publish nothing)'
         type: boolean
         default: true
+      heartbeat:
+        description: 'Heartbeat only: commit ops/heartbeat.json, build no epoch'
+        type: boolean
+        default: false
 
-permissions:
-  contents: write
-  actions: write
+# permissions are declared per job (least privilege); nothing is granted at the workflow level
+permissions: {}
 
 concurrency:
   group: oracle
@@ -24,26 +41,53 @@ concurrency:
 
 jobs:
   epoch:
-    runs-on: ubuntu-latest
-    if: ${{ vars.ORACLE_ENABLED == 'true' }}
+    # the job is named "epoch" on purpose: the health check judges this workflow by the runs where it ran
+    runs-on: ubuntu-24.04
+    if: ${{ vars.ORACLE_ENABLED == 'true' && !inputs.heartbeat }}
+    # The only job that reads the oracle key. With the `oracle` environment (owner sheet 9.2) the key can live as an
+    # environment secret that only this job, and only from the branches the environment allows (main), can read.
+    # GitHub's documented behaviour makes this a no-op while the environment holds no secret: a job that references an
+    # environment still reads the repository secrets and variables, and a secret of the same name at the environment
+    # level takes precedence over the repository one; an environment that does not exist yet is created on the first
+    # run, with no protection rule. Required reviewers or a wait timer would delay the Sunday run, so none is set.
+    # The heartbeat job reads no secret and declares no environment.
+    environment: oracle
+    # A job timeout is a cancellation on GitHub, which would skip the rescue steps below and lose the only
+    # copy of an epoch that is already on-chain; so the job limit is generous and the long step has its own
+    # limit (a step timeout is a plain failure, after which the rescue steps still run).
+    timeout-minutes: 180
+    permissions:
+      contents: write # commit the epoch files
+      actions: write # start the site deploy
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
           cache-dependency-path: oracle/package-lock.json
       - name: Install
         working-directory: oracle
-        run: npm ci
+        run: npm ci --ignore-scripts
+      # Informational here (CI is where they block): after walk-away nobody can fix a test file, and a test
+      # that fails for an environmental reason must not stop the weekly payout. A failure is still visible
+      # as a warning annotation on the run.
       - name: Unit tests
         working-directory: oracle
-        run: npm test
+        continue-on-error: true
+        run: npm test || { echo "::warning::oracle unit tests failed; the epoch is still built and published (see CI for the failing test)"; exit 1; }
       - name: Build / publish epoch
+        id: epoch
         working-directory: oracle
+        timeout-minutes: 60
         env:
           ORACLE_PRIVATE_KEY: ${{ secrets.ORACLE_PRIVATE_KEY }}
           EPOCHS_DIR: ../frontend/public/epochs
+          # optional comma list of X1 endpoints tried before the default one (oracle/src/x1-rpc.ts); empty = unchanged
+          X1_RPC_URLS: ${{ vars.X1_RPC_URLS }}
+          # D-17: 'true' = an epoch whose anomaly-gate hold ran out is not released until an operator clears it (a heartbeat,
+          # which pays nothing, is never held; the health check is amber while it is set: review r4 finding 12)
+          GATE_BLOCK: ${{ vars.GATE_BLOCK }}
           PORTAL_ETH: ${{ vars.PORTAL_ETH }}
           START_ETH: ${{ vars.START_ETH }}
           PORTAL_OP: ${{ vars.PORTAL_OP }}
@@ -66,29 +110,47 @@ jobs:
           else
             npm run epoch
           fi
-      # Runs even when the step above failed: the file is written before publishing, so an RPC error
-      # after an on-chain publish must not lose the only copy of the epoch data.
+      # Both rescue steps run whenever the step above started, whether it succeeded, failed, timed out or the
+      # job was cancelled: the file is written before publishing, so an RPC error after an on-chain publish
+      # must not lose the only copy of the epoch data.
       - name: Keep a copy of the epoch files
-        if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v4
+        if: ${{ always() && steps.epoch.outcome != 'skipped' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: epochs-${{ github.run_id }}
           path: frontend/public/epochs
           retention-days: 90
       - name: Commit epoch files
-        if: ${{ !cancelled() }}
-        run: |
-          git config user.name "moon-forge-oracle"
-          git config user.email "oracle@users.noreply.github.com"
-          git add frontend/public/epochs
-          if git diff --cached --quiet; then echo "nothing new"; exit 0; fi
-          git commit -m "oracle: publish epoch data"
-          git push
-          gh workflow run deploy-frontend.yml
+        id: commit
+        if: ${{ always() && steps.epoch.outcome != 'skipped' }}
         env:
           GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add frontend/public/epochs
+          if git diff --cached --quiet; then echo "nothing new"; exit 0; fi
+          # tells the announcement step that this run published something: a later run of the same slot (a
+          # late cron tick after the keeper already started the epoch) finds nothing new and announces nothing.
+          # Only a new or changed base epoch file counts: a run the anomaly gate held commits its hold record
+          # (gate/epoch-<n>.json) alone, and must not announce last week's epoch as new (r4-fix, review r4 finding 6)
+          if git diff --cached --name-only | grep -Eq '^frontend/public/epochs/epoch-[0-9]+\.json$'; then echo "published=true" >> "$GITHUB_OUTPUT"; fi
+          git commit -m "oracle: publish epoch data"
+          # another commit (a heartbeat, a person) may have landed meanwhile: rebase and retry, never force
+          for attempt in 1 2 3 4 5 6; do
+            if git pull --rebase origin "$BRANCH" && git push origin "HEAD:$BRANCH"; then
+              gh workflow run deploy-frontend.yml -R "$GITHUB_REPOSITORY" || echo "::warning::site deploy not started; the next epoch run or a manual run of deploy-frontend.yml will"
+              exit 0
+            fi
+            git rebase --abort 2>/dev/null || true
+            echo "push attempt $attempt failed; retrying in 30 s"
+            sleep 30
+          done
+          echo "::error::could not push the epoch files (they are in the run artifact epochs-${{ github.run_id }}; the heartbeat job commits them from there)"
+          exit 1
       - name: Announce the epoch on the project's channels
-        if: ${{ success() && vars.ANNOUNCE_ENABLED == 'true' && !(github.event_name == 'workflow_dispatch' && inputs.dry) }}
+        if: ${{ success() && steps.commit.outputs.published == 'true' && steps.epoch.outputs.held != 'true' && vars.ANNOUNCE_ENABLED == 'true' && !(github.event_name == 'workflow_dispatch' && inputs.dry) }}
         working-directory: oracle
         env:
           EPOCHS_DIR: ../frontend/public/epochs
@@ -99,3 +161,152 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: npm run announce -- epoch
+      # ── the extra pot (upgraded program only; dormant before it) ────────────────────────────────────────────
+      # A10.11, durable first: an extra epoch is published only once its file is in the pushed history, so these
+      # steps run after the commit above has pushed this run's files, and only then. `npm run publish-extra` refuses
+      # unless the same file (same data hash) is at origin/<branch>, and never sends an extra epoch twice. Before the
+      # upgrade (the extra pot not live) it reads the detection only, prints "extra pot not live", sends nothing and
+      # changes no file, so the steps after it do nothing: the v2 Sunday run publishes, commits and announces exactly
+      # as before. They come after the announcement and never fail the job (the health check judges this workflow by
+      # its epoch job); a week whose extra step fails is published by the next weekly run, which publishes the
+      # pending earlier extra epochs first.
+      - name: Publish the extra epoch (upgraded program only)
+        id: extra
+        if: ${{ !cancelled() && steps.epoch.outcome == 'success' && steps.commit.outcome == 'success' && steps.commit.outputs.published == 'true' && steps.epoch.outputs.held != 'true' && !(github.event_name == 'workflow_dispatch' && inputs.dry) }}
+        working-directory: oracle
+        continue-on-error: true
+        timeout-minutes: 15
+        env:
+          ORACLE_PRIVATE_KEY: ${{ secrets.ORACLE_PRIVATE_KEY }}
+          EPOCHS_DIR: ../frontend/public/epochs
+          X1_RPC_URLS: ${{ vars.X1_RPC_URLS }}
+          EXTRA_DURABLE_REF: origin/${{ github.ref_name }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          git fetch -q origin "$BRANCH"
+          rc=0
+          npm run publish-extra || rc=$?
+          # a landed publication writes its {tx, slot} into extra-<n>.json: the record the next two steps keep
+          if [ -n "$(git status --porcelain -- ../frontend/public/epochs)" ]; then echo "recorded=true" >> "$GITHUB_OUTPUT"; fi
+          if [ "$rc" -ne 0 ]; then echo "::warning::the extra epoch was not published (exit $rc); the next weekly run publishes the pending extra epochs first"; fi
+          exit "$rc"
+      # the heartbeat job's rescue copies this artifact over the branch: refresh it so it carries the record
+      - name: Keep a copy of the extra publication record
+        if: ${{ always() && steps.extra.outputs.recorded == 'true' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: epochs-${{ github.run_id }}
+          path: frontend/public/epochs
+          retention-days: 90
+          overwrite: true
+      - name: Commit the extra publication record
+        if: ${{ always() && steps.extra.outputs.recorded == 'true' }}
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add frontend/public/epochs
+          if git diff --cached --quiet; then echo "nothing new"; exit 0; fi
+          git commit -m "oracle: extra epoch publication record"
+          for attempt in 1 2 3 4 5 6; do
+            if git pull --rebase origin "$BRANCH" && git push origin "HEAD:$BRANCH"; then
+              gh workflow run deploy-frontend.yml -R "$GITHUB_REPOSITORY" || echo "::warning::site deploy not started; the next epoch run or a manual run of deploy-frontend.yml will"
+              exit 0
+            fi
+            git rebase --abort 2>/dev/null || true
+            echo "push attempt $attempt failed; retrying in 30 s"
+            sleep 30
+          done
+          echo "::warning::could not push the extra publication record; the heartbeat job commits it from the run artifact, and publish-extra records it again (idempotent)"
+          exit 1
+
+  heartbeat:
+    name: Repository heartbeat
+    needs: epoch
+    # after the epoch job (so its commit lands first), whatever that job did, including skipped (ORACLE_ENABLED
+    # unset) or failed; not on a manual dry run, which should leave no trace
+    if: ${{ always() && (github.event_name == 'schedule' || inputs.heartbeat || !inputs.dry) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write # the heartbeat commit, and the epoch files when the epoch job could not push them
+      actions: write # start the site deploy after such a rescue commit (nothing else)
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: oracle/package-lock.json
+      - working-directory: oracle
+        run: npm ci --ignore-scripts
+      - name: Write ops/heartbeat.json
+        working-directory: oracle
+        continue-on-error: true
+        env:
+          X1_RPC_URLS: ${{ vars.X1_RPC_URLS }}
+        run: timeout 150 npx ts-node src/heartbeat.ts ../ops/heartbeat.json
+      # Second push path for the epoch data: the epoch job keeps frontend/public/epochs as a run artifact before
+      # publishing. If its own commit step failed (six push attempts, a rule added later, a conflict), the files
+      # are committed from here, so an epoch that is on-chain never loses its public file. Same-run artifact:
+      # needs no token. Missing (epoch job skipped, or it failed before keeping the files) is fine.
+      - name: Fetch the epoch files kept by the epoch job
+        if: ${{ needs.epoch.result != 'skipped' }}
+        continue-on-error: true
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: epochs-${{ github.run_id }}
+          path: /tmp/epochs-rescue
+      - name: Commit it
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          # a heartbeat with no chain data is still a heartbeat
+          if [ ! -s ops/heartbeat.json ]; then
+            mkdir -p ops
+            printf '{\n  "utc": "%s",\n  "error": "heartbeat writer failed; see the run log"\n}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > ops/heartbeat.json
+          fi
+          cp ops/heartbeat.json /tmp/heartbeat.json
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # always start from the branch tip, so a commit that landed meanwhile can never cause a conflict
+          for attempt in 1 2 3 4 5 6; do
+            git fetch origin "$BRANCH" && git reset -q --hard "origin/$BRANCH"
+            # 1. epoch files the branch does not have yet (normally none: the epoch job pushed them itself)
+            rescued=false
+            if ls /tmp/epochs-rescue/*.json >/dev/null 2>&1; then
+              mkdir -p frontend/public/epochs
+              cp /tmp/epochs-rescue/*.json frontend/public/epochs/
+              git add frontend/public/epochs
+              if ! git diff --cached --quiet; then
+                rescued=true
+                echo "::warning::the epoch files were not on $BRANCH: committing them from the run artifact"
+              fi
+            fi
+            # 2. the heartbeat itself, at most once a day (the keeper and the health check may both ask for one)
+            last=$(jq -r '.utc // empty' ops/heartbeat.json 2>/dev/null || true)
+            if [ "$rescued" = false ] && [ -n "$last" ] && [ $(( $(date -u +%s) - $(date -u -d "$last" +%s 2>/dev/null || echo 0) )) -lt 86400 ]; then
+              echo "the committed heartbeat ($last) is younger than 24 h: nothing to commit"
+              exit 0
+            fi
+            mkdir -p ops && cp /tmp/heartbeat.json ops/heartbeat.json
+            git add ops/heartbeat.json
+            msg="ops: heartbeat $(date -u +%F) [skip ci]"
+            [ "$rescued" = true ] && msg="oracle: publish epoch data (from the run artifact) + heartbeat [skip ci]"
+            if git commit -q -m "$msg" && git push origin "HEAD:$BRANCH"; then
+              echo "committed: $msg"
+              if [ "$rescued" = true ]; then
+                gh workflow run deploy-frontend.yml -R "$GITHUB_REPOSITORY" || echo "::warning::site deploy not started; the next epoch run or a manual run of deploy-frontend.yml will"
+              fi
+              exit 0
+            fi
+            echo "push attempt $attempt failed; retrying in 30 s"
+            sleep 30
+          done
+          echo "::error::could not commit the heartbeat"
+          exit 1

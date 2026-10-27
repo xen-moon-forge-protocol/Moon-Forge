@@ -18,6 +18,7 @@ import { CHAINS, EPOCHS_DIR } from "./config";
 import { withFailover } from "./evm";
 import { xenMarket, xntUsd } from "./pricing";
 import { connect, fetchConfig, PDA } from "./x1";
+import { claimsLineV3, dailyReleaseV3 } from "./flow-v3";
 
 const SITE = "https://xen-moon-forge-protocol.github.io/Moon-Forge/";
 const XNT = 1e9;
@@ -64,21 +65,51 @@ const xnt = (v: number) => (v >= 100 ? v.toFixed(0) : v >= 1 ? v.toFixed(2) : v.
 
 // ─── messages ──────────────────────────────────────────────────────────────
 
+/** v3 (A11): the last published file's rewards version decides which numbers the posts quote. */
+const isV3 = (f: any): boolean => !!f && f.version === 3;
+
 async function weeklyText(): Promise<string> {
   const [pool, price, week] = await Promise.all([poolFacts(), xntUsd(), weekCounted()]);
-  const budgetUsd = pool.budgetXnt * price.usd;
-  const left = Math.max(0, budgetUsd - week.countedUsd);
+  const last = publishedEpochs().pop();
   const head = `Moon Forge · week of ${new Date().toISOString().slice(0, 10)}`;
-  const core = [
-    `• Pool ${xnt(pool.poolXnt)} XNT; this epoch pays at most ${xnt(pool.budgetXnt)} XNT (${usd(budgetUsd)}) in total`,
-    left >= 1 ? `• Fair burn capacity left: ${usd(left)}` : `• Small pool: games, Artifacts and donations grow it`,
-  ];
+  let core: string[];
+  if (isV3(last)) {
+    // v3: the week's cash capacity is fixed by the pool at the last publication (A2): C = 8% × F_ref (A13.1: no earmark, no drop reserve)
+    const cashXnt = Number(BigInt(last.capacity.cash)) / XNT;
+    const cashUsd = cashXnt * price.usd;
+    const left = Math.max(0, cashUsd - week.countedUsd);
+    core = [
+      `• Pool ${xnt(pool.poolXnt)} XNT; this week's burn capacity ${xnt(cashXnt)} XNT (${usd(cashUsd)}), first come first served, ${xnt(dailyReleaseV3(last.capacity) / XNT)} XNT released per day`,
+      left >= 1 ? `• Capacity left this week: ${usd(left)}` : `• Small pool: games, Artifacts and donations grow it`,
+    ];
+  } else {
+    const budgetUsd = pool.budgetXnt * price.usd;
+    const left = Math.max(0, budgetUsd - week.countedUsd);
+    core = [
+      `• Pool ${xnt(pool.poolXnt)} XNT; this epoch pays at most ${xnt(pool.budgetXnt)} XNT (${usd(budgetUsd)}) in total`,
+      left >= 1 ? `• Fair burn capacity left: ${usd(left)}` : `• Small pool: games, Artifacts and donations grow it`,
+    ];
+  }
   // optional lines, dropped from the end if the post would exceed X's limit
   const optional = [`• Live on ${week.liveChains.map(short).join(", ")}`, `• Genesis claims: ${pool.genesisClaimed}/120`];
   const tail = `On-chain numbers: ${SITE}start`;
   let lines = [head, ...core, ...optional, tail];
   while (xLength(lines.join("\n")) > 280 && optional.length) { optional.pop(); lines = [head, ...core, ...optional, tail]; }
   return lines.join("\n");
+}
+
+/**
+ * Round 4: the receipt of a heartbeat base epoch (a window that valued no burn, published with no entry and budget 0 on
+ * the upgraded program so the oracle seat survives a quiet week). Facts only: nothing was paid, nothing changed hands.
+ */
+export function heartbeatText(last: { epoch: number; chains?: { skipped?: boolean; name?: string }[] }): string {
+  const skipped = (last.chains ?? []).filter((c) => c.skipped).map((c) => short(String(c.name)));
+  return [
+    `Epoch ${last.epoch} published on X1 (rewards v3): a heartbeat.`,
+    `• No burn to value in this window: 0 entries, budget 0 XNT, nothing paid${skipped.length ? `; ${skipped.join(", ")} read next week` : ""}`,
+    `• A weekly publication keeps the oracle seat alive; root and data hash on-chain, anyone can recompute the public file`,
+    `Burn status: ${SITE}missions`,
+  ].join("\n");
 }
 
 async function epochText(): Promise<string | null> {
@@ -88,6 +119,20 @@ async function epochText(): Promise<string | null> {
   if (ageH > 36) return null; // only right after publication
   const chains = [...new Set((last.burns ?? []).map((b: any) => CHAINS.find((c) => c.chainId === b.chainId)?.name).filter(Boolean))];
   const budget = last.publish.budget ? Number(BigInt(last.publish.budget)) / XNT : null;
+  if (isV3(last) && last.heartbeat === true) return heartbeatText(last);
+  if (isV3(last)) {
+    // v3 fields: paid from the cash capacity, missions locked on their own tier, skipped chains (their burns wait)
+    const paid = Number(BigInt(last.capacity.base) + BigInt(last.capacity.bandPaid)) / XNT;
+    const skipped = (last.chains ?? []).filter((c: any) => c.skipped).map((c: any) => short(String(c.name)));
+    const lines = [
+      `Epoch ${last.epoch} published on X1 (rewards v3).`,
+      `• ${(last.burns ?? []).length} burns on ${chains.map((n) => short(String(n))).join(", ") || "-"}, ${(last.leaves ?? []).length} entries, ${xnt(paid)} XNT paid from this week's capacity${budget !== null ? ` (budget ${xnt(budget)} XNT)` : ""}`,
+      `• ${last.capacity.lockedMissions} missions locked (${last.capacity.splitMissions ?? 0} in part), ${last.capacity.convertedMissions} paid as Launchpad${skipped.length ? `; ${skipped.join(", ")} read next week` : ""}`,
+      claimsLineV3(last.publish as { claims?: { claimed?: number; failed?: number } } | undefined, (last.leaves ?? []).length),
+      `Check your claim: ${SITE}missions`,
+    ];
+    return lines.join("\n");
+  }
   return [
     `Epoch ${last.epoch} published on X1.`,
     `• ${(last.burns ?? []).length} burns on ${chains.map((n) => short(String(n))).join(", ") || "-"}, ${(last.leaves ?? []).length} entries${budget !== null ? `, budget ${xnt(budget)} XNT` : ""}`,
@@ -122,9 +167,15 @@ async function postX(text: string): Promise<string> {
 async function postTelegram(text: string): Promise<string> {
   const { TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID } = process.env;
   if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) return "Telegram: no keys, skipped";
-  const r = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chat_id: TELEGRAM_CHAT_ID, text }),
-  });
+  // the token is part of the URL: a network error must not carry it into the log, so it is rethrown without the cause
+  let r: Response;
+  try {
+    r = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chat_id: TELEGRAM_CHAT_ID, text }),
+    });
+  } catch (e) {
+    throw new Error(`Telegram: request failed (${(e as any)?.cause?.code ?? (e as any)?.name ?? "network error"})`);
+  }
   if (!r.ok) throw new Error(`Telegram: HTTP ${r.status} ${(await r.text()).slice(0, 200)}`);
   return "Telegram: posted";
 }
@@ -146,4 +197,8 @@ async function main() {
   }
 }
 
-main().catch((e) => { console.error(e); process.exit(1); });
+/** the X length of a post (exported for the tests) */
+export { xLength };
+
+// run as a script only (the tests import heartbeatText without posting anything)
+if (require.main === module) main().catch((e) => { console.error(e); process.exit(1); });

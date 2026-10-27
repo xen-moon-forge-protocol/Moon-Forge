@@ -8,6 +8,24 @@ name: Keeper (near-continuous)
 # Each run loops at least 14 minutes (a pass every 15 s), then stays up to 5.5 h more while some
 # upkeep with a clock on it is due (Prediction locks and settlements, draws, Moon Wars turns), and
 # hands over to a new run if such work remains. Idle runs end after 14 minutes.
+#
+# GitHub fires only a small share of the cron ticks of a public repository (in practice a run every
+# few hours, not every 15 minutes), so this run also does three things on behalf of the other schedules
+# before its loop starts: it starts the oracle run when the weekly epoch is due, it asks the oracle
+# workflow for a heartbeat commit when the repository's last commit is getting old (GitHub disables
+# every schedule after 60 days without a commit), and it starts the daily health check when the last one
+# is older than 22 h. All through the GITHUB_TOKEN; no person, no PAT.
+#
+# Rewards v3 only (dormant until the switch, nothing changes before it): the feed jobs write the hourly week-so-far
+# file the site and the agent kit quote a burn from, and deploy it with the site. While it is live, every run ends just
+# after the next hour boundary and hands over, so one run starts each hour (see "Is the week-so-far feed live?").
+#
+# The loop signs with the KEEPER_PRIVATE_KEY secret only. It never falls back to ORACLE_PRIVATE_KEY: without the
+# keeper secret the loop does not run and the run fails (red, so the health check reports it), while the steps that
+# need no key (starting the oracle run, the heartbeat, the health check, the feed) still run.
+# Hygiene: actions pinned to commit SHAs (version in the comment), runner image pinned, Node 22, `npm ci --ignore-scripts`
+# (no dependency here needs an install script: the only ones with a script are the optional bufferutil and
+# utf-8-validate, which load their bundled prebuilds or are skipped, and esbuild's install check in the site build).
 
 on:
   schedule:
@@ -16,7 +34,7 @@ on:
 
 permissions:
   contents: read
-  actions: write # only to start the weekly oracle run when it is due
+  actions: write # to start the oracle run, the heartbeat and the next keeper run
 
 concurrency:
   group: keeper
@@ -24,40 +42,356 @@ concurrency:
 
 jobs:
   keep:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     if: ${{ vars.KEEPER_ENABLED == 'true' }}
     timeout-minutes: 345
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
           cache-dependency-path: oracle/package-lock.json
       - working-directory: oracle
-        run: npm ci
+        run: npm ci --ignore-scripts
+
+      # ── weekly schedules, backed up here because cron is unreliable ──────────────────────────
+      # busy: a run in any not-yet-finished state. A run held back by the `oracle` concurrency group reports
+      # pending/waiting, and a dispatch sent then would cancel it (GitHub keeps one pending run per group).
+      # recent: the newest oracle run (epoch or heartbeat) ended less than 4 h ago. While the epoch is due
+      # but a run keeps failing (a dead chain RPC, say), this spaces the retries to one every 4 h instead of
+      # one per keeper run; the window is 48 h, so nothing is lost.
+      - name: State of the oracle workflow (busy / recent)
+        id: oracle
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          busy=false
+          for s in queued in_progress pending waiting requested; do
+            n=$(gh run list -R "$GITHUB_REPOSITORY" -w oracle.yml -s "$s" --json databaseId --jq 'length' 2>/dev/null || echo 0)
+            [ "${n:-0}" -gt 0 ] && busy=true
+          done
+          recent=false
+          last=$(gh run list -R "$GITHUB_REPOSITORY" -w oracle.yml --limit 1 --json updatedAt --jq '.[0].updatedAt // empty' 2>/dev/null || true)
+          if [ -n "$last" ] && [ $(( $(date -u +%s) - $(date -u -d "$last" +%s 2>/dev/null || echo 0) )) -lt 14400 ]; then recent=true; fi
+          echo "busy=$busy" >> "$GITHUB_OUTPUT"
+          echo "recent=$recent" >> "$GITHUB_OUTPUT"
+          echo "oracle busy: $busy; last run ${last:-none}; recent (< 4 h): $recent"
+      - name: Is the weekly epoch due?
+        id: due
+        if: ${{ vars.ORACLE_ENABLED == 'true' && steps.oracle.outputs.busy != 'true' }}
+        continue-on-error: true # an RPC hiccup must not stop the keeper loop below
+        working-directory: oracle
+        env:
+          X1_RPC_URLS: ${{ vars.X1_RPC_URLS }} # optional X1 endpoints tried before the default one (oracle/src/x1-rpc.ts)
+          # D-17: 'true' keeps an epoch whose anomaly-gate hold ran out from being dispatched until an operator clears it
+          # (a heartbeat, which pays nothing, is never held: review r4 finding 12)
+          GATE_BLOCK: ${{ vars.GATE_BLOCK }}
+        run: npm run --silent due
+      - name: Start the oracle run
+        if: ${{ steps.due.outputs.due == 'true' && steps.oracle.outputs.recent != 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for _ in 1 2 3; do
+            gh workflow run oracle.yml -R "$GITHUB_REPOSITORY" -f dry=false -f heartbeat=false && exit 0
+            sleep 20
+          done
+          echo "::warning::could not start the oracle run; the next keeper run will try again"
+      - name: Ask for a heartbeat commit when the last commit is getting old
+        if: ${{ steps.due.outputs.due != 'true' && steps.oracle.outputs.busy != 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          last=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_REF_NAME" --jq '.commit.committer.date' 2>/dev/null || true)
+          if [ -z "$last" ]; then echo "::warning::could not read the last commit"; exit 0; fi
+          age=$(( ( $(date -u +%s) - $(date -u -d "$last" +%s) ) / 86400 ))
+          echo "last commit on $GITHUB_REF_NAME: $last ($age days ago)"
+          if [ "$age" -ge 6 ]; then
+            gh workflow run oracle.yml -R "$GITHUB_REPOSITORY" -f heartbeat=true && echo "heartbeat requested" \
+              || echo "::warning::could not request the heartbeat; the next run will"
+          fi
+      # The daily health check has the same problem as every schedule here (few ticks fire), and its 24 h
+      # comparisons need a run a day: start it when the last one is older than 22 h and none is running.
+      - name: Start the daily health check when it is overdue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          running=$(gh run list -R "$GITHUB_REPOSITORY" -w health.yml --limit 5 --json status --jq '[.[] | select(.status != "completed")] | length' 2>/dev/null || echo 1)
+          if [ "${running:-1}" -gt 0 ]; then echo "a health run is queued or running"; exit 0; fi
+          last=$(gh run list -R "$GITHUB_REPOSITORY" -w health.yml --limit 1 --json updatedAt --jq '.[0].updatedAt // empty' 2>/dev/null || true)
+          if [ -n "$last" ] && [ $(( $(date -u +%s) - $(date -u -d "$last" +%s 2>/dev/null || echo 0) )) -lt 79200 ]; then
+            echo "last health run $last: not due"; exit 0
+          fi
+          gh workflow run health.yml -R "$GITHUB_REPOSITORY" && echo "health check started" \
+            || echo "::warning::could not start the health check; the next keeper run will"
+
+      # ── the week-so-far feed needs one run an hour (rewards v3; dormant until the switch) ─────────
+      # The feed job below writes the hourly week-so-far file the site and the agent kit quote from. It is live only
+      # once the next epoch is built under the v3 rules on the upgraded program (oracle/src/feed-v3.ts feedGateV3);
+      # until then this step reports false and the loop and the hand-over below run exactly as before. While it is
+      # live, every run ends just after the next hour boundary and always hands over, so the next run's feed job writes
+      # that hour's file. A failed read reports false (this run then behaves as before; the next run asks again).
+      - name: Is the week-so-far feed live?
+        id: feedgate
+        if: ${{ vars.ORACLE_ENABLED == 'true' }}
+        continue-on-error: true
+        working-directory: oracle
+        env:
+          X1_RPC_URLS: ${{ vars.X1_RPC_URLS }}
+        run: npm run --silent feed -- --gate-only
+
+      # ── the keeper key: KEEPER_PRIVATE_KEY only, fail closed ─────────────────────────────────────
+      # The oracle key publishes the epochs; the keeper signs with its own key. Without the KEEPER_PRIVATE_KEY secret
+      # this step fails, so the loop below is skipped and the run ends red; the steps above and the checks after the
+      # loop (they use always()) still run, and a skipped loop never asks for the scheduled-run retry. The secret is
+      # only tested for being set, never printed.
+      - name: Keeper key (KEEPER_PRIVATE_KEY only, never the oracle key)
+        id: key
+        env:
+          KEEPER_PRIVATE_KEY: ${{ secrets.KEEPER_PRIVATE_KEY }}
+        run: |
+          if [ -z "$KEEPER_PRIVATE_KEY" ]; then
+            echo "::error::the repository secret KEEPER_PRIVATE_KEY is not set: the keeper loop does not run (keeper.yml never falls back to ORACLE_PRIVATE_KEY)"
+            exit 1
+          fi
+          echo "KEEPER_PRIVATE_KEY is set"
+
+      # ── the loop ─────────────────────────────────────────────────────────────────────────────
       # At least 14 min; then up to 5.5 h more, but only while some upkeep with a clock on it is due
       # before then (Prediction locks / settlements, draws, Moon Wars turns). Idle runs end after 14 min.
+      # While the week-so-far feed is live: until 75 s after the next hour boundary, then hand over.
+      # The oracle CLI reads its signer from ORACLE_PRIVATE_KEY (the variable name is historical): here it is the keeper key.
       - name: Keeper loop
         id: loop
         working-directory: oracle
         env:
-          ORACLE_PRIVATE_KEY: ${{ secrets.KEEPER_PRIVATE_KEY || secrets.ORACLE_PRIVATE_KEY }}
-        run: npm run keeper -- --for 840 --max 19800
-      - name: Hand over to the next run when time-sensitive upkeep is still due
-        if: ${{ always() && steps.loop.outputs.more == 'true' }}
-        run: gh workflow run keeper.yml -R "$GITHUB_REPOSITORY"
+          ORACLE_PRIVATE_KEY: ${{ secrets.KEEPER_PRIVATE_KEY }}
+          X1_RPC_URLS: ${{ vars.X1_RPC_URLS }}
+          FEED_LIVE: ${{ steps.feedgate.outputs.active }}
+        run: |
+          if [ "$FEED_LIVE" = "true" ]; then
+            t=$(( 3600 - $(date -u +%s) % 3600 + 75 ))
+            npm run keeper -- --for "$t" --max "$t"
+          else
+            npm run keeper -- --for 840 --max 19800
+          fi
+
+      # ── after the loop ───────────────────────────────────────────────────────────────────────
+      # A long run can cross Sunday 00:00 UTC: check the weekly epoch once more (the state read before the
+      # loop is hours old by now, so it is read again).
+      - name: State of the oracle workflow, again
+        id: oracle2
+        if: ${{ always() && vars.ORACLE_ENABLED == 'true' && steps.due.outputs.due != 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
-      # Backup to the oracle's own Sunday schedule (GitHub may delay or drop cron runs): start it once
-      # when the weekly epoch is due and nothing has been published since the slot opened.
-      - name: Is the weekly epoch due?
-        id: due
-        if: ${{ always() && vars.ORACLE_ENABLED == 'true' }}
+        run: |
+          busy=false
+          for s in queued in_progress pending waiting requested; do
+            n=$(gh run list -R "$GITHUB_REPOSITORY" -w oracle.yml -s "$s" --json databaseId --jq 'length' 2>/dev/null || echo 0)
+            [ "${n:-0}" -gt 0 ] && busy=true
+          done
+          recent=false
+          last=$(gh run list -R "$GITHUB_REPOSITORY" -w oracle.yml --limit 1 --json updatedAt --jq '.[0].updatedAt // empty' 2>/dev/null || true)
+          if [ -n "$last" ] && [ $(( $(date -u +%s) - $(date -u -d "$last" +%s 2>/dev/null || echo 0) )) -lt 14400 ]; then recent=true; fi
+          echo "busy=$busy" >> "$GITHUB_OUTPUT"
+          echo "recent=$recent" >> "$GITHUB_OUTPUT"
+          echo "oracle busy: $busy; last run ${last:-none}; recent (< 4 h): $recent"
+      - name: Is the weekly epoch due now?
+        id: due2
+        if: ${{ always() && vars.ORACLE_ENABLED == 'true' && steps.due.outputs.due != 'true' && steps.oracle2.outputs.busy != 'true' && steps.oracle2.outputs.recent != 'true' }}
+        continue-on-error: true
         working-directory: oracle
+        env:
+          X1_RPC_URLS: ${{ vars.X1_RPC_URLS }}
+          GATE_BLOCK: ${{ vars.GATE_BLOCK }}
         run: npm run --silent due
-      - name: Start the oracle run
-        if: ${{ always() && steps.due.outputs.due == 'true' }}
-        run: gh workflow run oracle.yml -R "$GITHUB_REPOSITORY" -f dry=false
+      - name: Start the oracle run (after the loop)
+        if: ${{ always() && steps.due2.outputs.due == 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
+        run: gh workflow run oracle.yml -R "$GITHUB_REPOSITORY" -f dry=false -f heartbeat=false || echo "::warning::could not start the oracle run"
+      # Hand over while time-sensitive upkeep is still due. A scheduled run whose loop failed (RPC outage, say)
+      # also gets one retry after a pause; a dispatched run never re-dispatches on failure, so a persistent
+      # failure cannot chain forever: it waits for the next cron tick, and the health check reports it.
+      # While the week-so-far feed is live the run always hands over (the feed needs a run every hour), after the
+      # next hour boundary: a loop that ended early (a failure, say) waits for it, so runs never chain faster than hourly.
+      - name: Hand over to the next run
+        if: ${{ always() && (steps.loop.outputs.more == 'true' || (steps.loop.outcome == 'failure' && github.event_name == 'schedule') || steps.feedgate.outputs.active == 'true') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LOOP_OUTCOME: ${{ steps.loop.outcome }}
+          FEED_LIVE: ${{ steps.feedgate.outputs.active }}
+        run: |
+          if [ "$FEED_LIVE" = "true" ]; then
+            # a loop that succeeded ran until just after the hour boundary; one that failed or never started waits for it
+            left=$(( 3600 - $(date -u +%s) % 3600 ))
+            if [ "$LOOP_OUTCOME" != "success" ] && [ "$left" -gt 300 ]; then
+              echo "week-so-far feed live, loop $LOOP_OUTCOME: waiting ${left} s for the next hour before handing over"
+              sleep "$left"
+            fi
+            echo "week-so-far feed live: handing over (loop: $LOOP_OUTCOME)"
+          elif [ "$LOOP_OUTCOME" = "failure" ]; then
+            echo "the loop failed: one retry after a pause"
+            sleep 300
+          else
+            echo "time-sensitive upkeep still due: handing over"
+          fi
+          for _ in 1 2 3 4 5; do
+            gh workflow run keeper.yml -R "$GITHUB_REPOSITORY" && exit 0
+            sleep 30
+          done
+          echo "::warning::could not start the next keeper run; the next cron tick will"
+
+  # ── the week-so-far feed (rewards v3): hourly, served with the site, never committed ─────────────
+  # The file the site and the agent kit quote a v3 burn from (oracle/src/feed-v3.ts; the FEED CONTRACT of
+  # agents/kit/burn.mjs), written by the same engine code as the weekly epoch build. It is published inside the GitHub
+  # Pages deployment, at <site>/feed/week-so-far.json: the same origin as the site and its epoch files (no CORS, no new
+  # host for the site's CSP), and no commit (an hourly commit would bury the history, wake every push-triggered workflow
+  # and redeploy the site anyway). A Pages deployment replaces the whole site, so this job builds the site from this
+  # run's commit exactly as deploy-frontend.yml does (oracle/test/feed.test.ts keeps the two build steps identical) and
+  # adds the file. Dormant until the switch: `npm run feed` reports active=false, and nothing is built or deployed.
+  # A failure here never fails the keeper run (the health check judges the keeper by its runs): a missing or stale feed
+  # only means no quote, because the site and the kit refuse a feed whose readings are not for the current hour.
+  feed:
+    name: Week-so-far feed
+    runs-on: ubuntu-24.04
+    if: ${{ vars.KEEPER_ENABLED == 'true' && vars.ORACLE_ENABLED == 'true' }}
+    continue-on-error: true
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      pages: read # the site's address, to read the feed it serves now
+    outputs:
+      active: ${{ steps.feed.outputs.active }}
+      sha: ${{ steps.sha.outputs.sha }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: The commit the site is built from
+        id: sha
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: oracle/package-lock.json
+      - working-directory: oracle
+        run: npm ci --ignore-scripts
+      - name: The feed the site serves now (its closed-candle readings are not read again)
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          url=$(gh api "repos/$GITHUB_REPOSITORY/pages" --jq '.html_url' 2>/dev/null || true)
+          if [ -n "$url" ] && curl -fsS --max-time 20 "${url%/}/feed/week-so-far.json" -o "$RUNNER_TEMP/prev-feed.json"; then
+            echo "previous feed read from ${url%/}/feed/week-so-far.json"
+          else
+            rm -f "$RUNNER_TEMP/prev-feed.json"
+            echo "no previous feed"
+          fi
+      - name: Write the feed (nothing while dormant)
+        id: feed
+        working-directory: oracle
+        timeout-minutes: 20
+        env:
+          EPOCHS_DIR: ../frontend/public/epochs
+          X1_RPC_URLS: ${{ vars.X1_RPC_URLS }}
+          # the same chains as the epoch build (oracle.yml)
+          PORTAL_ETH: ${{ vars.PORTAL_ETH }}
+          START_ETH: ${{ vars.START_ETH }}
+          PORTAL_OP: ${{ vars.PORTAL_OP }}
+          START_OP: ${{ vars.START_OP }}
+          PORTAL_BSC: ${{ vars.PORTAL_BSC }}
+          START_BSC: ${{ vars.START_BSC }}
+          PORTAL_POLYGON: ${{ vars.PORTAL_POLYGON }}
+          START_POLYGON: ${{ vars.START_POLYGON }}
+          PORTAL_AVAX: ${{ vars.PORTAL_AVAX }}
+          START_AVAX: ${{ vars.START_AVAX }}
+          PORTAL_BASE: ${{ vars.PORTAL_BASE }}
+          START_BASE: ${{ vars.START_BASE }}
+          PORTAL_PULSE: ${{ vars.PORTAL_PULSE }}
+          START_PULSE: ${{ vars.START_PULSE }}
+          PORTAL_MOONBEAM: ${{ vars.PORTAL_MOONBEAM }}
+          START_MOONBEAM: ${{ vars.START_MOONBEAM }}
+        run: npm run --silent feed -- --out "$RUNNER_TEMP/feed/week-so-far.json" --prev-feed "$RUNNER_TEMP/prev-feed.json"
+      - name: Set up Node for the site
+        if: ${{ steps.feed.outputs.active == 'true' }}
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install the site's dependencies
+        if: ${{ steps.feed.outputs.active == 'true' }}
+        working-directory: frontend
+        run: npm ci --ignore-scripts
+      # site build: the same commands as deploy-frontend.yml's "Build" step (checked by oracle/test/feed.test.ts)
+      - name: Build the site (as deploy-frontend.yml builds it)
+        if: ${{ steps.feed.outputs.active == 'true' }}
+        working-directory: frontend
+        run: |
+          npm run build
+          # the build prerenders every route (dist/<route>/index.html, with its own text, canonical and FAQ) and
+          # dist/404.html; never overwrite those, only fill a route the prerender did not write, so deep links
+          # (shared links, crawlers, agents) still answer HTTP 200
+          [ -f dist/404.html ] || cp dist/index.html dist/404.html
+          for r in start faq forge missions artifacts nft marketplace games donate whitepaper transparency; do
+            [ -f "dist/$r/index.html" ] || { mkdir -p "dist/$r" && cp dist/index.html "dist/$r/index.html"; }
+          done
+        env:
+          NODE_ENV: production
+      - name: Add the feed to the site
+        if: ${{ steps.feed.outputs.active == 'true' }}
+        run: |
+          mkdir -p frontend/dist/feed
+          cp "$RUNNER_TEMP/feed/week-so-far.json" frontend/dist/feed/week-so-far.json
+      # (the comment's last words keep oracle/test/feed.test.ts's pattern matching until it accepts a SHA pin)
+      - name: Keep the site with the feed as the Pages artifact
+        if: ${{ steps.feed.outputs.active == 'true' }}
+        uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3.0.1
+        with:
+          name: github-pages-feed
+          path: frontend/dist
+          retention-days: 1
+
+  # No concurrency group with deploy-frontend.yml on purpose: a queued job would cancel a site deploy waiting in that
+  # group. Instead the deployment is skipped when a site change reached the branch after this run's commit (that change
+  # has its own deploy; the next hour's feed is built on it).
+  feed-deploy:
+    name: Deploy the site with the feed
+    needs: feed
+    if: ${{ needs.feed.outputs.active == 'true' }}
+    runs-on: ubuntu-24.04
+    continue-on-error: true
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Is this still the newest site?
+        id: fresh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUILT: ${{ needs.feed.outputs.sha }}
+        run: |
+          head=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_REF_NAME" --jq '.sha' 2>/dev/null || true)
+          if [ -z "$head" ]; then echo "::warning::could not read the branch head: not deploying"; echo "ok=false" >> "$GITHUB_OUTPUT"; exit 0; fi
+          if [ "$head" = "$BUILT" ]; then echo "ok=true" >> "$GITHUB_OUTPUT"; exit 0; fi
+          n=$(gh api "repos/$GITHUB_REPOSITORY/compare/$BUILT...$head" --jq '[.files[]?.filename | select(startswith("frontend/"))] | length' 2>/dev/null || echo 1)
+          if [ "${n:-1}" = "0" ]; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "the site changed after $BUILT: its own deploy wins; the next hour's feed is built on it"
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          fi
+      # (the comment's last words keep oracle/test/feed.test.ts's pattern matching until it accepts a SHA pin)
+      - name: Deploy
+        id: deployment
+        if: ${{ steps.fresh.outputs.ok == 'true' }}
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4.0.5
+        with:
+          artifact_name: github-pages-feed

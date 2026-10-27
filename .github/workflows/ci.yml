@@ -1,52 +1,62 @@
 name: CI
 
+# Actions pinned to commit SHAs (version in the comment), runner image pinned, Node 22, `npm ci --ignore-scripts`
+# from the committed lockfiles (no dependency here needs its install script; see keeper.yml).
+
 on:
   push:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   portal:
     name: EVM portal (Hardhat)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: '20'
-      - run: npm install --no-audit --no-fund
+          node-version: '22'
+      - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: npx hardhat test
 
   oracle:
     name: Oracle unit tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
           cache-dependency-path: oracle/package-lock.json
+      # `npm test` includes test/health.test.ts (oracle/package.json)
       - working-directory: oracle
-        run: npm ci && npm test && npx tsc --noEmit -p .
+        run: npm ci --ignore-scripts && npm test && npx tsc --noEmit -p .
 
   program:
     name: Anchor program unit tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      # pinned like program-tests.yml: a new stable must never turn this red when nobody is around to fix it
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # head of the action's stable branch on 2026-10-25; the toolchain is pinned below
+        with:
+          toolchain: '1.94.0'
       - run: cargo test -p moon-forge --lib
 
   frontend:
     name: Frontend build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
           cache-dependency-path: frontend/package-lock.json
       - working-directory: frontend
-        run: npm ci && npm run build
+        run: npm ci --ignore-scripts && npm run build

@@ -4,6 +4,8 @@ name: Announcements (weekly)
 # forge read from chain. Never replies, mentions or DMs; no price predictions. Without the channel keys
 # (repository secrets) the text is only printed in the log. Enable with the repository variable
 # ANNOUNCE_ENABLED=true. The epoch receipt is posted by the oracle workflow right after publication.
+# Actions pinned to commit SHAs (version in the comment), runner image pinned, Node 22, `npm ci --ignore-scripts`.
+# The dispatch input `kind` is a fixed choice, reaches the shell only through the environment and is checked again.
 
 on:
   schedule:
@@ -12,6 +14,8 @@ on:
     inputs:
       kind:
         description: 'weekly or epoch'
+        type: choice
+        options: [weekly, epoch]
         default: 'weekly'
       dry:
         description: 'Dry run (print only)'
@@ -27,18 +31,18 @@ concurrency:
 
 jobs:
   post:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     if: ${{ vars.ANNOUNCE_ENABLED == 'true' }}
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
           cache-dependency-path: oracle/package-lock.json
       - working-directory: oracle
-        run: npm ci
+        run: npm ci --ignore-scripts
       - name: Post
         working-directory: oracle
         env:
@@ -55,9 +59,14 @@ jobs:
           PORTAL_AVAX: ${{ vars.PORTAL_AVAX }}
           PORTAL_BASE: ${{ vars.PORTAL_BASE }}
           PORTAL_PULSE: ${{ vars.PORTAL_PULSE }}
+          KIND: ${{ inputs.kind || 'weekly' }} # empty on the schedule: the weekly post
+          DRY: ${{ inputs.dry }}
         run: |
-          KIND="${{ github.event.inputs.kind || 'weekly' }}"
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.dry }}" = "true" ]; then
+          case "$KIND" in
+            weekly|epoch) ;;
+            *) echo "::error::kind must be weekly or epoch"; exit 1 ;;
+          esac
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] && [ "$DRY" = "true" ]; then
             npm run announce -- "$KIND" --dry
           else
             npm run announce -- "$KIND"

@@ -1,0 +1,348 @@
+name: Program tests
+
+# Full test of the X1 program on a local validator, exactly what tests/run-local.sh does by hand:
+# cargo unit tests, IDL, the `--features localnet` build (test keys, days compressed into seconds), the real
+# Metaplex Core program dumped from X1 mainnet, solana-test-validator, tests/moon-forge.test.ts, the randomized
+# stress / solvency audit (tests/stress.test.ts), the round-3 gap cases + B-13 assertion (tests/v3-gaps.test.ts) and, on a fresh validator, the agent kit's end-to-end test
+# (agents/kit/test/e2e-local.mjs). Logs, the IDL and both binaries (localnet + mainnet, with sha256) are
+# uploaded as artifacts.
+#
+# Required before any program upgrade: see OPERATORS.md ("Program tests"). No secrets, no token, nothing to
+# renew: it runs on pull requests that touch the program or its tests, by hand (Actions -> Program tests ->
+# Run workflow, on any branch) and once a week on the default branch. Toolchain pinned to the versions of
+# tests/run-local.sh / README (Agave solana-cli 3.1.11, anchor-cli 0.32.1, Rust 1.94.0) and Node 22; cargo, the Solana
+# toolchain and the Core dump are cached so a warm run stays well inside the free-tier limits. Actions pinned to commit
+# SHAs (version in the comment).
+#
+# Manual only: the oracle end-to-end test across the upgrade (tests/e2e-oracle-v3.sh, the real oracle CLI on local
+# validators, about 10 minutes more plus the build of the deployed binary). Run workflow with "e2e_oracle" ticked: the
+# localnet job then checks out the full history (the script builds the deployed source with `git archive be03ad8` and
+# compares with origin/main's oracle) and runs tests/run-local.sh with E2E_ORACLE=1. Pull requests and the weekly run
+# never run it.
+#
+# A branch that still carries the live v2 program source (main until the final upgrade's source is committed) has no
+# grep-guard or mainnet-guard script and no v3 suite: the guards job then skips those two steps with a notice, the
+# localnet job runs that branch's own tests/run-local.sh, and a manual e2e_oracle run fails at once. The program source of
+# the final upgrade is recognised by programs/moon-forge/src/instructions/seat.rs; once it is there, a missing guard
+# script fails the run.
+
+on:
+  workflow_dispatch:
+    inputs:
+      stress_seed:
+        description: 'STRESS_SEED for tests/stress.test.ts (default 42; reuse the seed of a failed run to reproduce it)'
+        required: false
+        default: '42'
+      stress_rounds:
+        description: 'STRESS_ROUNDS for tests/stress.test.ts (default 10)'
+        required: false
+        default: '10'
+      e2e_oracle:
+        description: 'Also run the oracle end-to-end test across the upgrade (tests/e2e-oracle-v3.sh, E2E_ORACLE=1)'
+        type: boolean
+        required: false
+        default: false
+  pull_request:
+    paths:
+      - 'programs/**'
+      - 'tests/**'
+      - 'agents/kit/**'
+      - 'Anchor.toml'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/program-tests.yml'
+  schedule:
+    # Weekly, Wednesday 05:23 UTC (best effort: GitHub runs scheduled workflows late or not at all when
+    # throttled, and disables them after 60 days without a commit; a manual run is always available).
+    - cron: '23 5 * * 3'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: program-tests-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  SOLANA_VERSION: '3.1.11'   # Agave solana-cli / cargo-build-sbf / solana-test-validator (README, tests/run-local.sh)
+  ANCHOR_VERSION: '0.32.1'   # Anchor.toml [toolchain] anchor_version
+  # sha256 of the release asset anchor-0.32.1-x86_64-unknown-linux-gnu (github.com/coral-xyz/anchor/releases/tag/v0.32.1)
+  ANCHOR_SHA256: '5f25b850ce80278507a98947833fcd48423391f6d145046ffb0c5fd130dec436'
+  MPL_CORE: 'CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d'   # Metaplex Core on X1 (Anchor.toml [[test.genesis]])
+  PROGRAM_ID: '57UE1U1t23ztg2noLp8pcpGW1B1Xw25rLH6ra9Mchea9'
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # Fast gate, independent of the validator suite: the SPEC-UPGRADE-v2 8.1 grep guards, the Rust unit tests (mainnet
+  # constants) and tests/check-mainnet-guards.sh (the in-place mainnet build must be green or blocked ONLY by the
+  # OD-25 / OD-16 / Arweave placeholder guards; a throwaway-key mainnet build must be green; the published test keys
+  # of tests/fixtures must be refused as INITIAL_KEEPER / SEAT_COLD_INITIAL). No binary from this job is uploaded.
+  guards:
+    name: Mainnet compile guards and unit tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      # the final upgrade's source has instructions/seat.rs; the live v2 source has no guard scripts (see the header)
+      - name: Which program source is on this branch
+        id: tree
+        run: |
+          if [ -f programs/moon-forge/src/instructions/seat.rs ]; then
+            echo "final=true" >> "$GITHUB_OUTPUT"
+            echo "the program source of the final upgrade: every guard runs"
+          else
+            echo "final=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::the live v2 program source: the grep guards and the mainnet compile guards come with the final upgrade's source and are skipped"
+          fi
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # head of the action's stable branch on 2026-10-25; the toolchain is pinned below
+        with:
+          toolchain: '1.94.0'
+
+      - name: Cache cargo registry and target
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: program-guards-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'programs/**/Cargo.toml', 'programs/**/*.rs') }}
+          restore-keys: |
+            program-guards-${{ runner.os }}-
+
+      - name: Cache the Solana toolchain (Agave install + platform tools)
+        id: solana-cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ~/.local/share/solana/install
+            ~/.cache/solana
+          key: solana-${{ runner.os }}-${{ env.SOLANA_VERSION }}
+
+      - name: Install Agave solana-cli ${{ env.SOLANA_VERSION }}
+        if: steps.solana-cache.outputs.cache-hit != 'true'
+        run: sh -c "$(curl -sSfL --retry 3 "https://release.anza.xyz/v${SOLANA_VERSION}/install")"
+
+      - name: Add the Solana toolchain to PATH
+        run: echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
+
+      # The committed Cargo.lock must be the one the builds end with (round 2: `cargo metadata --locked` failed and
+      # cargo-build-sbf rewrote the lock). --locked fails as soon as cargo would have to change it.
+      - name: Cargo.lock is final (cargo metadata --locked)
+        run: cargo metadata --locked --format-version 1 > /dev/null
+
+      - name: Grep guards (SPEC-UPGRADE-v2 8.1, ECO-3)
+        if: ${{ steps.tree.outputs.final == 'true' }}
+        run: bash tests/grep-guards.sh
+
+      - name: Unit tests (cargo test --lib, mainnet constants)
+        run: cargo test -p moon-forge --lib
+
+      - name: Mainnet compile guards (tests/check-mainnet-guards.sh)
+        if: ${{ steps.tree.outputs.final == 'true' }}
+        run: |
+          mkdir -p ci-logs
+          MF_GUARD_LOGDIR="$PWD/ci-logs/guards" MF_GUARD_TARGET="$RUNNER_TEMP/guard-target" bash tests/check-mainnet-guards.sh
+
+      - name: Upload guard logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: program-guards-logs
+          path: ci-logs/
+          if-no-files-found: ignore
+          retention-days: 30
+
+  localnet:
+    name: Localnet (unit, integration, stress, agent kit)
+    # ubuntu-24.04 on purpose: the prebuilt anchor binary needs glibc 2.39 (Ubuntu 22.04 has 2.35).
+    runs-on: ubuntu-24.04
+    # 40 more minutes when the manual oracle e2e runs (the old binary's build plus about 10 minutes of e2e)
+    timeout-minutes: ${{ inputs.e2e_oracle && 190 || 150 }}
+    steps:
+      # full history only for the manual oracle e2e (`git archive be03ad8` and `git archive origin/main`); 1 otherwise.
+      # Written as "not e2e -> 1, else 0" because 0 is falsy in an expression (`e2e && 0 || 1` would always give 1).
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: ${{ !inputs.e2e_oracle && 1 || 0 }}
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+
+      # Host Rust for `cargo test --lib` and `anchor idl build` (the SBF build uses the platform tools that
+      # cargo-build-sbf downloads). Pinned to the version the suite was last run with, so a new stable can
+      # never break a run nobody is around to fix.
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # head of the action's stable branch on 2026-10-25; the toolchain is pinned below
+        with:
+          toolchain: '1.94.0'
+
+      - name: Cache cargo registry and target
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: program-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'programs/**/Cargo.toml', 'programs/**/*.rs') }}
+          restore-keys: |
+            program-${{ runner.os }}-
+
+      - name: Cache the Solana toolchain (Agave install + platform tools)
+        id: solana-cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ~/.local/share/solana/install
+            ~/.cache/solana
+          key: solana-${{ runner.os }}-${{ env.SOLANA_VERSION }}
+
+      - name: Install Agave solana-cli ${{ env.SOLANA_VERSION }}
+        if: steps.solana-cache.outputs.cache-hit != 'true'
+        run: sh -c "$(curl -sSfL --retry 3 "https://release.anza.xyz/v${SOLANA_VERSION}/install")"
+
+      - name: Add the Solana toolchain to PATH
+        run: echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
+
+      - name: Install anchor-cli ${{ env.ANCHOR_VERSION }} (prebuilt release binary, sha256 pinned; source build as fallback)
+        run: |
+          set -uo pipefail
+          if curl -sSfL --retry 3 -o /tmp/anchor "https://github.com/coral-xyz/anchor/releases/download/v${ANCHOR_VERSION}/anchor-${ANCHOR_VERSION}-x86_64-unknown-linux-gnu" \
+             && echo "${ANCHOR_SHA256}  /tmp/anchor" | sha256sum -c -; then
+            sudo install -m 0755 /tmp/anchor /usr/local/bin/anchor
+          fi
+          if ! anchor --version 2>/dev/null | grep -qF "anchor-cli ${ANCHOR_VERSION}"; then
+            echo "::warning::prebuilt anchor ${ANCHOR_VERSION} unavailable or unusable; building anchor-cli from the v${ANCHOR_VERSION} tag (slow)"
+            sudo rm -f /usr/local/bin/anchor
+            cargo install --git https://github.com/coral-xyz/anchor --tag "v${ANCHOR_VERSION}" anchor-cli --locked --force
+          fi
+          anchor --version | grep -F "anchor-cli ${ANCHOR_VERSION}"
+
+      - name: Default Solana keypair (throwaway, for the CLI and anchor)
+        run: |
+          mkdir -p ~/.config/solana
+          [ -f ~/.config/solana/id.json ] || solana-keygen new --no-bip39-passphrase --silent -o ~/.config/solana/id.json
+          solana config set -u http://127.0.0.1:8899 >/dev/null
+
+      - name: Toolchain versions
+        run: |
+          solana --version; solana-test-validator --version; anchor --version; cargo --version; rustc --version; node --version; npm --version
+
+      - name: Week number (the Metaplex Core dump is refreshed weekly)
+        id: week
+        run: echo "week=$(date -u +%G-W%V)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache the Metaplex Core program dumped from X1 mainnet
+        id: mpl-cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: tests/fixtures/mpl_core.so
+          key: mpl-core-${{ env.MPL_CORE }}-${{ steps.week.outputs.week }}
+          restore-keys: |
+            mpl-core-${{ env.MPL_CORE }}-
+
+      # Same command as tests/run-local.sh (which then finds the file and skips its own dump). If X1 mainnet
+      # does not answer, last week's cached copy is used; with no copy at all the run fails here.
+      - name: Refresh the Metaplex Core dump
+        if: steps.mpl-cache.outputs.cache-hit != 'true'
+        run: |
+          if solana program dump -u https://rpc.mainnet.x1.xyz "$MPL_CORE" /tmp/mpl_core.so; then
+            mkdir -p tests/fixtures && mv /tmp/mpl_core.so tests/fixtures/mpl_core.so
+          elif [ -f tests/fixtures/mpl_core.so ]; then
+            echo "::warning::X1 mainnet RPC did not answer; using the cached Metaplex Core dump"
+          else
+            echo "::error::no Metaplex Core dump available (X1 mainnet RPC down and no cached copy)"; exit 1
+          fi
+          sha256sum tests/fixtures/mpl_core.so
+
+      # Unit tests -> IDL -> `--features localnet` build -> Core dump (already there) -> synthetic XDEX observation
+      # -> solana-test-validator -> tests/moon-forge.test.ts + tests/stress.test.ts + tests/v3-gaps.test.ts (one mocha process; it
+      # ends with the B-13 coverage assertion over all three) -> rebuild of the mainnet binary. v3-gaps adds about 8 min.
+      # The synthetic XDEX observation ring covers about 24 minutes from the validator start and the Predictions
+      # tests need it (integration + stress took 11 min on an 8-core box); the unattended weekly run uses 5 stress
+      # rounds so a slower runner with cold caches stays inside the ring. Manual runs and PRs keep the default 10.
+      # The oracle e2e (manual, e2e_oracle): its oracle dependencies are installed here without install scripts, so
+      # tests/e2e-oracle-v3.sh finds oracle/node_modules and skips its own install.
+      - name: The oracle e2e needs its script on this branch
+        if: ${{ inputs.e2e_oracle }}
+        run: |
+          if [ ! -f tests/e2e-oracle-v3.sh ]; then
+            echo "::error::e2e_oracle was ticked, but this branch has no tests/e2e-oracle-v3.sh (it comes with the final upgrade's source): run the workflow on a branch that has it"
+            exit 1
+          fi
+
+      - name: The oracle's dependencies for the oracle e2e (no install scripts)
+        if: ${{ inputs.e2e_oracle }}
+        working-directory: oracle
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: tests/run-local.sh (unit tests, IDL, localnet build, validator, integration + stress tests)
+        env:
+          STRESS_SEED: ${{ inputs.stress_seed || '42' }}
+          STRESS_ROUNDS: ${{ github.event_name == 'schedule' && '5' || inputs.stress_rounds || '10' }}
+          # run-local.sh runs tests/e2e-oracle-v3.sh after its suites only when E2E_ORACLE is 1
+          E2E_ORACLE: ${{ inputs.e2e_oracle && '1' || '0' }}
+          # the v2 comparison runs origin/main's oracle (a checkout has no local main branch unless it is on main)
+          MAIN_REF: origin/main
+        run: |
+          mkdir -p ci-logs
+          set -o pipefail
+          bash tests/run-local.sh 2>&1 | tee ci-logs/run-local.log
+
+      # The kit test wants a clean state and a fresh observation ring: a second validator with the same
+      # programs and accounts as run-local.sh (that one is stopped when the script exits).
+      - name: Agent kit end-to-end test (fresh validator, agents/kit/test/e2e-local.mjs)
+        run: |
+          set -euo pipefail
+          for _ in $(seq 1 60); do (ss -ltn 2>/dev/null || netstat -ltn 2>/dev/null) | grep -qE ':(8899|9900) ' || break; sleep 1; done
+          node tests/fixtures/make-observation.cjs
+          solana-test-validator --reset --quiet --ledger /tmp/moonforge-ledger-kit \
+            --bpf-program 57UE1U1t23ztg2noLp8pcpGW1B1Xw25rLH6ra9Mchea9 target/deploy/moon_forge_localnet.so \
+            --bpf-program CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d tests/fixtures/mpl_core.so \
+            --account 4oUvUgziz4S6VXxMkjqorjgPrgT3wrxXN9kDuja8pkPZ tests/fixtures/xdex-observation.json &
+          VALIDATOR=$!
+          trap 'kill $VALIDATOR' EXIT
+          for _ in $(seq 1 180); do solana -u http://127.0.0.1:8899 cluster-version >/dev/null 2>&1 && break; sleep 1; done
+          solana -u http://127.0.0.1:8899 cluster-version
+          cd agents/kit
+          npm ci --ignore-scripts --no-audit --no-fund
+          RPC=http://127.0.0.1:8899 node test/e2e-local.mjs 2>&1 | tee ../../ci-logs/kit-e2e.log
+
+      - name: Collect validator logs and build hashes
+        if: always()
+        run: |
+          mkdir -p ci-logs
+          for l in /tmp/moonforge-ledger/validator.log /tmp/moonforge-ledger-kit/validator.log; do
+            [ -f "$l" ] && tail -n 20000 "$l" > "ci-logs/$(basename "$(dirname "$l")").log" || true
+          done
+          ls -la target/deploy 2>/dev/null || true
+          sha256sum target/deploy/*.so target/idl/moon_forge.json 2>/dev/null | tee ci-logs/sha256.txt || true
+          # the oracle e2e's per-command logs (its work dir, E2E_WORK default; the throwaway keys stay out)
+          if [ -d /tmp/mf-e2e-oracle/logs ]; then cp -r /tmp/mf-e2e-oracle/logs ci-logs/e2e-oracle-logs; fi
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: program-tests-logs
+          path: ci-logs/
+          if-no-files-found: ignore
+          retention-days: 30
+
+      # moon_forge.so is the MAINNET binary rebuilt at the end of run-local.sh (the localnet one must never be
+      # deployed). Before an upgrade, its sha256 here must equal the sha256 of the binary you deploy.
+      - name: Upload the build (IDL, localnet and mainnet binaries, sha256)
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: program-build
+          path: |
+            target/idl/moon_forge.json
+            target/deploy/moon_forge.so
+            target/deploy/moon_forge_localnet.so
+            ci-logs/sha256.txt
+          if-no-files-found: ignore
+          retention-days: 90

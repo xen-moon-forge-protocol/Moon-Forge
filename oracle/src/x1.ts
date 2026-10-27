@@ -6,9 +6,11 @@
 import * as anchor from "@coral-xyz/anchor";
 import { Connection, Keypair, PublicKey, SYSVAR_SLOT_HASHES_PUBKEY, SystemProgram } from "@solana/web3.js";
 import bs58 from "bs58";
-import { ORACLE_PRIVATE_KEY, PROGRAM_ID, X1_RPC } from "./config";
+import { ORACLE_PRIVATE_KEY, PROGRAM_ID } from "./config";
+import { x1Connection } from "./x1-rpc";
 import { ArtifactHolder, EpochFile } from "./epoch";
 import { keccak } from "./merkle";
+import { gatedSealActionV3, gatedSealDueAt, sealAllowedV3 } from "./flow-v3";
 import idl from "./idl/moon_forge.json";
 
 export const programId = new PublicKey(PROGRAM_ID);
@@ -54,19 +56,42 @@ export const PDA = {
 export const DROP_BACKING = 5_000_000_000n;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/**
+ * The one text a malformed key ever produces (r4-fix, review r4 finding 14): the parsers' own messages are never shown,
+ * because on Node 22 a JSON SyntaxError quotes part of its input, i.e. the first bytes of the private seed, and GitHub
+ * masks only the whole secret value, not a fragment of it.
+ */
+export const KEY_FORMAT_ERROR = "the key is not a 64-byte JSON array or base58 secret";
+
 export function loadKeypair(secret = ORACLE_PRIVATE_KEY): Keypair {
   if (!secret) throw new Error("ORACLE_PRIVATE_KEY not set");
   const s = secret.trim();
   if (s.startsWith("0x")) throw new Error("ORACLE_PRIVATE_KEY looks like an EVM key; X1 needs a Solana/SVM keypair");
-  const bytes = s.startsWith("[") ? Uint8Array.from(JSON.parse(s)) : bs58.decode(s);
-  return Keypair.fromSecretKey(bytes);
+  try {
+    const bytes = s.startsWith("[") ? Uint8Array.from(JSON.parse(s)) : bs58.decode(s);
+    return Keypair.fromSecretKey(bytes);
+  } catch {
+    throw new Error(KEY_FORMAT_ERROR);
+  }
+}
+
+/**
+ * The LIVE program's IDL (src/idl/moon_forge.json, the main-branch copy; W2-4 / IDL split): every v2 path (publish_epoch,
+ * claims, drops, the keeper) is built from it, so the weekly v2 payout sends exactly the accounts the deployed binary
+ * expects until the upgrade is on mainnet. The upgraded program's IDL (moon_forge.v3.json) is used by x1-v3.ts only.
+ */
+export const LIVE_IDL = idl as anchor.Idl;
+
+/** The v2 Anchor client (live IDL) on any provider; connect() uses it. */
+export function programV2(provider: anchor.Provider): anchor.Program {
+  return new anchor.Program(LIVE_IDL, provider);
 }
 
 export function connect(signer?: Keypair) {
-  const connection = new Connection(X1_RPC, "confirmed");
+  const connection = x1Connection("confirmed"); // X1_RPC_URLS unset: new Connection(X1_RPC, "confirmed"), as before
   const wallet = new anchor.Wallet(signer ?? Keypair.generate());
   const provider = new anchor.AnchorProvider(connection, wallet, { commitment: "confirmed" });
-  const program = new anchor.Program(idl as anchor.Idl, provider);
+  const program = programV2(provider);
   return { connection, provider, program, wallet };
 }
 
@@ -155,8 +180,15 @@ export function dropOutcome(ep: any, player: PublicKey, tier: number, score: big
   return { won: r < value, value: DROP_BACKING };
 }
 
-/** Delivers every won, undelivered Forge Drop of an epoch (permissionless; the Artifact goes to the player). */
-export async function deliverDrops(connection: Connection, program: anchor.Program, payer: Keypair, f: EpochFile, log = console.log) {
+/**
+ * Delivers every won, undelivered Forge Drop of an epoch (permissionless; the Artifact goes to the player). `run` (the
+ * v3 keeper's pass budget, R-1): each delivery goes through it and the loop stops once it is spent; without `run` (the
+ * v2 path) nothing changes.
+ */
+export async function deliverDrops(
+  connection: Connection, program: anchor.Program, payer: Keypair, f: EpochFile, log = console.log,
+  run?: { canSend(): boolean; send(label: string, fn: () => Promise<string>): Promise<boolean> },
+) {
   const ep: any = await (program.account as any).epoch.fetchNullable(PDA.epoch(f.epoch));
   if (!ep || ep.dropState !== 2 || ep.closed || Date.now() / 1000 >= Number(ep.expiresAt)) return 0;
   let done = 0;
@@ -166,22 +198,28 @@ export async function deliverDrops(connection: Connection, program: anchor.Progr
     const receipt = PDA.drop(f.epoch, player, l.tier);
     if (await connection.getAccountInfo(receipt)) continue;
     const proof = (f.proofs[`${l.player}:${l.tier}`] || []).map((h) => Array.from(Buffer.from(h, "hex")));
+    if (run && !run.canSend()) break;
     const cfg = await fetchConfig(program);
-    try {
-      let sig: string;
+    const deliver = async (): Promise<string> => {
       if (Number(cfg.artifactsAlive[0]) >= 600) {
-        sig = await program.methods.claimDropXnt(new anchor.BN(f.epoch), l.tier, new anchor.BN(l.score), proof).accountsPartial({
+        return program.methods.claimDropXnt(new anchor.BN(f.epoch), l.tier, new anchor.BN(l.score), proof).accountsPartial({
           config: PDA.config(), epoch: PDA.epoch(f.epoch), receipt, player, playerState: PDA.player(player),
           rewardVault: PDA.rewardVault(), payer: payer.publicKey, systemProgram: SystemProgram.programId,
         }).signers([payer]).rpc();
-      } else {
-        const serial = Number(cfg.artifactsMinted[0]);
-        const asset = PDA.asset(0, serial);
-        sig = await program.methods.claimDrop(new anchor.BN(f.epoch), l.tier, serial, new anchor.BN(l.score), proof).accountsPartial({
-          config: PDA.config(), epoch: PDA.epoch(f.epoch), receipt, player, asset, record: PDA.artifact(asset), collection: PDA.collection(),
-          artifactAuthority: PDA.authority(), rewardVault: PDA.rewardVault(), payer: payer.publicKey, coreProgram: MPL_CORE, systemProgram: SystemProgram.programId,
-        }).signers([payer]).rpc();
       }
+      const serial = Number(cfg.artifactsMinted[0]);
+      const asset = PDA.asset(0, serial);
+      return program.methods.claimDrop(new anchor.BN(f.epoch), l.tier, serial, new anchor.BN(l.score), proof).accountsPartial({
+        config: PDA.config(), epoch: PDA.epoch(f.epoch), receipt, player, asset, record: PDA.artifact(asset), collection: PDA.collection(),
+        artifactAuthority: PDA.authority(), rewardVault: PDA.rewardVault(), payer: payer.publicKey, coreProgram: MPL_CORE, systemProgram: SystemProgram.programId,
+      }).signers([payer]).rpc();
+    };
+    if (run) {
+      if (await run.send(`Forge Drop delivered to ${l.player} (epoch ${f.epoch}, tier ${l.tier})`, deliver)) done++;
+      continue;
+    }
+    try {
+      const sig = await deliver();
       done++;
       log(`  Forge Drop delivered to ${l.player} (epoch ${f.epoch}, tier ${l.tier}): ${sig}`);
     } catch (e) {
@@ -296,7 +334,17 @@ export async function keeperPass(connection: Connection, program: anchor.Program
       }
       continue;
     }
-    if (e.account.dropState === 1) await sealDrop(program, payer, id, log);
+    // v3 (A11, A12/P2): a v3 epoch file whose seal gate said no is left unsealed; once the SlotHashes window has passed,
+    // seal_drop is sent anyway: the program takes its Expired branch, cancels the seed and releases the drop reserve now
+    if (e.account.dropState === 1) {
+      const allowed = sealAllowedV3(epochFiles, id);
+      const action = allowed ? "seal" : gatedSealActionV3({ dropState: 1, sealAllowed: false, dropSlot: Number(e.account.dropSlot), currentSlot: await connection.getSlot("finalized") });
+      if (action === "seal") await sealDrop(program, payer, id, log);
+      else if (action === "cancel") {
+        log(`  epoch ${id}: the gate left the drop seed unsealed and its SlotHashes window has passed: cancelling it (reserve back to the pool)`);
+        await sealDrop(program, payer, id, log);
+      }
+    }
   }
   for (const f of epochFiles) {
     const ep = epochs.find((e) => Number(e.account.id) === f.epoch);
@@ -399,7 +447,7 @@ export async function keeperPass(connection: Connection, program: anchor.Program
  * settlements (the XDEX TWAP window must still be in the observation ring), Moon Wars starts / timeouts /
  * payouts, unsettled bets and unsealed Forge Drops.
  */
-export async function nextDeadline(program: anchor.Program, now = Math.floor(Date.now() / 1000)): Promise<{ at: number | null; reasons: string[] }> {
+export async function nextDeadline(program: anchor.Program, now = Math.floor(Date.now() / 1000), epochFiles: EpochFile[] = []): Promise<{ at: number | null; reasons: string[] }> {
   const acc = program.account as any;
   const due: { at: number; why: string }[] = [];
   const cfg = await fetchConfig(program);
@@ -421,7 +469,19 @@ export async function nextDeadline(program: anchor.Program, now = Math.floor(Dat
     if (s === 1) due.push({ at: Number(r.account.endTs), why: `prediction ${id} settle` });
     if (s === 2 || s === 3) due.push({ at: now, why: `prediction ${id} payouts` });
   }
-  for (const e of await acc.epoch.all()) if (!e.account.closed && e.account.dropState === 1) due.push({ at: now, why: `epoch ${Number(e.account.id)} drop seal` });
+  // A12 (P2): a seed the v3 gate left unsealed is due when its SlotHashes window has passed (the cancelling seal), not now
+  let slot: number | null = null;
+  for (const e of await acc.epoch.all()) {
+    if (e.account.closed || e.account.dropState !== 1) continue;
+    const id = Number(e.account.id);
+    if (sealAllowedV3(epochFiles, id)) {
+      due.push({ at: now, why: `epoch ${id} drop seal` });
+      continue;
+    }
+    if (slot === null) slot = await program.provider.connection.getSlot("finalized");
+    const at = gatedSealDueAt({ dropState: 1, sealAllowed: false, dropSlot: Number(e.account.dropSlot), currentSlot: slot }, now);
+    if (at !== null) due.push({ at, why: `epoch ${id} drop seed cancel` });
+  }
   if (!due.length) return { at: null, reasons: [] };
   due.sort((a, b) => a.at - b.at);
   return { at: Math.max(now, due[0].at), reasons: due.slice(0, 5).map((d) => d.why) };

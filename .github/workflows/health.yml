@@ -1,9 +1,39 @@
 name: Health check (daily)
 
-# Read-only daily check of everything the protocol needs to keep running: keeper / oracle wallet
-# balances, the latest run of every automation workflow, keeper freshness, the site and agent card,
-# the burn portals, and the publishing token's expiry (repository variable PAT_EXPIRES). The run fails
-# when something needs attention, and GitHub notifies the account by email.
+# Read-only daily check of everything the protocol needs to keep running. It turns red (the run fails and
+# GitHub emails the account) when: the weekly epoch is late with burns waiting; the oracle wallet cannot pay
+# about four more epochs or the keeper wallet is below its floor; a vault is below rent, cannot cover what
+# the program reserved, or fell more than 20% since yesterday for no recorded reason; the XNT price sources
+# disagree by more than 5%; a live chain has no fresh RPC serving the portal; the epoch files on GitHub
+# Pages differ from the chain; no keeper run in 24 h, or a schedule variable is set to something other than
+# "true"; the oracle key, a pending hand-over or the program's upgrade authority changed; upkeep that costs
+# players money is overdue beyond the keeper's usual gap between runs.
+# The stable-count rows (IMMUTABILITY.md, before the 14-day count) are red too when: a game wallet, an open pot or
+# a seat bond holds less than it owes; a published epoch does not reconcile (claimed + unclaimed + expired = budget,
+# file = chain, forge_paid = sum of claims); the oracle seat is dead or past the point an epoch could save it; the
+# oldest unsettled bet is older than KEEPER_STALL_SLOTS; the keeper bond does not cover reserved + jackpot_reserved;
+# the site shows rules that are not the detected ones; the newest epoch has no green `verify --full` 36 h after
+# publication; a pinned privileged key (oracle/src/health-pins.json) changed; a new keeper chain overlaps an earlier
+# one (K-5); the extra pot's vault, accounting or release bound is off. Rows that need the upgraded program print
+# "n/a until upgrade" while the live v2 binary is detected. A "stable-days streak" row counts the consecutive UTC
+# days whose health runs had no FAIL (read from the previous runs), restarting after a program deploy.
+# The repository variables PAT_EXPIRES and DISPATCH_EXPIRES are reported as information only: nothing in the
+# scheduled automation uses a personal access token (the dispatch token is only for the external cron), so an
+# expired one never turns this red.
+#
+# Results: the job summary (a table), the console, and ops/health-latest.json kept as the run artifact
+# "health-snapshot" (30 days). The next run downloads the previous snapshot for its 24 h comparisons and the
+# K-5 chain history. The verify job keeps ops/verification.json as the artifact "verification" (90 days).
+# Nothing is committed here; the oracle workflow's heartbeat job owns the commits.
+#
+# Two keep-alive layers run at the end, whatever the check found: when the last commit is getting old
+# the oracle workflow is asked for its weekly heartbeat commit, and the scheduled workflows are
+# re-enabled through the API (GitHub disables them after 60 days without a commit).
+#
+# GitHub fires few of the daily ticks, so the keeper also starts this workflow when the last health run is
+# older than 22 h (keeper.yml); that is what makes the check daily in practice.
+#
+# Actions pinned to commit SHAs (version in the comment), runner image pinned, Node 22, `npm ci --ignore-scripts`.
 
 on:
   schedule:
@@ -12,30 +42,134 @@ on:
 
 permissions:
   contents: read
-  actions: write # only to re-enable the scheduled workflows (last step)
+  actions: write # to read the previous snapshot, request the heartbeat and re-enable the scheduled workflows
 
+# A new run waits for the one in progress instead of cancelling it: the verify job's full run of a new epoch file takes
+# about 25 minutes, and a cancelled run uploads no snapshot. GitHub keeps one waiting run per group (a newer one
+# replaces it), so runs never pile up.
 concurrency:
   group: health
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
-  check:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+  verify:
+    # `npm run verify -- <file> --full` on the newest epoch file (and its extra file), so the check below can say
+    # "verification green". A file the previous run already verified green, with the same data hash, is carried over
+    # from that run's "verification" artifact: the full run happens about once a week, after each publication.
+    # It never fails the run (the check's "verification" row judges the result) and it needs no secret.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    permissions:
+      contents: read
+      actions: read # the previous run's artifact
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
           cache-dependency-path: oracle/package-lock.json
       - working-directory: oracle
-        run: npm ci
+        run: npm ci --ignore-scripts
+      - name: Find the previous verification
+        id: prev
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          id=$(gh run list -R "$GITHUB_REPOSITORY" -w health.yml -s completed --limit 5 --json databaseId,conclusion \
+               --jq '[.[] | select(.conclusion != "cancelled")][0].databaseId' 2>/dev/null || true)
+          echo "run_id=$id" >> "$GITHUB_OUTPUT"
+          echo "previous run: ${id:-none}"
+      - name: Download it
+        if: ${{ steps.prev.outputs.run_id != '' && steps.prev.outputs.run_id != 'null' }}
+        continue-on-error: true # a first run has nothing to carry over: the newest file is verified in full
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: verification
+          run-id: ${{ steps.prev.outputs.run_id }}
+          github-token: ${{ github.token }}
+          path: oracle/prev-verify
+      - name: Verify the newest epoch file (read-only)
+        working-directory: oracle
+        continue-on-error: true
+        timeout-minutes: 45
+        env:
+          EPOCHS_DIR: ../frontend/public/epochs
+          VERIFY_PREV: prev-verify/verification.json
+          VERIFY_JSON: ../ops/verification.json
+          X1_RPC_URLS: ${{ vars.X1_RPC_URLS }}
+        run: npm run health-verify
+      - name: Keep it
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: verification
+          path: ops/verification.json
+          retention-days: 90
+          if-no-files-found: ignore
+
+  check:
+    needs: verify
+    if: ${{ always() }} # whatever the verify job did: a missing verification is a row, not a skipped check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: oracle/package-lock.json
+      - working-directory: oracle
+        run: npm ci --ignore-scripts
+      - name: Find the previous snapshot
+        id: prev
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # the newest completed run that was not cancelled (a cancelled run uploads nothing)
+          id=$(gh run list -R "$GITHUB_REPOSITORY" -w health.yml -s completed --limit 5 --json databaseId,conclusion \
+               --jq '[.[] | select(.conclusion != "cancelled")][0].databaseId' 2>/dev/null || true)
+          echo "run_id=$id" >> "$GITHUB_OUTPUT"
+          echo "previous run: ${id:-none}"
+      - name: Download it (24 h comparisons)
+        if: ${{ steps.prev.outputs.run_id != '' && steps.prev.outputs.run_id != 'null' }}
+        continue-on-error: true # a first run, or a run whose check never wrote the file, has nothing to compare with
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: health-snapshot
+          run-id: ${{ steps.prev.outputs.run_id }}
+          github-token: ${{ github.token }}
+          path: oracle/prev
+      - name: Fetch this run's verification
+        continue-on-error: true # the verify job failed before writing it: the verification row says so
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: verification
+          path: ops
       - name: Check
         working-directory: oracle
         env:
           GITHUB_TOKEN: ${{ github.token }}
           PAT_EXPIRES: ${{ vars.PAT_EXPIRES }}
+          DISPATCH_EXPIRES: ${{ vars.DISPATCH_EXPIRES }}
+          KEEPER_ENABLED: ${{ vars.KEEPER_ENABLED }}
+          ORACLE_ENABLED: ${{ vars.ORACLE_ENABLED }}
+          # the oracle's D-17 GATE_BLOCK (oracle.yml, keeper.yml): amber while it is set (review r4 finding 12)
+          GATE_BLOCK: ${{ vars.GATE_BLOCK }}
+          # optional overrides, same names the oracle and keeper understand (empty = the defaults in config.ts):
+          # X1_RPC_URLS (comma list) is tried before the default X1 endpoint, and each listed one is probed. The same
+          # variable, and only it, is passed to the oracle (oracle.yml) and the keeper (keeper.yml), so this row
+          # probes exactly the endpoints they use.
+          X1_RPC_URLS: ${{ vars.X1_RPC_URLS }}
+          ORACLE_PUBKEY: ${{ vars.ORACLE_PUBKEY }}
+          KEEPER_PUBKEY: ${{ vars.KEEPER_PUBKEY }}
+          EPOCHS_DIR: ../frontend/public/epochs
+          HEALTH_PREV: prev/health-latest.json
+          HEALTH_JSON: ../ops/health-latest.json
+          VERIFY_JSON: ../ops/verification.json
           PORTAL_ETH: ${{ vars.PORTAL_ETH }}
           PORTAL_OP: ${{ vars.PORTAL_OP }}
           PORTAL_BSC: ${{ vars.PORTAL_BSC }}
@@ -45,15 +179,44 @@ jobs:
           PORTAL_PULSE: ${{ vars.PORTAL_PULSE }}
           PORTAL_MOONBEAM: ${{ vars.PORTAL_MOONBEAM }}
         run: npm run health
-      - name: Keep the scheduled workflows enabled
-        # GitHub disables scheduled workflows in a public repository after 60 days without repository
-        # activity, and weeks without burns produce no commits. Re-enabling them through the API keeps
-        # the oracle, keeper, announcements and this check running, without any commit.
+      - name: Keep the snapshot
+        # public like the rest of the run; the next run reads it, and anyone can download it from the run page
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: health-snapshot
+          path: ops/health-latest.json
+          retention-days: 30
+          if-no-files-found: ignore
+      - name: Ask for a heartbeat commit when the last commit is getting old
+        # Second requester after the keeper (which may be disabled or starved of cron ticks). The oracle
+        # workflow commits ops/heartbeat.json with the GITHUB_TOKEN; ops/ is outside frontend/, so no deploy.
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          for wf in oracle.yml keeper.yml announce.yml health.yml; do
+          last=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_REF_NAME" --jq '.commit.committer.date' 2>/dev/null || true)
+          if [ -z "$last" ]; then echo "::warning::could not read the last commit"; exit 0; fi
+          age=$(( ( $(date -u +%s) - $(date -u -d "$last" +%s) ) / 86400 ))
+          echo "last commit on $GITHUB_REF_NAME: $last ($age days ago)"
+          [ "$age" -lt 7 ] && exit 0
+          # a run held back by the `oracle` concurrency group reports pending/waiting; dispatching then would
+          # cancel it (GitHub keeps one pending run per group), so every not-yet-finished state counts as busy
+          for s in queued in_progress pending waiting requested; do
+            n=$(gh run list -R "$GITHUB_REPOSITORY" -w oracle.yml -s "$s" --json databaseId --jq 'length' 2>/dev/null || echo 0)
+            if [ "${n:-0}" -gt 0 ]; then echo "an oracle run is already $s"; exit 0; fi
+          done
+          gh workflow run oracle.yml -R "$GITHUB_REPOSITORY" -f heartbeat=true && echo "heartbeat requested" \
+            || echo "::warning::could not request the heartbeat; tomorrow's run will"
+      - name: Keep the scheduled workflows enabled
+        # GitHub disables scheduled workflows in a public repository after 60 days without repository
+        # activity. The weekly heartbeat commit prevents that; re-enabling them through the API is the
+        # second layer, and brings them back should it ever happen anyway.
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for wf in oracle.yml keeper.yml announce.yml health.yml program-tests.yml; do
             if gh api -X PUT "repos/${{ github.repository }}/actions/workflows/$wf/enable" >/dev/null; then
               echo "enabled: $wf"
             else

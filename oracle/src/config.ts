@@ -52,16 +52,17 @@ const rpcList = (k: string, d: string) => env(k, d).split(",").map((u) => u.trim
 
 // RPC lists: endpoints checked on 2026-10-12 to serve eth_getLogs over week-old blocks without an API key
 // (publicnode now refuses those "archive" requests without a personal token). Override with e.g. BASE_RPC_URL=a,b
+// D-53 (round 4): the five chains with a portal only; Ethereum, PulseChain and Moonbeam are removed (no portal, none
+// planned: XEN Prime takes Ethereum's XEN, PulseChain and Moonbeam have no priced market). A chain added later is a new,
+// reviewed entry here with its portal.
+// O-22 / T1-10: the BSC entry that carries a shared public NodeReal key (published in many places, rate-limited for
+// everyone using it) is the LAST resort, never the primary; the keyless endpoints come first.
 const RAW_CHAINS: Omit<ChainConfig, "rpc">[] = [
-  { chainId: 1, name: "Ethereum", rpcs: rpcList("ETH_RPC_URL", "https://rpc.mevblocker.io,https://mainnet.gateway.tenderly.co,https://ethereum-rpc.publicnode.com"), portal: env("PORTAL_ETH"), startBlock: Number(env("START_ETH", "0")), confirmations: 64, logChunk: 5_000, xen: "0x06450dEe7FD2Fb8E39061434BAbCFC05599a6Fb8", gecko: "eth" },
   { chainId: 10, name: "Optimism", rpcs: rpcList("OP_RPC_URL", "https://mainnet.optimism.io,https://optimism.gateway.tenderly.co,https://optimism-rpc.publicnode.com"), portal: env("PORTAL_OP"), startBlock: Number(env("START_OP", "0")), confirmations: 120, logChunk: 10_000, xen: "0xeB585163DEbB1E637c6D617de3bEF99347cd75c8", gecko: "optimism" },
-  { chainId: 56, name: "BSC", rpcs: rpcList("BSC_RPC_URL", "https://bsc-mainnet.nodereal.io/v1/64a9df0874fb4a93b9d0a3849de012d3,https://bsc.rpc.blxrbdn.com,https://bsc-rpc.publicnode.com"), portal: env("PORTAL_BSC"), startBlock: Number(env("START_BSC", "0")), confirmations: 30, logChunk: 5_000, xen: "0x2AB0e9e4eE70FFf1fB9D67031E44F6410170d00e", gecko: "bsc" },
+  { chainId: 56, name: "BSC", rpcs: rpcList("BSC_RPC_URL", "https://bsc.rpc.blxrbdn.com,https://bsc-rpc.publicnode.com,https://bsc-mainnet.nodereal.io/v1/64a9df0874fb4a93b9d0a3849de012d3"), portal: env("PORTAL_BSC"), startBlock: Number(env("START_BSC", "0")), confirmations: 30, logChunk: 5_000, xen: "0x2AB0e9e4eE70FFf1fB9D67031E44F6410170d00e", gecko: "bsc" },
   { chainId: 137, name: "Polygon", rpcs: rpcList("POLYGON_RPC_URL", "https://polygon.gateway.tenderly.co,https://polygon-bor-rpc.publicnode.com"), portal: env("PORTAL_POLYGON"), startBlock: Number(env("START_POLYGON", "0")), confirmations: 256, logChunk: 3_000, xen: "0x2AB0e9e4eE70FFf1fB9D67031E44F6410170d00e", gecko: "polygon_pos" },
   { chainId: 43114, name: "Avalanche", rpcs: rpcList("AVAX_RPC_URL", "https://api.avax.network/ext/bc/C/rpc,https://avalanche-c-chain-rpc.publicnode.com"), portal: env("PORTAL_AVAX"), startBlock: Number(env("START_AVAX", "0")), confirmations: 30, logChunk: 2_000, xen: "0xC0C5AA69Dbe4d6DDdfBc89c0957686ec60F24389", gecko: "avax" },
   { chainId: 8453, name: "Base", rpcs: rpcList("BASE_RPC_URL", "https://base.gateway.tenderly.co,https://mainnet.base.org,https://base-rpc.publicnode.com"), portal: env("PORTAL_BASE"), startBlock: Number(env("START_BASE", "0")), confirmations: 120, logChunk: 1_000, xen: "0xffcbF84650cE02DaFE96926B37a0ac5E34932fa5", gecko: "base" },
-  { chainId: 369, name: "PulseChain", rpcs: rpcList("PULSE_RPC_URL", "https://rpc.pulsechain.com,https://pulsechain-rpc.publicnode.com,https://rpc-pulsechain.g4mm4.io"), portal: env("PORTAL_PULSE"), startBlock: Number(env("START_PULSE", "0")), confirmations: 30, logChunk: 5_000, xen: "0x8a7FDcA264e87b6da72D000f22186B4403081A2a", gecko: "pulsechain" },
-  // Moonbeam: verified XEN contract, but no priced market on 2026-10-07 → burns would score zero. No portal planned.
-  { chainId: 1284, name: "Moonbeam", rpcs: rpcList("MOONBEAM_RPC_URL", "https://moonbeam-rpc.publicnode.com"), portal: env("PORTAL_MOONBEAM"), startBlock: Number(env("START_MOONBEAM", "0")), confirmations: 30, logChunk: 5_000, xen: "0xb564A5767A00Ee9075cAC561c427643286F8F4E1", gecko: "glmr" },
 ];
 export const CHAINS: ChainConfig[] = RAW_CHAINS.map((c) => ({ ...c, rpc: c.rpcs[0] }));
 

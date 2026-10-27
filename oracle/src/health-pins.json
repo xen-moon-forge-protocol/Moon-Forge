@@ -1,0 +1,9 @@
+{
+  "_about": "Pinned privileged keys for the daily health check (health.ts 'pin:' rows). A different key on chain is red. \"\" = not pinned yet (amber); null = none expected. Change a pin only in a reviewed commit made in the same session as the change it expects: the upgrade authority moves to the offline signer at the final upgrade and becomes null at the freeze (the IDL authority becomes 11111111111111111111111111111111 after anchor idl erase-authority); the seat keys are pinned when the upgraded program creates the seats.",
+  "upgradeAuthority": "7PuG8ELKXzvZqVLawFnmjDJqq4KEyRhssKQEq7aQM6Qd",
+  "idlAuthority": "7PuG8ELKXzvZqVLawFnmjDJqq4KEyRhssKQEq7aQM6Qd",
+  "architect": "7PuG8ELKXzvZqVLawFnmjDJqq4KEyRhssKQEq7aQM6Qd",
+  "seatCold": "",
+  "seatRefund": "",
+  "keeperSeat": ""
+}
