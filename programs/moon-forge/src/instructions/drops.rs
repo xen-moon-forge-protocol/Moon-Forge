@@ -1,22 +1,26 @@
-//! Forge Drops — random Lunar Dust for burners, paid out of the epoch budget.
+//! Forge Drops — LEGACY. Only epochs published by the v2 binary have a drop reserve. v3 epochs have none:
+//! since the final upgrade `publish_epoch` always writes `drop_reserve = 0` and `drop_state = DROP_NONE`, so
+//! every instruction here returns DropNotPending / DropNotSealed for them. The code stays so the drops of
+//! epochs 2-5 (published by the old binary before the upgrade) can still be sealed, delivered or cancelled.
 //!
-//! publish_epoch : 10% of the budget (at most MAX_DROPS_PER_EPOCH floors) becomes the epoch's
-//!                 `drop_reserve`, and the epoch commits to a future slot (publish slot + 4).
+//! publish_epoch : (v2 binary) 10% of the budget, at most MAX_DROPS_PER_EPOCH floors, became the epoch's
+//!                 `drop_reserve`, and the epoch committed to a future slot (publish slot + 4).
 //! seal_drop     : PERMISSIONLESS. seed = keccak(hash of the first block at or after that slot).
 //!                 If nobody seals within the SlotHashes window (~512 slots) the drops are
 //!                 cancelled and the reserve returns to the free pool. There is no re-roll, so
 //!                 nobody gains anything by waiting for a "better" seed.
-//! claim_drop    : PERMISSIONLESS, for any leaf of the epoch.
+//! claim_drop    : PERMISSIONLESS, for any leaf of the epoch, once the epoch's 48-h hold is over (verify_leaf).
 //!                 value = score × drop_reserve / total_score (the leaf's expected drop value).
 //!                 value >= DROP_BACKING → always wins, and the whole value becomes the floor;
 //!                 otherwise wins with probability value / DROP_BACKING and the floor is DROP_BACKING.
 //!                 The prize is a Lunar Dust Artifact owned by the player: recyclable for its
-//!                 floor at any time, +5% burn boost, weekly lottery chips, Duel element.
+//!                 floor at any time, and a Duel element.
 //! claim_drop_xnt: only while every Lunar Dust slot is alive (sold out): same value, paid in XNT.
 //!
 //! Bounds: a leaf never weighs more than the epoch (score <= total_score), so one drop is at
-//! most the reserve; and an epoch never pays more than reserve + max(reserve, 15 XNT) in drops
-//! (luck above that is refused with DropCapReached). Overruns come from the free pool only.
+//! most the reserve; and a legacy epoch never pays more than reserve + max(reserve, 15 XNT) in drops
+//! (luck above that is refused with DropCapReached; the formula is kept so epoch 1's reserve returns
+//! through expire_epoch). Overruns come from the free pool only.
 
 use anchor_lang::prelude::*;
 
@@ -58,6 +62,12 @@ pub fn seal_drop(ctx: Context<SealDrop>) -> Result<()> {
     Ok(())
 }
 
+/// Most a legacy epoch pays in drops: reserve + max(reserve, DROP_LUCK_BUFFER). UNCHANGED since v2 (every
+/// epoch published by the old binary keeps the cap it was published with; epoch 1: 15,043,151,041 lamports).
+pub fn legacy_drop_cap(drop_reserve: u64) -> u64 {
+    drop_reserve.saturating_add(drop_reserve.max(DROP_LUCK_BUFFER))
+}
+
 /// (won, floor). Pure function of on-chain data: anyone can recompute every outcome.
 pub fn drop_outcome(epoch: &Epoch, player: &Pubkey, tier: u8, score: u64) -> Result<(bool, u64)> {
     let value = u64::try_from(
@@ -89,7 +99,7 @@ fn verify_and_book_drop(
     verify_leaf(epoch, player, tier, score, proof, Clock::get()?.unix_timestamp)?;
     let (won, value) = drop_outcome(epoch, player, tier, score)?;
     require!(won, ForgeError::NoDrop);
-    let cap = epoch.drop_reserve.saturating_add(epoch.drop_reserve.max(DROP_LUCK_BUFFER));
+    let cap = legacy_drop_cap(epoch.drop_reserve);
     require!(epoch.drop_paid.saturating_add(value) <= cap, ForgeError::DropCapReached);
 
     let from_reserve = value.min(epoch.drop_reserve.saturating_sub(epoch.drop_paid));
@@ -105,9 +115,10 @@ fn verify_and_book_drop(
     Ok(value)
 }
 
-/// The pool refunds whoever delivers a drop to someone else (rent of the new accounts).
+/// The pool refunds whoever delivers a drop to someone else (rent of the new accounts). No tip to the player
+/// or to the oracle (SPEC 2.12); no minimum is needed: a drop is always at least 5 XNT.
 fn pay_drop_tip(config: &mut Config, reward_vault: &AccountInfo, payer: &AccountInfo, player: &Pubkey) -> Result<u64> {
-    if payer.key() == *player {
+    if payer.key() == *player || payer.key() == config.oracle {
         return Ok(0);
     }
     let tip = DROP_KEEPER_TIP.min(free_balance(reward_vault, config.reward_reserved)?);
@@ -340,5 +351,31 @@ mod tests {
             assert!((0.95..1.05).contains(&ratio), "paid/reserve = {ratio}");
             assert!((freq - chance).abs() < chance * 0.05, "win frequency {freq} vs {chance}");
         }
+    }
+
+    /// The legacy cap formula is frozen: reserve + max(reserve, 15 XNT).
+    #[test]
+    fn legacy_cap_values() {
+        assert_eq!(legacy_drop_cap(15 * XNT), 30 * XNT);
+        assert_eq!(legacy_drop_cap(100 * XNT), 200 * XNT);
+        assert_eq!(legacy_drop_cap(0), 15 * XNT);
+        assert_eq!(legacy_drop_cap(43_151_041), 15_043_151_041); // epoch 1
+    }
+
+    /// The live epoch-1 data (epoch1-drop-check.out.txt): the single leaf lost the draw.
+    #[test]
+    fn drop_outcome_on_the_live_epoch_1() {
+        use std::str::FromStr;
+        let mut seed = [0u8; 32];
+        for (i, b) in seed.iter_mut().enumerate() {
+            *b = u8::from_str_radix(&"ec4bee1564ef05c11db79cfa11bfb1ddd3443c2589762da096c04510ab11aa8a"[2 * i..2 * i + 2], 16).unwrap();
+        }
+        let mut e = epoch(63_918, 43_151_041, 0);
+        e.drop_seed = seed;
+        let player = Pubkey::from_str("AFuEuc2SrXPCSkXKMZEBbV9cYVJ556kiHtBy6ESqDRKs").unwrap();
+        let (won, floor) = drop_outcome(&e, &player, 0, 63_918).unwrap();
+        assert!(!won);
+        assert_eq!(floor, DROP_BACKING);
+        assert_eq!(random_u64(&seed, player.as_ref(), &[0]) % DROP_BACKING, 2_186_694_961);
     }
 }

@@ -1,15 +1,23 @@
 pub mod artifacts;
 pub mod drops;
+pub mod extra;
 pub mod forge;
 pub mod games;
+pub mod keeper;
+pub mod market;
 pub mod p2p;
 pub mod predictions;
+pub mod seat;
 pub mod wars;
 
 pub use artifacts::*;
 pub use drops::*;
+pub use extra::*;
 pub use forge::*;
 pub use games::*;
+pub use keeper::*;
+pub use market::*;
 pub use p2p::*;
 pub use predictions::*;
+pub use seat::*;
 pub use wars::*;

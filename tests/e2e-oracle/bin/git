@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# A stand-in for `git`, first on the oracle's PATH in tests/e2e-oracle-v3.sh only. publish-extra publishes an extra
+# file only once the identical file is in the pushed history (index.ts gitShowV3: `git rev-parse --show-toplevel`,
+# then `git show <ref>:<path>`). Here the "pushed history" is the directory $E2E_PUSHED, which the test fills after each
+# run the way oracle.yml commits and pushes the epochs directory. Nothing else is answered: no real repository is read
+# or written.
+case "${1:-}" in
+  rev-parse)
+    [ "${2:-}" = "--show-toplevel" ] && { echo "$E2E_GIT_TOP"; exit 0; } ;;
+  show)
+    rel="${2#*:}"
+    [ -f "$E2E_PUSHED/$rel" ] && { cat "$E2E_PUSHED/$rel"; exit 0; }
+    echo "fatal: path '$rel' does not exist in '${2%%:*}'" >&2; exit 128 ;;
+esac
+echo "e2e git stand-in: '$*' is not served" >&2
+exit 2

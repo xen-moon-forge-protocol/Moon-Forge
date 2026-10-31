@@ -2,7 +2,7 @@
   "name": "moonforge-program-tests",
   "private": true,
   "scripts": {
-    "test": "TS_NODE_PROJECT=./tsconfig.json mocha -r ts-node/register -t 900000 moon-forge.test.ts stress.test.ts"
+    "test": "TS_NODE_PROJECT=./tsconfig.json mocha -r ts-node/register -t 900000 moon-forge.test.ts stress.test.ts v3-gaps.test.ts"
   },
   "dependencies": {
     "@coral-xyz/anchor": "^0.32.1",

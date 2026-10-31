@@ -1,920 +1,1407 @@
-﻿/**
- * Moon Forge v2 — integration tests against a local validator running:
+/**
+ * Moon Forge v3 (final upgrade) — integration tests against a local validator running:
  *   • the program built with `--features localnet` (test keys, days compressed into seconds)
  *   • the real Metaplex Core program dumped from X1 mainnet
- * Run: bash tests/run-local.sh   (see that script)
+ *   • a synthetic XDEX observation account (tests/fixtures/make-observation.cjs: +5% on odd prediction rounds)
+ * SPEC-UPGRADE-v2 8.2 blocks B-1 … B-14, in the order: first-run steps (S7) → Predictions entries (background) → B-8
+ * → B-1 / B-3 → B-7 → B-9 → B-10 → B-5 / B-6 → stalls and expiries → B-2 → B-11 → Predictions resolution → B-13 → B-14.
+ * Run: bash tests/run-local.sh
  */
 import * as anchor from "@coral-xyz/anchor";
-import { keccak_256 } from "@noble/hashes/sha3";
-import { Connection, Keypair, LAMPORTS_PER_SOL, PublicKey, SystemProgram, SYSVAR_SLOT_HASHES_PUBKEY } from "@solana/web3.js";
+import { Connection, Keypair, PublicKey, SystemProgram, SYSVAR_SLOT_HASHES_PUBKEY, TransactionInstruction } from "@solana/web3.js";
 import { assert, expect } from "chai";
 import * as fs from "fs";
 import * as path from "path";
+import {
+  big, betPack, betUnpack, chainTools, claimLeaf, coverage, currentPrice, errText, expectErr, extraLeaf, forgeSplit, idl, isWin,
+  jackpotTicketV2, KeeperChain, keccak, kp, L, marketSplit, minListPrice, mixedSeed, MPL_CORE, nextPrice, OBS, pdas, retry, rnd,
+  seatBond, sleep, trackedMethods, tree, u32, u64, U64_MAX, voidBond, withStallNote, XNT,
+  airdrop, airdropLeaf, airdropWallets, CORE_AUTH, CORE_PLUGIN, parseCore, parseRoyalties,
+} from "./v3-helpers";
 
-const idl = JSON.parse(fs.readFileSync(path.join(__dirname, "../target/idl/moon_forge.json"), "utf8"));
 const RPC = process.env.RPC || "http://127.0.0.1:8899";
-const XNT = LAMPORTS_PER_SOL;
-const MPL_CORE = new PublicKey("CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d");
-const kp = (f: string) => Keypair.fromSecretKey(Uint8Array.from(JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures", f), "utf8"))));
-const oracle = kp("test-oracle.json");
-const architect = kp("test-architect.json");
-
 const connection = new Connection(RPC, "confirmed");
 const payer = Keypair.generate();
 const provider = new anchor.AnchorProvider(connection, new anchor.Wallet(payer), { commitment: "confirmed" });
 const program = new anchor.Program(idl, provider);
-const pid = program.programId;
+const methods: any = trackedMethods(program);
 const acc = program.account as any;
-
-// ─── helpers ────────────────────────────────────────────────────────────────
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-const u64 = (n: number | bigint) => { const b = Buffer.alloc(8); b.writeBigUInt64LE(BigInt(n)); return b; };
-const u32 = (n: number) => { const b = Buffer.alloc(4); b.writeUInt32LE(n); return b; };
-const pda = (...s: Buffer[]) => PublicKey.findProgramAddressSync(s, pid)[0];
-const P = {
-  config: pda(Buffer.from("config")),
-  reward: pda(Buffer.from("reward_vault")),
-  bankroll: pda(Buffer.from("bankroll_vault")),
-  draw: pda(Buffer.from("draw_vault")),
-  collection: pda(Buffer.from("collection")),
-  authority: pda(Buffer.from("artifact_authority")),
-  epoch: (n: number) => pda(Buffer.from("epoch"), u64(n)),
-  receipt: (n: number, p: PublicKey, t: number) => pda(Buffer.from("receipt"), u64(n), p.toBuffer(), Buffer.from([t])),
-  mission: (n: number, p: PublicKey, t: number) => pda(Buffer.from("mission"), u64(n), p.toBuffer(), Buffer.from([t])),
-  player: (o: PublicKey) => pda(Buffer.from("player"), o.toBuffer()),
-  bet: (ps: PublicKey, n: number | bigint) => pda(Buffer.from("bet"), ps.toBuffer(), u64(n)),
-  house: (o: PublicKey) => pda(Buffer.from("house"), o.toBuffer()),
-  jackpot: (r: number) => pda(Buffer.from("jackpot"), u64(r)),
-  jpEntry: (r: number, i: number) => pda(Buffer.from("jp_entry"), u64(r), u32(i)),
-  drawRound: (r: number) => pda(Buffer.from("draw"), u64(r)),
-  drawEntry: (r: number, i: number) => pda(Buffer.from("draw_entry"), u64(r), u32(i)),
-  duel: (c: PublicKey, n: number | bigint) => pda(Buffer.from("duel"), c.toBuffer(), u64(n)),
-  asset: (t: number, s: number) => pda(Buffer.from("asset"), Buffer.from([t]), u32(s)),
-  artifact: (a: PublicKey) => pda(Buffer.from("artifact"), a.toBuffer()),
-  airdrop: (c: PublicKey) => pda(Buffer.from("airdrop"), c.toBuffer()),
-  drop: (n: number, p: PublicKey, t: number) => pda(Buffer.from("drop"), u64(n), p.toBuffer(), Buffer.from([t])),
-};
-const keccak = (...p: Uint8Array[]) => { const h = keccak_256.create(); p.forEach((x) => h.update(x)); return Buffer.from(h.digest()); };
-const hashPair = (a: Buffer, b: Buffer) => (Buffer.compare(a, b) <= 0 ? keccak(a, b) : keccak(b, a));
-function tree(leaves: Buffer[]) {
-  const layers = [leaves];
-  while (layers[layers.length - 1].length > 1) {
-    const c = layers[layers.length - 1], n: Buffer[] = [];
-    for (let i = 0; i < c.length; i += 2) n.push(i + 1 < c.length ? hashPair(c[i], c[i + 1]) : c[i]);
-    layers.push(n);
-  }
-  const proof = (idx: number) => {
-    const out: number[][] = [];
-    for (let l = 0; l < layers.length - 1; l++) { const s = idx ^ 1; if (s < layers[l].length) out.push(Array.from(layers[l][s])); idx >>= 1; }
-    return out;
-  };
-  return { root: layers[layers.length - 1][0], proof };
-}
-const claimLeaf = (e: number, p: PublicKey, t: number, s: bigint) =>
-  keccak(Buffer.from("MOONFORGE_V2_CLAIM"), u64(e), p.toBuffer(), Buffer.from([t]), u64(s));
-
-async function fund(...ks: PublicKey[]) {
-  for (const k of ks) {
-    const sig = await connection.requestAirdrop(k, 1000 * XNT);
-    await connection.confirmTransaction(sig, "confirmed");
-  }
-}
-const bal = (k: PublicKey) => connection.getBalance(k, "confirmed");
-async function expectErr(p: Promise<any>, code: string) {
-  let resolved = false;
-  try { await p; resolved = true; } catch (e: any) {
-    const msg = String(e) + JSON.stringify(e?.logs ?? e?.transactionLogs ?? "");
-    expect(msg, `expected error ${code || "(any)"}`).to.contain(code);
-  }
-  if (resolved) assert.fail(`transaction succeeded but error ${code || "(any)"} was expected`);
-}
-async function slotHashAtOrAfter(target: bigint): Promise<Buffer | null> {
-  const d = (await connection.getAccountInfo(SYSVAR_SLOT_HASHES_PUBKEY))!.data;
-  const len = Number(d.readBigUInt64LE(0));
-  let best: Buffer | null = null;
-  for (let i = 0; i < len; i++) { const o = 8 + i * 40; if (d.readBigUInt64LE(o) >= target) best = d.subarray(o + 8, o + 40); else break; }
-  return best;
-}
-const rnd = (h: Buffer, a: Buffer, b: Buffer) => keccak(Buffer.from("MOONFORGE_RNG"), h, a, b).readBigUInt64LE(0);
-async function waitPastSlot(target: bigint) {
-  for (;;) { if (BigInt(await connection.getSlot("confirmed")) > target + 1n) return; await sleep(300); }
-}
+const pid = program.programId;
+const P = pdas(pid);
+const T = chainTools(connection, program);
+const { bal, event } = T;
+const BN = (x: number | bigint | string) => new anchor.BN(x.toString());
+const SYS = SystemProgram.programId;
 
 // ─── actors ─────────────────────────────────────────────────────────────────
-const alice = Keypair.generate();
-const bob = Keypair.generate();
-const carol = Keypair.generate(); // Moon Landing burner who will eject
-const keeper = Keypair.generate();
-const bot = Keypair.generate(); // session key
+const oracle = kp("test-oracle.json"); // INITIAL_ORACLE (localnet)
+const architect0 = kp("test-architect.json"); // ARCHITECT (localnet): config.architect at initialize
+const cold = kp("test-cold.json"); // SEAT_COLD_INITIAL (localnet)
+const keeper = kp("test-keeper.json"); // INITIAL_KEEPER (localnet)
+const architect = Keypair.generate(); // the OD-22 payee installed by set_architect (S7 step 4)
+const newHot = Keypair.generate(); // the hot key the cold key rotates to (B-9)
+const [alice, bob, carol, dave, eve, frank, predA, predB, keeper2, fresh] = Array.from({ length: 10 }, () => Keypair.generate());
+const stranger = Keypair.generate();
 
-describe("Moon Forge v2", () => {
-  before(async () => {
-    await fund(payer.publicKey, oracle.publicKey, architect.publicKey, alice.publicKey, bob.publicKey, carol.publicKey, keeper.publicKey, bot.publicKey);
+async function fund(...ks: PublicKey[]) {
+  for (const k of ks) await airdrop(connection, k, 1000 * XNT);
+}
+/** Sends a builder, returns its events and block time. */
+async function send(b: any, signers: Keypair[] = []) {
+  const sig = await b.signers(signers).rpc();
+  return T.txInfo(sig);
+}
+const cfg = () => acc.config.fetch(P.config);
+const ks = () => acc.houseKeeper.fetch(P.keeper);
+const xs = () => acc.extraState.fetch(P.extraState);
+const gameBal = async (k: PublicKey) => big((await acc.playerState.fetch(P.player(k))).balance);
+const rent8 = () => T.rentFor(8);
+
+// ─── account builders ───────────────────────────────────────────────────────
+const forgeAccounts = (k: PublicKey, tier: number, serial: number, arch: PublicKey) => ({
+  config: P.config, asset: P.asset(tier, serial), record: P.artifact(P.asset(tier, serial)), collection: P.collection, artifactAuthority: P.authority,
+  rewardVault: P.reward, drawVault: P.draw, architect: arch, buyer: k, coreProgram: MPL_CORE, systemProgram: SYS, extraState: P.extraState, extraVault: P.extraVault,
+});
+async function forge(k: Keypair, tier: number, max: anchor.BN = U64_MAX) {
+  const c = await cfg();
+  const serial = c.artifactsMinted[tier];
+  const info = await send(methods.forgeArtifact(tier, serial, max).accountsPartial(forgeAccounts(k.publicKey, tier, serial, c.architect)), [k]);
+  const ev = event(info.events, "ArtifactForged");
+  return { serial, asset: P.asset(tier, serial), price: big(ev.price), backing: big(ev.backing), info, before: c };
+}
+const recycle = (k: Keypair, asset: PublicKey) => methods.recycleArtifact().accountsPartial({
+  config: P.config, asset, record: P.artifact(asset), collection: P.collection, owner: k.publicKey, coreProgram: MPL_CORE, systemProgram: SYS, extraState: P.extraState,
+}).signers([k]).rpc();
+const assetOwner = async (a: PublicKey) => new PublicKey((await connection.getAccountInfo(a))!.data.subarray(1, 33));
+/** The asset's TransferDelegate registry record (exactly one), parsed: { authority tag, address or null }. */
+const delegateOf = (d: Buffer) => {
+  const rec = parseCore(d).plugins.filter((p) => p.type === CORE_PLUGIN.TransferDelegate);
+  expect(rec.length, "one TransferDelegate plugin").to.equal(1);
+  return { authority: rec[0].authority, address: rec[0].address ? rec[0].address.toBase58() : null };
+};
+/** Core TransferV1 by the owner (Core resets every owner-managed plugin authority on transfer). */
+const coreTransfer = (asset: PublicKey, owner: Keypair, to: PublicKey) => T.sendIxs([new TransactionInstruction({
+  programId: MPL_CORE, data: Buffer.from([14, 0]),
+  keys: [
+    { pubkey: asset, isSigner: false, isWritable: true }, { pubkey: P.collection, isSigner: false, isWritable: false },
+    { pubkey: owner.publicKey, isSigner: true, isWritable: true }, { pubkey: MPL_CORE, isSigner: false, isWritable: false },
+    { pubkey: to, isSigner: false, isWritable: false }, { pubkey: MPL_CORE, isSigner: false, isWritable: false }, { pubkey: MPL_CORE, isSigner: false, isWritable: false },
+  ],
+})], [owner]);
+/** Core BurnV1 by the owner, outside Moon Forge (leaves an orphan record). */
+const coreBurn = (asset: PublicKey, owner: Keypair) => T.sendIxs([new TransactionInstruction({
+  programId: MPL_CORE, data: Buffer.from([12, 0]),
+  keys: [
+    { pubkey: asset, isSigner: false, isWritable: true }, { pubkey: P.collection, isSigner: false, isWritable: true },
+    { pubkey: owner.publicKey, isSigner: true, isWritable: true }, { pubkey: MPL_CORE, isSigner: false, isWritable: false },
+    { pubkey: SYS, isSigner: false, isWritable: false }, { pubkey: MPL_CORE, isSigner: false, isWritable: false },
+  ],
+})], [owner]);
+
+// epochs: oracle publishes; the signer changes after the cold rotation (B-9)
+let hot = oracle;
+const publish = (n: number, root: Buffer, total: bigint, leaves: number, signer = hot, cap: bigint = 1_000_000_000_000_000n) =>
+  methods.publishEpoch(BN(n), Array.from(root), Array.from(Buffer.alloc(32, n)), BN(total), leaves, BN(cap))
+    .accountsPartial({ config: P.config, epoch: P.epoch(n), rewardVault: P.reward, oracle: signer.publicKey, systemProgram: SYS }).signers([signer]);
+const claimInstantB = (n: number, l: { p: PublicKey; t: number; s: bigint }, proof: number[][], payerK: Keypair) =>
+  methods.claimInstant(BN(n), l.t, BN(l.s), proof).accountsPartial({
+    config: P.config, epoch: P.epoch(n), receipt: P.receipt(n, l.p, l.t), player: l.p, playerState: P.player(l.p), rewardVault: P.reward,
+    payer: payerK.publicKey, systemProgram: SYS,
+  }).signers([payerK]);
+const claimMissionB = (n: number, l: { p: PublicKey; t: number; s: bigint }, proof: number[][], payerK: Keypair) =>
+  methods.claimMission(BN(n), l.t, BN(l.s), proof).accountsPartial({
+    config: P.config, epoch: P.epoch(n), receipt: P.receipt(n, l.p, l.t), mission: P.mission(n, l.p, l.t), player: l.p, playerState: P.player(l.p),
+    rewardVault: P.reward, payer: payerK.publicKey, systemProgram: SYS,
+  }).signers([payerK]);
+const publishExtra = (n: number, root: Buffer, total: bigint, leaves: number, signer = hot, weeks = 1) =>
+  methods.publishExtraEpoch(BN(n), Array.from(root), Array.from(Buffer.alloc(32, 0x40 + n)), BN(total), leaves, weeks).accountsPartial({
+    config: P.config, extraState: P.extraState, extraEpoch: P.extraEpoch(n), baseEpoch: P.epoch(n), prevEpoch: P.epoch(Math.max(1, n - 1)),
+    oracle: signer.publicKey, systemProgram: SYS,
+  }).signers([signer]);
+const walkPairs = async () => {
+  const last = (await cfg()).lastEpoch.toNumber();
+  const out: { pubkey: PublicKey; isSigner: boolean; isWritable: boolean }[] = [];
+  for (let id = last; id >= 1 && out.length < 20; id--) out.push({ pubkey: P.epoch(id), isSigner: false, isWritable: false }, { pubkey: P.extraEpoch(id), isSigner: false, isWritable: false });
+  return out;
+};
+
+// house / keeper
+let chain: KeeperChain;
+let chainSeed = 1;
+const newChain = (len: number) => (chain = new KeeperChain(keccak(Buffer.from("test-chain"), u32(chainSeed++)), len));
+const armB = (k: Keypair, tip: Buffer, len: number, deposit: number | bigint) => methods.armKeeper(Array.from(tip), BN(len), BN(deposit)).accountsPartial({
+  config: P.config, keeperSeat: P.keeper, keeper: k.publicKey, bankrollVault: P.bankroll, rewardVault: P.reward, systemProgram: SYS,
+}).signers([k]);
+const keeperOnly = (k: Keypair) => ({ config: P.config, keeperSeat: P.keeper, keeper: k.publicKey, bankrollVault: P.bankroll, rewardVault: P.reward, systemProgram: SYS });
+type V2Bet = { ps: PublicKey; nonce: number; pk: PublicKey; owner: Keypair; seed: Buffer; game: number; choice: number };
+async function placeV2(k: Keypair, game: number, param: number, choice: number, stake: number): Promise<V2Bet> {
+  const ps = P.player(k.publicKey);
+  const nonce = (await acc.playerState.fetch(ps)).nonce.toNumber();
+  const seed = keccak(Buffer.from("seed"), k.publicKey.toBuffer(), u64(nonce));
+  const c = await cfg();
+  await methods.placeBetV2(game, BN(param), choice, BN(stake), Array.from(seed)).accountsPartial({
+    config: P.config, playerState: ps, bet: P.bet(ps, nonce), bankrollVault: P.bankroll, rewardVault: P.reward, architect: c.architect,
+    signer: k.publicKey, systemProgram: SYS, keeperSeat: P.keeper,
+  }).signers([k]).rpc();
+  return { ps, nonce, pk: P.bet(ps, nonce), owner: k, seed, game, choice };
+}
+const anchorB = (b: V2Bet) => methods.anchorBet().accountsPartial({ bet: b.pk, slotHashes: SYSVAR_SLOT_HASHES_PUBKEY });
+async function anchorWhenReady(b: V2Bet) {
+  const t = big((await acc.bet.fetch(b.pk)).targetSlot);
+  await T.waitPastSlot(betUnpack(t).anchor);
+  await retry(["NotReady"], () => anchorB(b).rpc());
+}
+const settleV2B = (b: V2Bet, reveal: Buffer) => methods.settleBetV2(Array.from(reveal)).accountsPartial({
+  config: P.config, bet: b.pk, playerState: b.ps, bankrollVault: P.bankroll, slotHashes: SYSVAR_SLOT_HASHES_PUBKEY, rentPayer: b.owner.publicKey, keeperSeat: P.keeper,
+});
+const refundB = (b: V2Bet) => methods.refundStalledBet().accountsPartial({
+  config: P.config, bet: b.pk, playerState: b.ps, bankrollVault: P.bankroll, slotHashes: SYSVAR_SLOT_HASHES_PUBKEY, rentPayer: b.owner.publicKey,
+  keeperSeat: P.keeper, rewardVault: P.reward,
+});
+/** Anchors (if needed) and settles a v2 bet with the keeper's next reveal; returns the roll, win flag and payout. */
+async function settleBet(b: V2Bet) {
+  const bet0 = await acc.bet.fetch(b.pk);
+  if ((bet0.game & 0x40) === 0) await anchorWhenReady(b);
+  const bet = await acc.bet.fetch(b.pk);
+  const { index } = betUnpack(big(bet.targetSlot));
+  const reveal = chain.reveal(index);
+  const before = await gameBal(b.owner.publicKey);
+  // G-2 (round 4): the settle tip, min(0.0005 XNT, half of the bet's 1% pool share, the free pool), from the reward
+  // vault to the registered keeper wallet (resolved by the client from keeper_seat.keeper), booked in keeper_tips
+  const kw = (await ks()).keeper as PublicKey;
+  const c0 = await cfg();
+  const [kw0, pool0] = [big(await bal(kw)), big(await bal(P.reward))];
+  const free0 = pool0 - big(await rent8()) - big(c0.rewardReserved);
+  const share = (big(bet.stake) * 100n) / 10_000n / 2n;
+  const want = [500_000n, share, free0 < 0n ? 0n : free0].reduce((a, x) => (x < a ? x : a));
+  const st = await withStallNote(send(settleV2B(b, reveal)), connection, big(bet.targetSlot), ks);
+  const ev = event(st.events, "BetSettled");
+  expect(big(ev.keeperTip), "G-2 settle tip").to.equal(want);
+  expect(big(await bal(kw)) - kw0, "the tip reaches the registered keeper wallet").to.equal(want);
+  expect(pool0 - big(await bal(P.reward)), "the tip leaves the reward vault").to.equal(want);
+  expect(big((await cfg()).stats.keeperTips) - big(c0.stats.keeperTips), "booked in keeper_tips").to.equal(want);
+  const roll = rnd(reveal, b.pk.toBuffer(), Buffer.from(bet.seed)) % 10_000n;
+  const won = isWin(bet.game & 0x3f, bet.choice, big(bet.chanceBps), roll);
+  expect((await gameBal(b.owner.publicKey)) - before).to.equal(won ? big(bet.payout) : 0n);
+  return { roll, won, payout: big(bet.payout), tip: want };
+}
+const revealKeeperB = (reveal: Buffer, k = keeper) => methods.revealKeeper(Array.from(reveal)).accountsPartial({ keeperSeat: P.keeper, keeper: k.publicKey }).signers([k]);
+
+// jackpot
+const enterJp = (k: Keypair, r: number, idx: number, amt: number) => methods.enterJackpot(BN(r), idx, BN(amt)).accountsPartial({
+  config: P.config, round: P.jackpot(r), entry: P.jpEntry(r, idx), playerState: P.player(k.publicKey), signer: k.publicKey, systemProgram: SYS,
+}).signers([k]);
+const drawJp = (r: number, first: PublicKey) => methods.drawJackpot().accountsPartial({ config: P.config, round: P.jackpot(r), firstPlayerState: P.player(first), keeperSeat: P.keeper });
+const settleJpV2B = async (r: number, entryIdx: number, reveal: Buffer) => {
+  const e = await acc.jackpotEntry.fetch(P.jpEntry(r, entryIdx));
+  return methods.settleJackpotV2(Array.from(reveal)).accountsPartial({
+    config: P.config, round: P.jackpot(r), entry: P.jpEntry(r, entryIdx), winnerState: P.player(e.player), rewardVault: P.reward, drawVault: P.draw,
+    architect: (await cfg()).architect, slotHashes: SYSVAR_SLOT_HASHES_PUBKEY, keeperSeat: P.keeper,
   });
-
-  it("initialize_v2 is permissionless and deterministic", async () => {
-    await program.methods.initializeV2().accountsPartial({
-      config: P.config, rewardVault: P.reward, bankrollVault: P.bankroll, drawVault: P.draw,
-      collection: P.collection, artifactAuthority: P.authority, payer: payer.publicKey, systemProgram: SystemProgram.programId,
-    }).rpc();
-    const c = await acc.config.fetch(P.config);
-    expect(c.oracle.toBase58()).to.equal(oracle.publicKey.toBase58());
-    expect(c.architect.toBase58()).to.equal(architect.publicKey.toBase58());
-    for (const v of [P.reward, P.bankroll, P.draw]) expect((await connection.getAccountInfo(v))!.owner.toBase58()).to.equal(pid.toBase58());
-    await program.methods.sweepLegacy().accountsPartial({ config: P.config, rewardVault: P.reward }).rpc(); // no-op locally
-  });
-
-  it("donate sends 100% to the chosen vault and rejects foreign accounts", async () => {
-    const before = await bal(P.reward);
-    await program.methods.donate(0, new anchor.BN(100 * XNT)).accountsPartial({ config: P.config, donor: payer.publicKey, vault: P.reward }).rpc();
-    expect((await bal(P.reward)) - before).to.equal(100 * XNT);
-    await expectErr(program.methods.donate(0, new anchor.BN(1)).accountsPartial({ config: P.config, donor: payer.publicKey, vault: alice.publicKey }).rpc(), "InvalidTarget");
-    await program.methods.donate(2, new anchor.BN(10 * XNT)).accountsPartial({ config: P.config, donor: payer.publicKey, vault: P.draw }).rpc();
-  });
-
-  // Epoch 1: alice Launchpad (score 600), bob Orbit (score 300), carol Moon Landing (score 100)
-  const E1 = [
-    { p: alice.publicKey, t: 0, s: 600n },
-    { p: bob.publicKey, t: 1, s: 300n },
-    { p: carol.publicKey, t: 2, s: 100n },
-  ];
-  const t1 = tree(E1.map((l) => claimLeaf(1, l.p, l.t, l.s)));
-  const BIG_CAP = 1_000_000_000_000_000n; // lamports per score unit: never binding in these tests
-  const publish = (n: number, root: Buffer, total: bigint, leaves: number, cap: bigint | number = BIG_CAP, signer = oracle) =>
-    program.methods.publishEpoch(new anchor.BN(n), Array.from(root), Array.from(Buffer.alloc(32, n)), new anchor.BN(total.toString()), leaves, new anchor.BN(cap.toString()))
-      .accountsPartial({ config: P.config, epoch: P.epoch(n), rewardVault: P.reward, oracle: signer.publicKey, systemProgram: SystemProgram.programId })
-      .signers([signer]).rpc();
-
-  it("only the oracle can publish; budget = 10% of the free pool, computed on-chain; >= 6 'days' between epochs", async () => {
-    await expectErr(publish(1, t1.root, 1000n, 3, BIG_CAP, alice), "OnlyOracle");
-    await expectErr(publish(1, t1.root, 1000n, 3, 0), "EmptyEpoch"); // the rate cap can never be switched off
-    await expectErr(publish(2, t1.root, 1000n, 3), "BadEpochNumber");
-    await expectErr(publish(1, t1.root, 0n, 3), "EmptyEpoch");
-    const free = (await bal(P.reward)) - (await connection.getMinimumBalanceForRentExemption(8));
-    await publish(1, t1.root, 1000n, 3);
-    const e = await acc.epoch.fetch(P.epoch(1));
-    const total = e.budget.toNumber() + e.dropReserve.toNumber();
-    expect(total).to.equal(Math.floor(free / 10));
-    expect(e.dropReserve.toNumber()).to.equal(Math.floor(total / 10)); // 10% of the budget -> Forge Drops
-    expect(e.dropState).to.equal(1); // pending seal
-    const c = await acc.config.fetch(P.config);
-    expect(c.rewardReserved.toNumber()).to.equal(total);
-    // immediately after: too soon (6 s on localnet)
-    await expectErr(publish(2, tree([claimLeaf(2, alice.publicKey, 0, 1n)]).root, 1n, 1), "EpochTooSoon");
-  });
-
-  it("claim_instant: anyone can submit, XNT goes to the player, pool pays the keeper tip", async () => {
-    const e = await acc.epoch.fetch(P.epoch(1));
-    const expected = Math.floor((600 * e.budget.toNumber()) / 1000);
-    const aliceBefore = await bal(alice.publicKey);
-    const keeperBefore = await bal(keeper.publicKey);
-    const accounts = {
-      config: P.config, epoch: P.epoch(1), receipt: P.receipt(1, alice.publicKey, 0), player: alice.publicKey,
-      playerState: P.player(alice.publicKey), rewardVault: P.reward, payer: keeper.publicKey, systemProgram: SystemProgram.programId,
-    };
-    // wrong score / wrong tier rejected
-    await expectErr(program.methods.claimInstant(new anchor.BN(1), 0, new anchor.BN(601), t1.proof(0)).accountsPartial(accounts).signers([keeper]).rpc(), "InvalidProof");
-    await program.methods.claimInstant(new anchor.BN(1), 0, new anchor.BN(600), t1.proof(0)).accountsPartial(accounts).signers([keeper]).rpc();
-    expect((await bal(alice.publicKey)) - aliceBefore).to.equal(expected);
-    const ps = await acc.playerState.fetch(P.player(alice.publicKey));
-    expect(ps.chips.toNumber()).to.equal(Math.floor(expected / XNT)); // 1 chip per XNT
-    expect(await bal(keeper.publicKey)).to.be.greaterThan(keeperBefore - 0.01 * XNT); // rents fronted, tip received
-    // double claim impossible
-    await expectErr(program.methods.claimInstant(new anchor.BN(1), 0, new anchor.BN(600), t1.proof(0)).accountsPartial(accounts).signers([keeper]).rpc(), "already in use");
-  });
-
-  it("claim_mission + linear vesting + permissionless withdraw_vested", async () => {
-    const accounts = (l: typeof E1[0]) => ({
-      config: P.config, epoch: P.epoch(1), receipt: P.receipt(1, l.p, l.t), mission: P.mission(1, l.p, l.t), player: l.p,
-      playerState: P.player(l.p), rewardVault: P.reward, payer: payer.publicKey, systemProgram: SystemProgram.programId,
-    });
-    await program.methods.claimMission(new anchor.BN(1), 1, new anchor.BN(300), t1.proof(1)).accountsPartial(accounts(E1[1])).rpc();
-    await program.methods.claimMission(new anchor.BN(1), 2, new anchor.BN(100), t1.proof(2)).accountsPartial(accounts(E1[2])).rpc();
-    const m = await acc.mission.fetch(P.mission(1, bob.publicKey, 1));
-    expect(m.end.toNumber() - m.start.toNumber()).to.equal(45); // 45 "days" (seconds on localnet)
-    const chips0 = (await acc.playerState.fetch(P.player(bob.publicKey))).chips.toNumber();
-    expect(chips0).to.equal(0); // vesting claims grant chips only as XNT is actually paid out
-    await sleep(3000);
-    const before = await bal(bob.publicKey);
-    await program.methods.withdrawVested().accountsPartial({ mission: P.mission(1, bob.publicKey, 1), player: bob.publicKey, playerState: P.player(bob.publicKey), rentPayer: payer.publicKey }).rpc();
-    const got = (await bal(bob.publicKey)) - before;
-    expect(got).to.be.greaterThan(0);
-    expect(got).to.be.lessThan(m.total.toNumber() * 0.3);
-    const m2 = await acc.mission.fetch(P.mission(1, bob.publicKey, 1));
-    expect((await acc.playerState.fetch(P.player(bob.publicKey))).chips.toNumber()).to.equal(Math.floor(m2.withdrawn.toNumber() / XNT));
-  });
-
-  it("eject: vested paid in full, unvested pays 75% penalty to the pool (Moon Landing)", async () => {
-    const m = await acc.mission.fetch(P.mission(1, carol.publicKey, 2));
-    const poolBefore = await bal(P.reward);
-    const carolBefore = await bal(carol.publicKey);
-    await expectErr(program.methods.eject().accountsPartial({ config: P.config, mission: P.mission(1, carol.publicKey, 2), player: bob.publicKey, rewardVault: P.reward, rentPayer: payer.publicKey, playerState: P.player(carol.publicKey) }).signers([bob]).rpc(), "");
-    const cchips0 = (await acc.playerState.fetch(P.player(carol.publicKey))).chips.toNumber();
-    await program.methods.eject().accountsPartial({ config: P.config, mission: P.mission(1, carol.publicKey, 2), player: carol.publicKey, rewardVault: P.reward, rentPayer: payer.publicKey, playerState: P.player(carol.publicKey) }).signers([carol]).rpc();
-    const penalty = (await bal(P.reward)) - poolBefore;
-    const paid = (await bal(carol.publicKey)) - carolBefore + 5000; // + tx fee
-    // chips only on what carol really received, never on the part lost to the penalty
-    expect((await acc.playerState.fetch(P.player(carol.publicKey))).chips.toNumber() - cchips0).to.equal(Math.floor(paid / XNT));
-    expect(penalty + paid).to.be.closeTo(m.total.toNumber(), 10_000);
-    expect(penalty / m.total.toNumber()).to.be.within(0.6, 0.75); // early exit pays less than Launchpad
-    expect(await connection.getAccountInfo(P.mission(1, carol.publicKey, 2))).to.equal(null);
-  });
-
-  it("the rate cap can only lower the budget", async () => {
-    const t2 = tree([claimLeaf(2, alice.publicKey, 0, 1000n)]);
-    // the validator clock can lag the host clock: retry while the program still says "too soon"
-    for (let i = 0; ; i++) {
-      try { await publish(2, t2.root, 1000n, 1, 5); break; } // cap 5 lamports per score unit → budget 5000
-      catch (e: any) { if (!String(e).includes("EpochTooSoon") || i > 40) throw e; await sleep(1000); }
-    }
-    const e2 = await acc.epoch.fetch(P.epoch(2));
-    expect(e2.budget.toNumber() + e2.dropReserve.toNumber()).to.equal(5000);
-  });
-
-  it("game wallet, exposure cap, commit-reveal coin flip with permissionless settle", async () => {
-    // seed the bankroll as the first House LP
-    await program.methods.houseDeposit(new anchor.BN(200 * XNT), new anchor.BN(0)).accountsPartial({ config: P.config, share: P.house(payer.publicKey), bankrollVault: P.bankroll, owner: payer.publicKey, systemProgram: SystemProgram.programId }).rpc();
-    await program.methods.openPlayer().accountsPartial({ playerState: P.player(bob.publicKey), owner: bob.publicKey, systemProgram: SystemProgram.programId }).signers([bob]).rpc();
-    await program.methods.deposit(new anchor.BN(20 * XNT)).accountsPartial({ playerState: P.player(bob.publicKey), payer: bob.publicKey, systemProgram: SystemProgram.programId }).signers([bob]).rpc();
-
-    const ps = P.player(bob.publicKey);
-    const betAccounts = (nonce: number, signer: Keypair) => ({
-      config: P.config, playerState: ps, bet: P.bet(ps, nonce), bankrollVault: P.bankroll, rewardVault: P.reward,
-      architect: architect.publicKey, signer: signer.publicKey, systemProgram: SystemProgram.programId,
-    });
-    // 0.25% of a 200 XNT bankroll = 0.5 XNT max net win → 1 XNT coin flip (net 0.96) must fail
-    await expectErr(program.methods.placeBet(0, new anchor.BN(0), 0, new anchor.BN(1 * XNT), Array(32).fill(1)).accountsPartial(betAccounts(0, bob)).signers([bob]).rpc(), "BankrollTooSmall");
-
-    const poolBefore = await bal(P.reward), archBefore = await bal(architect.publicKey);
-    const stake = 0.5 * XNT;
-    await program.methods.placeBet(0, new anchor.BN(0), 1, new anchor.BN(stake), Array(32).fill(7)).accountsPartial(betAccounts(0, bob)).signers([bob]).rpc();
-    expect((await bal(P.reward)) - poolBefore).to.equal(stake / 100); // 1% → burners' pool
-    expect((await bal(architect.publicKey)) - archBefore).to.equal(stake / 200); // 0.5% → architect
-    const bet = await acc.bet.fetch(P.bet(ps, 0));
-    // settle too early fails, then anyone (the keeper) settles
-    await waitPastSlot(BigInt(bet.targetSlot.toString()));
-    const before = (await acc.playerState.fetch(ps)).balance.toNumber();
-    await program.methods.settleBet().accountsPartial({ config: P.config, bet: P.bet(ps, 0), playerState: ps, bankrollVault: P.bankroll, slotHashes: SYSVAR_SLOT_HASHES_PUBKEY, rentPayer: bob.publicKey }).rpc(); // paid by a third party (the provider wallet), not by bob
-    const h = (await slotHashAtOrAfter(BigInt(bet.targetSlot.toString())))!;
-    const roll = rnd(h, P.bet(ps, 0).toBuffer(), Buffer.alloc(32, 7)) % 10000n;
-    const won = (roll < 5000n) === false; // choice 1 wins on roll >= 5000
-    const after = (await acc.playerState.fetch(ps)).balance.toNumber();
-    expect(after - before).to.equal(won ? 0.98 * XNT : 0);
-    expect((await acc.config.fetch(P.config)).bankrollReserved.toNumber()).to.equal(0);
-    expect(await connection.getAccountInfo(P.bet(ps, 0))).to.equal(null);
-  });
-
-  it("session key (bot) can bet within its limit and can never withdraw", async () => {
-    const ps = P.player(bob.publicKey);
-    const now = Math.floor(Date.now() / 1000);
-    await program.methods.setSession(bot.publicKey, new anchor.BN(now + 3600), new anchor.BN(0.2 * XNT)).accountsPartial({ playerState: ps, owner: bob.publicKey }).signers([bob]).rpc();
-    const nonce = (await acc.playerState.fetch(ps)).nonce.toNumber();
-    const accounts = { config: P.config, playerState: ps, bet: P.bet(ps, nonce), bankrollVault: P.bankroll, rewardVault: P.reward, architect: architect.publicKey, signer: bot.publicKey, systemProgram: SystemProgram.programId };
-    await expectErr(program.methods.placeBet(2, new anchor.BN(20000), 0, new anchor.BN(0.3 * XNT), Array(32).fill(2)).accountsPartial(accounts).signers([bot]).rpc(), "SessionLimit");
-    await program.methods.placeBet(2, new anchor.BN(20000), 0, new anchor.BN(0.1 * XNT), Array(32).fill(2)).accountsPartial(accounts).signers([bot]).rpc(); // Void Rush 2x
-    await expectErr(program.methods.withdraw(new anchor.BN(1)).accountsPartial({ playerState: ps, owner: bot.publicKey }).signers([bot]).rpc(), "");
-    // a bot cannot put the owner's money in a pot shared with others
-    const jr = (await acc.config.fetch(P.config)).jackpotRound.toNumber();
-    await expectErr(program.methods.enterJackpot(new anchor.BN(jr), 0, new anchor.BN(0.1 * XNT)).accountsPartial({
-      config: P.config, round: P.jackpot(jr), entry: P.jpEntry(jr, 0), playerState: ps, signer: bot.publicKey, systemProgram: SystemProgram.programId,
-    }).signers([bot]).rpc(), "OwnerOnly");
-    const bet = await acc.bet.fetch(P.bet(ps, nonce));
-    await waitPastSlot(BigInt(bet.targetSlot.toString()));
-    await program.methods.settleBet().accountsPartial({ config: P.config, bet: P.bet(ps, nonce), playerState: ps, bankrollVault: P.bankroll, slotHashes: SYSVAR_SLOT_HASHES_PUBKEY, rentPayer: bot.publicKey }).rpc();
-    // owner withdraws
-    const b = (await acc.playerState.fetch(ps)).balance.toNumber();
-    const w = await bal(bob.publicKey);
-    await program.methods.withdraw(new anchor.BN(b)).accountsPartial({ playerState: ps, owner: bob.publicKey }).signers([bob]).rpc();
-    expect((await bal(bob.publicKey)) - w).to.equal(b); // fee paid by the provider wallet: bob receives the exact balance
-  });
-
-  it("Be the House: 24h cooldown, withdraw at conservative share value", async () => {
-    const share = P.house(payer.publicKey);
-    const s = await acc.houseShare.fetch(share);
-    await program.methods.houseRequestWithdraw(new anchor.BN(s.shares.toNumber() / 2)).accountsPartial({ share, owner: payer.publicKey }).rpc();
-    await expectErr(program.methods.houseWithdraw(new anchor.BN(0)).accountsPartial({ config: P.config, share, bankrollVault: P.bankroll, owner: payer.publicKey }).rpc(), "WithdrawLocked");
-    await sleep(2000);
-    const before = await bal(payer.publicKey);
-    await program.methods.houseWithdraw(new anchor.BN(0)).accountsPartial({ config: P.config, share, bankrollVault: P.bankroll, owner: payer.publicKey }).rpc();
-    expect((await bal(payer.publicKey)) - before).to.be.greaterThan(90 * XNT);
-  });
-
-  it("Be the House: shares are never cheaper while bets are pending; slippage limits protect LPs", async () => {
-    const ps = P.player(bob.publicKey);
-    await program.methods.deposit(new anchor.BN(5 * XNT)).accountsPartial({ playerState: ps, payer: payer.publicKey, systemProgram: SystemProgram.programId }).rpc();
-    const nonce = (await acc.playerState.fetch(ps)).nonce.toNumber();
-    // a pending 20x Void Rush bet reserves its full payout (conservative value drops)
-    await program.methods.placeBet(2, new anchor.BN(200_000), 0, new anchor.BN(0.01 * XNT), Array(32).fill(5)).accountsPartial({
-      config: P.config, playerState: ps, bet: P.bet(ps, nonce), bankrollVault: P.bankroll, rewardVault: P.reward,
-      architect: architect.publicKey, signer: bob.publicKey, systemProgram: SystemProgram.programId,
-    }).signers([bob]).rpc();
-    const c = await acc.config.fetch(P.config);
-    expect(c.bankrollReserved.toNumber()).to.be.greaterThan(0);
-    const rent = await connection.getMinimumBalanceForRentExemption(8);
-    const optimistic = BigInt((await bal(P.bankroll)) - rent);
-    const conservative = optimistic - BigInt(c.bankrollReserved.toString());
-    const total = BigInt(c.houseTotalShares.toString());
-    const amount = 10n * BigInt(XNT);
-    const atOptimistic = (amount * total) / optimistic;
-    expect(atOptimistic < (amount * total) / conservative).to.equal(true);
-    const dep = (min: bigint) => program.methods.houseDeposit(new anchor.BN(amount.toString()), new anchor.BN(min.toString()))
-      .accountsPartial({ config: P.config, share: P.house(alice.publicKey), bankrollVault: P.bankroll, owner: alice.publicKey, systemProgram: SystemProgram.programId }).signers([alice]).rpc();
-    await expectErr(dep(atOptimistic + 1n), "SlippageExceeded");
-    await dep(atOptimistic);
-    expect((await acc.houseShare.fetch(P.house(alice.publicKey))).shares.toString()).to.equal(atOptimistic.toString());
-
-    // withdrawals: priced at the conservative value, never below the LP's own limit
-    await program.methods.houseRequestWithdraw(new anchor.BN(atOptimistic.toString())).accountsPartial({ share: P.house(alice.publicKey), owner: alice.publicKey }).signers([alice]).rpc();
-    await sleep(1500);
-    const wd = (min: bigint) => program.methods.houseWithdraw(new anchor.BN(min.toString()))
-      .accountsPartial({ config: P.config, share: P.house(alice.publicKey), bankrollVault: P.bankroll, owner: alice.publicKey }).signers([alice]).rpc();
-    await expectErr(wd(amount), "SlippageExceeded"); // the pending bet is counted as won
-    const before = await bal(alice.publicKey);
-    for (let i = 0; ; i++) {
-      try { await wd(amount * 97n / 100n); break; }
-      catch (e: any) { if (!String(e).includes("WithdrawLocked") || i > 30) throw e; await sleep(500); }
-    }
-    expect((await bal(alice.publicKey)) - before).to.be.greaterThan(9.7 * XNT);
-
-    const bet = await acc.bet.fetch(P.bet(ps, nonce));
-    await waitPastSlot(BigInt(bet.targetSlot.toString()));
-    await program.methods.settleBet().accountsPartial({ config: P.config, bet: P.bet(ps, nonce), playerState: ps, bankrollVault: P.bankroll, slotHashes: SYSVAR_SLOT_HASHES_PUBKEY, rentPayer: bob.publicKey }).rpc();
-  });
-
-  async function settleRound(kind: "jackpot" | "draw", roundId: number) {
-    const roundPk = kind === "jackpot" ? P.jackpot(roundId) : P.drawRound(roundId);
-    const r = await (kind === "jackpot" ? acc.jackpotRound : acc.drawRound).fetch(roundPk);
-    await waitPastSlot(BigInt(r.targetSlot.toString()));
-    const h = (await slotHashAtOrAfter(BigInt(r.targetSlot.toString())))!;
-    const total = BigInt((kind === "jackpot" ? r.total : r.totalWeight).toString());
-    const t = rnd(h, roundPk.toBuffer(), u64(roundId)) % total;
-    for (let i = 0; i < r.entries; i++) {
-      const ePk = kind === "jackpot" ? P.jpEntry(roundId, i) : P.drawEntry(roundId, i);
-      const e = await (kind === "jackpot" ? acc.jackpotEntry : acc.drawEntry).fetch(ePk);
-      const start = BigInt(e.start.toString()), size = BigInt((kind === "jackpot" ? e.amount : e.weight).toString());
-      if (t >= start && t < start + size) {
-        if (i > 0) {
-          const wrong = kind === "jackpot" ? P.jpEntry(roundId, 0) : P.drawEntry(roundId, 0);
-          const we = await (kind === "jackpot" ? acc.jackpotEntry : acc.drawEntry).fetch(wrong);
-          const m = kind === "jackpot"
-            ? program.methods.settleJackpot().accountsPartial({ config: P.config, round: roundPk, entry: wrong, winnerState: P.player(we.player), rewardVault: P.reward, drawVault: P.draw, architect: architect.publicKey, slotHashes: SYSVAR_SLOT_HASHES_PUBKEY })
-            : program.methods.settleDraw().accountsPartial({ config: P.config, round: roundPk, entry: wrong, winnerState: P.player(we.player), drawVault: P.draw, rewardVault: P.reward, slotHashes: SYSVAR_SLOT_HASHES_PUBKEY });
-          await expectErr(m.rpc(), "NotWinningEntry");
-        }
-        const m = kind === "jackpot"
-          ? program.methods.settleJackpot().accountsPartial({ config: P.config, round: roundPk, entry: ePk, winnerState: P.player(e.player), rewardVault: P.reward, drawVault: P.draw, architect: architect.publicKey, slotHashes: SYSVAR_SLOT_HASHES_PUBKEY })
-          : program.methods.settleDraw().accountsPartial({ config: P.config, round: roundPk, entry: ePk, winnerState: P.player(e.player), drawVault: P.draw, rewardVault: P.reward, slotHashes: SYSVAR_SLOT_HASHES_PUBKEY });
-        await m.rpc();
-        return e.player as PublicKey;
-      }
-    }
-    throw new Error("no winning entry found");
+};
+async function jackpotWinnerIndex(r: number, reveal: Buffer) {
+  const round = await acc.jackpotRound.fetch(P.jackpot(r));
+  const { anchor } = betUnpack(big(round.targetSlot));
+  await T.waitPastSlot(anchor);
+  const h = (await T.slotHashAtOrAfter(anchor))!;
+  const ticket = jackpotTicketV2(h, reveal, P.jackpot(r), r, big(round.total));
+  for (let i = 0; i < round.entries; i++) {
+    const e = await acc.jackpotEntry.fetch(P.jpEntry(r, i));
+    if (ticket >= big(e.start) && ticket < big(e.start) + big(e.amount)) return { i, ticket, player: e.player as PublicKey };
   }
+  throw new Error("no winning entry");
+}
+const closeJpEntry = async (r: number, i: number) => {
+  const e = await acc.jackpotEntry.fetch(P.jpEntry(r, i));
+  return methods.closeJackpotEntry().accountsPartial({ round: P.jackpot(r), playerState: P.player(e.player), entry: P.jpEntry(r, i), rentPayer: e.rentPayer }).rpc();
+};
+async function openGame(k: Keypair, xnt: number) {
+  if (!(await connection.getAccountInfo(P.player(k.publicKey)))) {
+    await methods.openPlayer().accountsPartial({ playerState: P.player(k.publicKey), owner: k.publicKey, systemProgram: SYS }).signers([k]).rpc();
+  }
+  if (xnt > 0) await methods.deposit(BN(Math.round(xnt * XNT))).accountsPartial({ playerState: P.player(k.publicKey), payer: k.publicKey, systemProgram: SYS }).signers([k]).rpc();
+}
 
-  it("Jackpot: multiplayer pot, provably drawn winner, 2% rake", async () => {
-    for (const k of [alice, bob]) {
-      await program.methods.openPlayer().accountsPartial({ playerState: P.player(k.publicKey), owner: k.publicKey, systemProgram: SystemProgram.programId }).signers([k]).rpc();
-      await program.methods.deposit(new anchor.BN(10 * XNT)).accountsPartial({ playerState: P.player(k.publicKey), payer: k.publicKey, systemProgram: SystemProgram.programId }).signers([k]).rpc();
-    }
-    const enter = (k: Keypair, idx: number, amt: number) => program.methods.enterJackpot(new anchor.BN(0), idx, new anchor.BN(amt))
-      .accountsPartial({ config: P.config, round: P.jackpot(0), entry: P.jpEntry(0, idx), playerState: P.player(k.publicKey), signer: k.publicKey, systemProgram: SystemProgram.programId }).signers([k]).rpc();
-    await enter(alice, 0, 3 * XNT);
-    await enter(bob, 1, 1 * XNT);
-    await expectErr(program.methods.drawJackpot().accountsPartial({ config: P.config, round: P.jackpot(0), firstPlayerState: P.player(alice.publicKey) }).rpc(), "RoundRunning");
-    await sleep(2500);
-    await program.methods.drawJackpot().accountsPartial({ config: P.config, round: P.jackpot(0), firstPlayerState: P.player(alice.publicKey) }).rpc();
-    const winner = await settleRound("jackpot", 0);
-    const ws = await acc.playerState.fetch(P.player(winner));
-    const startBal = winner.equals(alice.publicKey) ? 7 : 9;
-    expect(ws.balance.toNumber()).to.equal(startBal * XNT + 0.98 * 4 * XNT);
-    expect((await acc.config.fetch(P.config)).jackpotRound.toNumber()).to.equal(1);
+// state shared across blocks
+const E1 = [
+  { p: alice.publicKey, t: 0, s: 600n },
+  { p: bob.publicKey, t: 1, s: 300n },
+  { p: carol.publicKey, t: 2, s: 100n },
+];
+const t1 = tree(E1.map((l) => claimLeaf(1, l.p, l.t, l.s)));
+const E2 = [{ p: alice.publicKey, t: 0, s: 1000n }, { p: bob.publicKey, t: 0, s: 1000n }]; // leaves sum to 2× the total score
+const t2 = tree(E2.map((l) => claimLeaf(2, l.p, l.t, l.s)));
+let stallGroup: { jp: number; s0: V2Bet; s1: V2Bet; positions: bigint[] } | null = null;
+let predRounds: number[] = [];
+let predEntries: Promise<void> | null = null;
+let predError: any = null;
+const p2pRake = { pool: 0n, architect: 0n }; // expected 1.5% / 0.5% of decided P2P pots, checked in B-4
+
+describe("Moon Forge v3", () => {
+  before(async () => {
+    await fund(payer.publicKey, oracle.publicKey, architect0.publicKey, cold.publicKey, keeper.publicKey, architect.publicKey, newHot.publicKey,
+      alice.publicKey, bob.publicKey, carol.publicKey, dave.publicKey, eve.publicKey, frank.publicKey, predA.publicKey, predB.publicKey,
+      keeper2.publicKey, stranger.publicKey);
+    await fund(payer.publicKey, keeper.publicKey, dave.publicKey);
   });
 
-  it("Jackpot: a round nobody else joined is refunded in full", async () => {
-    const before = (await acc.playerState.fetch(P.player(bob.publicKey))).balance.toNumber();
-    await program.methods.enterJackpot(new anchor.BN(1), 0, new anchor.BN(XNT)).accountsPartial({ config: P.config, round: P.jackpot(1), entry: P.jpEntry(1, 0), playerState: P.player(bob.publicKey), signer: bob.publicKey, systemProgram: SystemProgram.programId }).signers([bob]).rpc();
-    await sleep(2500);
-    await program.methods.drawJackpot().accountsPartial({ config: P.config, round: P.jackpot(1), firstPlayerState: P.player(bob.publicKey) }).rpc();
-    expect((await acc.playerState.fetch(P.player(bob.publicKey))).balance.toNumber()).to.equal(before);
-  });
+  // ─── S7 first-run steps (SPEC-UPGRADE-v2 6.3) ──────────────────────────────
+  it("S7: initialize, init_artifacts, forge refused before init_extra, set_architect, lock_collection_royalties, init_seat, init_extra, arm_keeper", async () => {
+    await methods.initializeV2().accountsPartial({
+      config: P.config, rewardVault: P.reward, bankrollVault: P.bankroll, drawVault: P.draw, collection: P.collection, artifactAuthority: P.authority,
+      payer: payer.publicKey, systemProgram: SYS,
+    }).rpc();
+    let c = await cfg();
+    expect(c.oracle.toBase58()).to.equal(oracle.publicKey.toBase58());
+    expect(c.architect.toBase58()).to.equal(architect0.publicKey.toBase58());
+    await methods.sweepLegacy().accountsPartial({ legacyState: P.legacyState, legacyEscrow: P.legacyEscrow, config: P.config, rewardVault: P.reward }).rpc();
+    // B-13 PoolEmpty: before the first donation the pool holds only its rent, so 10% of the free pool is 0 and the first
+    // publish is refused (checked first: fewer than 10 free lamports, so the refused publish can never create epoch 1)
+    const rv = (await connection.getAccountInfo(P.reward))!;
+    expect(BigInt(rv.lamports) - BigInt(await T.rentFor(rv.data.length)) - big(c.rewardReserved) < 10n, "an empty pool before the donation").to.equal(true);
+    await expectErr(publish(1, Buffer.alloc(32, 9), 1000n, 1).rpc(), "PoolEmpty");
+    expect((await cfg()).lastEpoch.toNumber()).to.equal(0);
+    const r0 = await bal(P.reward);
+    const d = await send(methods.donate(0, BN(100 * XNT)).accountsPartial({ config: P.config, donor: payer.publicKey, vault: P.reward, systemProgram: SYS }));
+    expect(event(d.events, "Donated").amount.toString()).to.equal(String(100 * XNT));
+    expect((await bal(P.reward)) - r0).to.equal(100 * XNT);
+    await expectErr(methods.donate(0, BN(1)).accountsPartial({ config: P.config, donor: payer.publicKey, vault: alice.publicKey, systemProgram: SYS }).rpc(), "InvalidTarget");
+    await methods.initArtifacts().accountsPartial({ config: P.config, collection: P.collection, artifactAuthority: P.authority, payer: payer.publicKey, coreProgram: MPL_CORE, systemProgram: SYS }).rpc();
+    await methods.refreshCollectionUri().accountsPartial({ config: P.config, collection: P.collection, artifactAuthority: P.authority, payer: payer.publicKey, coreProgram: MPL_CORE, systemProgram: SYS }).rpc();
+    // LB-6: forging before init_extra fails on the missing extra_state account
+    await expectErr(methods.forgeArtifact(0, 0, U64_MAX).accountsPartial(forgeAccounts(alice.publicKey, 0, 0, c.architect)).signers([alice]).rpc(), "AccountNotInitialized");
 
-  it("Artifacts: Core collection, forge (50/40/5/5 split), weekly chips, recycle returns the floor", async () => {
-    await program.methods.initArtifacts().accountsPartial({ config: P.config, collection: P.collection, artifactAuthority: P.authority, payer: payer.publicKey, coreProgram: MPL_CORE, systemProgram: SystemProgram.programId }).rpc();
-    expect((await connection.getAccountInfo(P.collection))!.owner.toBase58()).to.equal(MPL_CORE.toBase58());
-
-    // the collection URI follows METADATA_BASE_URI; anyone can re-point it, and only to that constant
-    const baseUri = /METADATA_BASE_URI: &str = "([^"]+)"/.exec(fs.readFileSync(path.join(__dirname, "../programs/moon-forge/src/constants.rs"), "utf8"))![1];
-    const collectionUri = async () => { // CollectionV1: key | update_authority | name | uri | ...
-      const d = (await connection.getAccountInfo(P.collection))!.data;
-      const o = 33 + 4 + d.readUInt32LE(33);
-      return d.subarray(o + 4, o + 4 + d.readUInt32LE(o)).toString();
+    // B-11: set_architect needs the old payee AND the new key; then lock the royalties to the new payee
+    const setArch = (signer: Keypair, extra: Keypair[] = []) => methods.setArchitect(architect.publicKey).accountsPartial({
+      config: P.config, architect: signer.publicKey, newArchitect: architect.publicKey, rewardVault: P.reward,
+    }).remainingAccounts(extra.map((k) => ({ pubkey: k.publicKey, isSigner: true, isWritable: false }))).signers([signer, ...extra]);
+    await expectErr(setArch(architect0).rpc(), "Unauthorized");
+    await expectErr(setArch(stranger, [architect]).rpc(), "OnlyArchitect");
+    const sa = await send(setArch(architect0, [architect]));
+    expect(event(sa.events, "ArchitectChanged").newArchitect.toBase58()).to.equal(architect.publicKey.toBase58());
+    c = await cfg();
+    expect(c.architect.toBase58()).to.equal(architect.publicKey.toBase58());
+    const lock = (k: Keypair) => methods.lockCollectionRoyalties().accountsPartial({
+      config: P.config, collection: P.collection, artifactAuthority: P.authority, architect: k.publicKey, coreProgram: MPL_CORE, systemProgram: SYS,
+    }).signers([k]);
+    await expectErr(lock(architect0).rpc(), "OnlyArchitect");
+    const lk = await send(lock(architect));
+    expect(event(lk.events, "CollectionRoyaltiesLocked").creator.toBase58()).to.equal(architect.publicKey.toBase58());
+    const coll = (await connection.getAccountInfo(P.collection))!.data;
+    // M-1, parsed from the collection's plugin registry (not a byte search): Royalties { 500 bps, [ { new payee, 100 } ],
+    // RuleSet None } and its plugin authority None, so nobody (not even the artifact_authority PDA) can change it again
+    const royaltiesOf = (d: Buffer) => {
+      const core = parseCore(d);
+      expect(core.key).to.equal(5);
+      expect(core.updateAuthority!.toBase58()).to.equal(P.authority.toBase58());
+      const rec = core.plugins.filter((p) => p.type === CORE_PLUGIN.Royalties);
+      expect(rec.length).to.equal(1);
+      return { authority: rec[0].authority, ...parseRoyalties(d, rec[0].offset) };
     };
-    expect(await collectionUri()).to.equal(`${baseUri}collection.json`);
-    const refresh = () => program.methods.refreshCollectionUri().accountsPartial({
-      config: P.config, collection: P.collection, artifactAuthority: P.authority, payer: bob.publicKey, coreProgram: MPL_CORE, systemProgram: SystemProgram.programId,
-    }).signers([bob]).rpc();
-    await refresh();
-    await refresh();
-    expect(await collectionUri()).to.equal(`${baseUri}collection.json`);
+    const roy = royaltiesOf(coll);
+    expect([roy.authority, roy.basisPoints, roy.creators.length, roy.creators[0].percentage, roy.ruleSet]).to.deep.equal([CORE_AUTH.None, 500, 1, 100, 0]);
+    expect(roy.creators[0].address.toBase58()).to.equal(architect.publicKey.toBase58());
+    expect(coll.includes(architect0.publicKey.toBuffer())).to.equal(false);
+    // the plugin authority is None: Core itself refuses a second update (the program has no lock flag of its own), and the
+    // failure is inside the Core CPI, not a program check
+    const coreRefuses = async (p: Promise<any>) => {
+      let failed = false;
+      try { await p; } catch (e) { failed = true; expect(errText(e), "a refusal inside Core").to.include(`Program ${MPL_CORE.toBase58()} failed`); }
+      expect(failed, "Core accepted a plugin update after the lock").to.equal(true);
+    };
+    await coreRefuses(lock(architect).rpc());
+    // After the lock, an UpdateCollectionPluginV1 from the artifact_authority PDA with DIFFERENT content (a new creator)
+    // also fails: lock_collection_royalties is the program's only plugin-update CPI, so it stands in for the spec's
+    // test-only Core instruction (DEVIATIONS r3 task-b 2). The payee moves to `arch2` and back; the plugin never changes.
+    const arch2 = Keypair.generate();
+    await fund(arch2.publicKey);
+    const setArchTo = (from: Keypair, to: Keypair) => methods.setArchitect(to.publicKey).accountsPartial({
+      config: P.config, architect: from.publicKey, newArchitect: to.publicKey, rewardVault: P.reward,
+    }).remainingAccounts([{ pubkey: to.publicKey, isSigner: true, isWritable: false }]).signers([from, to]).rpc();
+    await setArchTo(architect, arch2);
+    await coreRefuses(lock(arch2).rpc());
+    expect((await connection.getAccountInfo(P.collection))!.data.equals(coll)).to.equal(true);
+    await setArchTo(arch2, architect);
+    expect((await cfg()).architect.toBase58()).to.equal(architect.publicKey.toBase58());
 
-    const forge = (k: Keypair, tier: number, serial: number) => program.methods.forgeArtifact(tier, serial, new anchor.BN("18446744073709551615")).accountsPartial({
-      config: P.config, asset: P.asset(tier, serial), record: P.artifact(P.asset(tier, serial)), collection: P.collection, artifactAuthority: P.authority,
-      rewardVault: P.reward, drawVault: P.draw, architect: architect.publicKey, buyer: k.publicKey, coreProgram: MPL_CORE, systemProgram: SystemProgram.programId,
-    }).signers([k]).rpc();
+    // init_seat: 10% of the free pool (min 1 XNT) bonded by the payer, keys from constants.
+    // SR-1 (security review r2, by design): init_seat is permissionless, so a STRANGER sends it here, standing in for a
+    // front-runner of S7 step 6. The seat it creates is exactly the one the runbook expects (hot = config.oracle, cold =
+    // SEAT_COLD_INITIAL, refund = SEAT_REFUND_INITIAL, bond = max(1 XNT, 10% of free) read at call time); the stranger
+    // only pays the bond and gets no role and no claim on it.
+    const free = big(await bal(P.reward)) - big(await rent8()) - big(c.rewardReserved);
+    const st0 = big(await bal(stranger.publicKey));
+    const initSeatB = (k: Keypair) => methods.initSeat().accountsPartial({ config: P.config, seat: P.seat, rewardVault: P.reward, payer: k.publicKey, systemProgram: SYS }).signers([k]);
+    const is = await send(initSeatB(stranger));
+    const seat = await acc.oracleSeat.fetch(P.seat);
+    expect(big(seat.bond)).to.equal(seatBond(free));
+    expect(seat.cold.toBase58()).to.equal(cold.publicKey.toBase58());
+    expect(seat.refund.toBase58()).to.equal(PublicKey.default.toBase58()); // SEAT_REFUND_INITIAL (default = the pool)
+    expect(seat.priority.toBase58()).to.equal(PublicKey.default.toBase58());
+    expect([seat.generation, seat.openSince, seat.priorityBond, seat.voids, seat.toPool].map((x: any) => x.toString())).to.deep.equal(["1", "0", "0", "0", "0"]);
+    const seatRent = big(await T.rentFor((await connection.getAccountInfo(P.seat))!.data.length));
+    expect(big(await bal(P.seat))).to.equal(seatRent + seatBond(free));
+    expect(st0 - big(await bal(stranger.publicKey)) >= seatRent + seatBond(free)).to.equal(true); // bond + rent + fee
+    const sc = event(is.events, "SeatChanged");
+    expect(sc.reason).to.equal(0);
+    expect(sc.taker.toBase58()).to.equal(stranger.publicKey.toBase58());
+    expect(sc.hot.toBase58()).to.equal(oracle.publicKey.toBase58());
+    expect((await cfg()).oracle.toBase58()).to.equal(oracle.publicKey.toBase58());
+    await expectErr(initSeatB(payer).rpc(), "already in use"); // once
+    await expectErr(methods.rotateHot(stranger.publicKey).accountsPartial({ config: P.config, seat: P.seat, cold: stranger.publicKey }).signers([stranger]).rpc(), "OnlyCold");
+    // init_extra (before any forge), once
+    const ie = () => methods.initExtra().accountsPartial({ config: P.config, extraState: P.extraState, extraVault: P.extraVault, payer: payer.publicKey, systemProgram: SYS });
+    await ie().rpc();
+    await expectErr(ie().rpc(), "already in use");
+    expect((await connection.getAccountInfo(P.extraVault))!.owner.toBase58()).to.equal(pid.toBase58());
 
-    const pool0 = await bal(P.reward), draw0 = await bal(P.draw), arch0 = await bal(architect.publicKey);
-    await forge(alice, 0, 0);
-    expect((await bal(P.reward)) - pool0).to.equal(4 * XNT);
-    expect((await bal(P.draw)) - draw0).to.equal(0.5 * XNT);
-    expect((await bal(architect.publicKey)) - arch0).to.equal(0.5 * XNT);
-    const asset = (await connection.getAccountInfo(P.asset(0, 0)))!;
-    expect(asset.owner.toBase58()).to.equal(MPL_CORE.toBase58());
-    expect(new PublicKey(asset.data.subarray(1, 33)).toBase58()).to.equal(alice.publicKey.toBase58());
-    await expectErr(forge(alice, 0, 5), "InvalidTarget"); // serial must be sequential
-
-    const chips = async () => (await acc.playerState.fetch(P.player(alice.publicKey))).chips.toNumber();
-    const c0 = await chips();
-    const chipAcc = { config: P.config, asset: P.asset(0, 0), record: P.artifact(P.asset(0, 0)), collection: P.collection, playerState: P.player(alice.publicKey), owner: alice.publicKey };
-    await program.methods.claimArtifactChips().accountsPartial(chipAcc).signers([alice]).rpc();
-    expect((await chips()) - c0).to.equal(5);
-    await expectErr(program.methods.claimArtifactChips().accountsPartial(chipAcc).signers([alice]).rpc(), "ChipsAlreadyClaimed");
-
-    await forge(bob, 1, 0); // Cosmic for the duel
-    await forge(alice, 0, 1); // second Lunar, recycled now
-    const before = await bal(alice.publicKey);
-    await program.methods.recycleArtifact().accountsPartial({ config: P.config, asset: P.asset(0, 1), record: P.artifact(P.asset(0, 1)), collection: P.collection, owner: alice.publicKey, coreProgram: MPL_CORE, systemProgram: SystemProgram.programId }).signers([alice]).rpc();
-    expect((await bal(alice.publicKey)) - before).to.be.greaterThan(4.99 * XNT); // floor (5 XNT) + record rent - fee
-    const c = await acc.config.fetch(P.config);
-    expect(c.artifactsAlive[0]).to.equal(1);
-    expect(c.artifactsMinted[0]).to.equal(2);
+    // arm_keeper: only INITIAL_KEEPER, bond >= 20 XNT
+    newChain(64);
+    await expectErr(armB(stranger, chain.tip, 64, 20 * XNT).rpc(), "OnlyKeeper");
+    await expectErr(armB(keeper, chain.tip, 64, 19 * XNT).rpc(), "KeeperBondTooSmall");
+    const ak = await send(armB(keeper, chain.tip, 64, 20 * XNT));
+    const ka = event(ak.events, "KeeperArmed");
+    expect(big(ka.bond)).to.equal(20n * BigInt(XNT));
+    expect(ka.length.toNumber()).to.equal(64);
+    const k = await ks();
+    expect((await bal(P.keeper)) - (await T.rentFor((await connection.getAccountInfo(P.keeper))!.data.length))).to.equal(Number(k.bond));
   });
 
-  it("Artifacts: dynamic price — +5% per forge, buyer's max price, decay after a quiet week, floor = half of what was paid", async () => {
-    const t = 2; // Solar Core, base 60 XNT (a quiet "week" = 7 s on localnet)
-    const forgeAt = (serial: number, max: bigint) => program.methods.forgeArtifact(t, serial, new anchor.BN(max.toString())).accountsPartial({
-      config: P.config, asset: P.asset(t, serial), record: P.artifact(P.asset(t, serial)), collection: P.collection, artifactAuthority: P.authority,
-      rewardVault: P.reward, drawVault: P.draw, architect: architect.publicKey, buyer: carol.publicKey, coreProgram: MPL_CORE, systemProgram: SystemProgram.programId,
-    }).signers([carol]).rpc();
-    const X = BigInt(XNT);
-    const s0 = (await acc.config.fetch(P.config)).artifactsMinted[t];
-    await expectErr(forgeAt(s0, 60n * X - 1n), "SlippageExceeded");
-    const pool0 = await bal(P.reward);
-    await forgeAt(s0, 60n * X);
-    expect((await acc.artifactRecord.fetch(P.artifact(P.asset(t, s0)))).backing.toString()).to.equal((30n * X).toString());
-    expect((await bal(P.reward)) - pool0).to.equal(24 * XNT);
-    expect((await acc.config.fetch(P.config)).artifactPrice[t].toString()).to.equal((63n * X).toString());
-
-    // the next buyer pays 5% more; a buyer who saw the old price is protected
-    await expectErr(forgeAt(s0 + 1, 60n * X), "SlippageExceeded");
-    await forgeAt(s0 + 1, 63n * X);
-    expect((await acc.artifactRecord.fetch(P.artifact(P.asset(t, s0 + 1)))).backing.toString()).to.equal((315n * X / 10n).toString());
-    expect((await acc.config.fetch(P.config)).artifactPrice[t].toString()).to.equal((6615n * X / 100n).toString());
-
-    // recycling returns exactly half of what that buyer paid (plus the record rent)
-    const c0 = await bal(carol.publicKey);
-    await program.methods.recycleArtifact().accountsPartial({ config: P.config, asset: P.asset(t, s0 + 1), record: P.artifact(P.asset(t, s0 + 1)), collection: P.collection, owner: carol.publicKey, coreProgram: MPL_CORE, systemProgram: SystemProgram.programId }).signers([carol]).rpc();
-    const back = (await bal(carol.publicKey)) - c0;
-    expect(back).to.be.greaterThan(31.5 * XNT - 10_000);
-    expect(back).to.be.lessThan(31.5 * XNT + 0.01 * XNT);
-
-    // after a full quiet period the price falls back by ÷1.05 (66.15 → 63), never below base
-    for (let i = 0; ; i++) {
-      try { await forgeAt(s0 + 2, 63n * X); break; }
-      catch (e: any) { if (!String(e).includes("SlippageExceeded") || i > 40) throw e; await sleep(500); }
-    }
-    expect((await acc.artifactRecord.fetch(P.artifact(P.asset(t, s0 + 2)))).backing.toString()).to.equal((315n * X / 10n).toString());
+  it("Predictions (real) v2: two players enter two consecutive rounds (entries in the background; resolved at the end)", async () => {
+    await openGame(predA, 5);
+    await openGame(predB, 5);
+    const enter = (k: Keypair, r: number, side: number, xnt: number) => methods.enterPrediction(BN(r), side, BN(xnt * XNT))
+      .accountsPartial({ round: P.pred(r), entry: P.predEntry(r, k.publicKey), playerState: P.player(k.publicKey), owner: k.publicKey, systemProgram: SYS }).signers([k]);
+    const enterRound = async (r: number) => {
+      await enter(predA, r, 1, 1).rpc(); // UP
+      await enter(predB, r, 0, 1).rpc(); // DOWN
+    };
+    // entries close 35 s into a 120-s round (one TWAP window + one max gap before the lock)
+    let t = await T.chainTime();
+    while (t % L.PRED_PERIOD > 28) { await sleep(1000); t = await T.chainTime(); }
+    const k0 = Math.floor(t / L.PRED_PERIOD);
+    await expectErr(enter(predA, k0 + 1, 1, 1).rpc(), "PredState"); // only the current round takes entries
+    await enterRound(k0);
+    await expectErr(enter(predA, k0, 0, 1).rpc(), "already in use"); // one entry per wallet per round
+    predRounds = [k0, k0 + 1];
+    predEntries = (async () => {
+      await T.untilChainTime((k0 + 1) * L.PRED_PERIOD + 1);
+      await enterRound(k0 + 1);
+    })().catch((e) => { predError = e; });
   });
 
-  it("Artifact Duel: commit-reveal, element cycle (Cosmic beats Lunar), 2% rake", async () => {
-    const cs = P.player(alice.publicKey);
-    const nonce = (await acc.playerState.fetch(cs)).nonce.toNumber();
-    const duel = P.duel(alice.publicKey, nonce);
-    const salt = Buffer.alloc(32, 9);
-    const commitment = keccak(Buffer.from("MOONFORGE_DUEL"), Buffer.from([0]), salt, duel.toBuffer());
-    await program.methods.createDuel(new anchor.BN(XNT), Array.from(commitment)).accountsPartial({ config: P.config, creatorState: cs, duel, owner: alice.publicKey, asset: P.asset(0, 0), record: P.artifact(P.asset(0, 0)), collection: P.collection, systemProgram: SystemProgram.programId }).signers([alice]).rpc();
-    await expectErr(program.methods.joinDuel(1).accountsPartial({ config: P.config, duel, opponentState: P.player(bob.publicKey), opponent: bob.publicKey, asset: P.asset(0, 0), record: P.artifact(P.asset(0, 0)), collection: P.collection }).signers([bob]).rpc(), "NotArtifactOwner");
-    await program.methods.joinDuel(1).accountsPartial({ config: P.config, duel, opponentState: P.player(bob.publicKey), opponent: bob.publicKey, asset: P.asset(1, 0), record: P.artifact(P.asset(1, 0)), collection: P.collection }).signers([bob]).rpc();
-    const bobBefore = (await acc.playerState.fetch(P.player(bob.publicKey))).balance.toNumber();
-    const resolve = { config: P.config, duel, creatorState: cs, opponentState: P.player(bob.publicKey), rewardVault: P.reward, drawVault: P.draw, architect: architect.publicKey, rentPayer: alice.publicKey };
-    await expectErr(program.methods.revealDuel(3, Array.from(salt)).accountsPartial({ resolve, creator: alice.publicKey }).signers([alice]).rpc(), "BadCommitment");
-    await program.methods.revealDuel(0, Array.from(salt)).accountsPartial({ resolve, creator: alice.publicKey }).signers([alice]).rpc();
-    expect((await acc.playerState.fetch(P.player(bob.publicKey))).balance.toNumber() - bobBefore).to.equal(0.98 * 2 * XNT);
+  // ─── B-8 Forge + hold ──────────────────────────────────────────────────────
+  it("B-8: publish (reserve 0, drop_state 0, budget = 10% free), 48-h hold, keeper tips (0.2 XNT min, never to the oracle), missions, eject", async () => {
+    await expectErr(publish(1, t1.root, 1000n, 3, alice).rpc(), "OnlyOracle");
+    await expectErr(publish(1, t1.root, 1000n, 3, oracle, 0n).rpc(), "EmptyEpoch");
+    await expectErr(publish(2, t1.root, 1000n, 3).rpc(), "BadEpochNumber");
+    await expectErr(publish(1, t1.root, 0n, 3).rpc(), "EmptyEpoch");
+    const c0 = await cfg();
+    const free = big(await bal(P.reward)) - big(await rent8()) - big(c0.rewardReserved);
+    const pub = await send(publish(1, t1.root, 1000n, 3));
+    const e = await acc.epoch.fetch(P.epoch(1));
+    expect(big(e.budget)).to.equal(free / 10n);
+    expect(e.dropReserve.toNumber()).to.equal(0);
+    expect(e.dropState).to.equal(0);
+    expect(event(pub.events, "EpochPublished").dropReserve.toNumber()).to.equal(0);
+    expect(big((await cfg()).rewardReserved)).to.equal(big(c0.rewardReserved) + big(e.budget));
+    await expectErr(publish(2, t2.root, 1000n, 2).rpc(), "EpochTooSoon");
+    await expectErr(methods.expireEpoch().accountsPartial({ config: P.config, epoch: P.epoch(1) }).rpc(), "ClaimWindowOpen");
+    await expectErr(claimInstantB(1, E1[0], t1.proof(0), dave).rpc(), "ClaimOnHold");
+    await expectErr(claimMissionB(1, E1[1], t1.proof(1), oracle).rpc(), "ClaimOnHold");
+
+    const budget = big(e.budget);
+    const amt = (s: bigint) => (s * budget) / 1000n;
+    // a third party submits alice's claim: alice gets the amount, the pool pays dave the 0.002 XNT tip (claim >= 0.2 XNT)
+    const a0 = big(await bal(alice.publicKey)), v0 = big(await bal(P.reward));
+    await expectErr(claimInstantB(1, { ...E1[0], s: 601n }, t1.proof(0), dave).rpc(), "ClaimOnHold"); // the hold comes before the proof
+    await T.untilChainTime(e.publishedAt.toNumber() + L.CLAIM_HOLD + 1);
+    await expectErr(claimInstantB(1, { ...E1[0], s: 601n }, t1.proof(0), dave).rpc(), "InvalidProof");
+    const ci = await retry(["ClaimOnHold"], () => send(claimInstantB(1, E1[0], t1.proof(0), dave)));
+    expect(big(await bal(alice.publicKey)) - a0).to.equal(amt(600n));
+    expect(v0 - big(await bal(P.reward))).to.equal(amt(600n) + BigInt(L.KEEPER_TIP));
+    const fc = event(ci.events, "ForgeClaimed");
+    expect(fc.keeperTip.toNumber()).to.equal(L.KEEPER_TIP);
+    expect(fc.chips.toNumber()).to.equal(0); // ECO-3
+    await expectErr(claimInstantB(1, E1[0], t1.proof(0), dave).rpc(), "already in use"); // the receipt PDA blocks a replay
+    // the oracle submits bob's mission: no tip (S6 / SPEC 2.11)
+    const v1 = big(await bal(P.reward));
+    const cm = await send(claimMissionB(1, E1[1], t1.proof(1), oracle));
+    expect(v1 - big(await bal(P.reward))).to.equal(amt(300n));
+    expect(event(cm.events, "ForgeClaimed").keeperTip.toNumber()).to.equal(0);
+    // carol submits her own mission: no tip
+    const v2 = big(await bal(P.reward));
+    await claimMissionB(1, E1[2], t1.proof(2), carol).rpc();
+    expect(v2 - big(await bal(P.reward))).to.equal(amt(100n));
+    const m = await acc.mission.fetch(P.mission(1, bob.publicKey, 1));
+    expect(m.end.toNumber() - m.start.toNumber()).to.equal(45);
+    await T.untilChainTime(m.start.toNumber() + 2); // vesting runs on the validator clock (it can lag the host clock)
+    const b0 = big(await bal(bob.publicKey));
+    await methods.withdrawVested().accountsPartial({ mission: P.mission(1, bob.publicKey, 1), player: bob.publicKey, playerState: P.player(bob.publicKey), rentPayer: oracle.publicKey }).rpc();
+    const got = big(await bal(bob.publicKey)) - b0;
+    expect(got > 0n && got < big(m.total) / 2n).to.equal(true);
+    // eject: vested paid, 75% of the unvested to the pool
+    const cm2 = await acc.mission.fetch(P.mission(1, carol.publicKey, 2));
+    const pool0 = big(await bal(P.reward)), carol0 = big(await bal(carol.publicKey));
+    await expectErr(methods.eject().accountsPartial({ config: P.config, mission: P.mission(1, carol.publicKey, 2), player: bob.publicKey, rewardVault: P.reward, rentPayer: carol.publicKey, playerState: P.player(carol.publicKey) }).signers([bob]).rpc(), "");
+    const ej = await send(methods.eject().accountsPartial({ config: P.config, mission: P.mission(1, carol.publicKey, 2), player: carol.publicKey, rewardVault: P.reward, rentPayer: carol.publicKey, playerState: P.player(carol.publicKey) }), [carol]);
+    const pe = event(ej.events, "PilotEjected");
+    expect(big(await bal(P.reward)) - pool0).to.equal(big(pe.penaltyToPool));
+    expect(big(pe.paid) + big(pe.penaltyToPool)).to.equal(big(cm2.total));
+    expect(big(await bal(carol.publicKey)) - carol0 > big(pe.paid)).to.equal(true); // + the mission rent
+    // a void after the hold is refused (B-9 HoldOver)
+    await expectErr(methods.voidEpoch(BN(1), BN(XNT)).accountsPartial({ config: P.config, epoch: P.epoch(1), seat: P.seat, rewardVault: P.reward, voider: dave.publicKey, systemProgram: SYS }).signers([dave]).rpc(), "HoldOver");
+    // the seat is alive (recently taken, surviving epoch)
+    await expectErr(methods.takeSeat(dave.publicKey, cold.publicKey, PublicKey.default).accountsPartial({ config: P.config, seat: P.seat, rewardVault: P.reward, taker: dave.publicKey, systemProgram: SYS })
+      .remainingAccounts(await walkPairs()).signers([dave]).rpc(), "SeatAlive");
   });
 
-  it("Burn Lottery: free chips + tickets, winner drawn on-chain, 50% of the vault paid", async () => {
-    const r = (await acc.config.fetch(P.config)).drawRound.toNumber();
-    const chips = (await acc.playerState.fetch(P.player(alice.publicKey))).chips.toNumber();
-    const enter = (k: Keypair, idx: number, c: number, t: number) => program.methods.enterDraw(new anchor.BN(r), idx, new anchor.BN(c), new anchor.BN(t))
-      .accountsPartial({ config: P.config, round: P.drawRound(r), entry: P.drawEntry(r, idx), playerState: P.player(k.publicKey), rewardVault: P.reward, drawVault: P.draw, architect: architect.publicKey, signer: k.publicKey, systemProgram: SystemProgram.programId })
-      .signers([k]).rpc();
-    await expectErr(enter(alice, 0, chips + 1, 0), "NotEnoughChips");
-    await enter(alice, 0, chips, 0);
-    await enter(bob, 1, 0, 2);
-    await sleep(7500);
-    await program.methods.drawDraw().accountsPartial({ config: P.config, round: P.drawRound(r) }).rpc();
-    const vault = (await bal(P.draw)) - (await connection.getMinimumBalanceForRentExemption(8));
-    const winner = await settleRound("draw", r);
-    const round = await acc.drawRound.fetch(P.drawRound(r));
-    expect(round.winner.toBase58()).to.equal(winner.toBase58());
-    expect(round.prize.toNumber()).to.equal(Math.floor(vault / 2));
+  it("B-8: the 108-byte legacy publish (old IDL) writes reserve 0; a leaf above the remaining budget is BudgetExhausted", async () => {
+    const old = new anchor.Program(JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures/idl-onchain-v2.json"), "utf8")), provider);
+    const ix = await old.methods.publishEpoch(BN(2), Array.from(t2.root), Array.from(Buffer.alloc(32, 2)), BN(1000), 2, BN(1_000_000_000_000_000n))
+      .accountsPartial({ config: P.config, epoch: P.epoch(2), rewardVault: P.reward, oracle: oracle.publicKey, systemProgram: SYS }).instruction();
+    expect(ix.data.length).to.equal(108);
+    await retry(["EpochTooSoon"], () => T.sendIxs([ix], [oracle]));
+    coverage.ok("publish_epoch");
+    const e2 = await acc.epoch.fetch(P.epoch(2));
+    expect(e2.dropReserve.toNumber()).to.equal(0);
+    expect(e2.dropState).to.equal(0);
+    await retry(["ClaimOnHold"], () => claimInstantB(2, E2[0], t2.proof(0), alice).rpc());
+    expect(big((await acc.epoch.fetch(P.epoch(2))).claimed)).to.equal(big(e2.budget));
+    await expectErr(claimInstantB(2, E2[1], t2.proof(1), bob).rpc(), "BudgetExhausted");
+    await expectErr(methods.closeReceipt().accountsPartial({ epoch: P.epoch(2), receipt: P.receipt(2, alice.publicKey, 0), rentPayer: alice.publicKey }).rpc(), "ClaimWindowOpen");
   });
 
-  it("Airdrop: architect sets the list once; listed wallets claim a free Lunar Dust (no floor)", async () => {
-    const leaf = (k: PublicKey) => keccak(Buffer.from("MOONFORGE_V2_AIRDROP"), k.toBuffer());
-    const t = tree([leaf(carol.publicKey), leaf(keeper.publicKey)]);
-    await expectErr(program.methods.setAirdropRoot(Array.from(t.root)).accountsPartial({ config: P.config, architect: alice.publicKey }).signers([alice]).rpc(), "");
-    await program.methods.setAirdropRoot(Array.from(t.root)).accountsPartial({ config: P.config, architect: architect.publicKey }).signers([architect]).rpc();
-    await expectErr(program.methods.setAirdropRoot(Array.from(t.root)).accountsPartial({ config: P.config, architect: architect.publicKey }).signers([architect]).rpc(), "AirdropRootSet");
-    const serial = (await acc.config.fetch(P.config)).artifactsMinted[0];
-    await program.methods.claimAirdrop(serial, t.proof(0)).accountsPartial({
-      config: P.config, receipt: P.airdrop(carol.publicKey), asset: P.asset(0, serial), record: P.artifact(P.asset(0, serial)),
-      collection: P.collection, artifactAuthority: P.authority, claimant: carol.publicKey, coreProgram: MPL_CORE, systemProgram: SystemProgram.programId,
-    }).signers([carol]).rpc();
-    const rec = await acc.artifactRecord.fetch(P.artifact(P.asset(0, serial)));
-    expect(rec.origin).to.equal(1);
-    expect(rec.backing.toNumber()).to.equal(0);
+  // ─── B-1 House (keeper) ────────────────────────────────────────────────────
+  it("B-1: place_bet retired; place_bet_v2 packs the chain position; anchor after one slot; settle in chain order; K-5; chain exhaustion", async () => {
+    await methods.houseDeposit(BN(200 * XNT), BN(0)).accountsPartial({ config: P.config, share: P.house(payer.publicKey), bankrollVault: P.bankroll, owner: payer.publicKey, systemProgram: SYS }).rpc();
+    await openGame(eve, 30);
+    const ps = P.player(eve.publicKey);
+    const n0 = (await acc.playerState.fetch(ps)).nonce.toNumber();
+    const c = await cfg();
+    await expectErr(methods.placeBet(0, BN(0), 1, BN(0.1 * XNT), Array(32).fill(1)).accountsPartial({
+      config: P.config, playerState: ps, bet: P.bet(ps, n0), bankrollVault: P.bankroll, rewardVault: P.reward, architect: c.architect, signer: eve.publicKey, systemProgram: SYS,
+    }).signers([eve]).rpc(), "KeeperRequired");
+    // place + anchor in the same transaction: the anchor block does not exist yet
+    const placeIx = await methods.placeBetV2(0, BN(0), 1, BN(0.1 * XNT), Array(32).fill(3)).accountsPartial({
+      config: P.config, playerState: ps, bet: P.bet(ps, n0), bankrollVault: P.bankroll, rewardVault: P.reward, architect: c.architect, signer: eve.publicKey, systemProgram: SYS, keeperSeat: P.keeper,
+    }).instruction();
+    const anchorIx = await methods.anchorBet().accountsPartial({ bet: P.bet(ps, n0), slotHashes: SYSVAR_SLOT_HASHES_PUBKEY }).instruction();
+    await expectErr(T.sendIxs([placeIx, anchorIx], [eve]), "NotReady");
+    const b1 = await placeV2(eve, 0, 0, 1, 0.1 * XNT);
+    let bet = await acc.bet.fetch(b1.pk);
+    expect(bet.game).to.equal(0x80);
+    const { index, anchor } = betUnpack(big(bet.targetSlot));
+    expect(index).to.equal(0n);
+    let k = await ks();
+    expect(k.pendingBets).to.equal(1);
+    expect(k.nextIndex.toNumber()).to.equal(1);
+    await expectErr(settleV2B(b1, chain.reveal(0)).rpc(), "NotReady"); // BET_ANCHORED first
+    await expectErr(methods.settleBet().accountsPartial({
+      config: P.config, bet: b1.pk, playerState: ps, bankrollVault: P.bankroll, slotHashes: SYSVAR_SLOT_HASHES_PUBKEY, rentPayer: eve.publicKey,
+    }).rpc(), "KeeperRequired");
+    await anchorWhenReady(b1);
+    bet = await acc.bet.fetch(b1.pk);
+    expect(bet.game).to.equal(0xc0);
+    const h = (await T.slotHashAtOrAfter(anchor))!;
+    expect(Buffer.from(bet.seed).equals(mixedSeed(b1.seed, h))).to.equal(true);
+    await expectErr(anchorB(b1).rpc(), "InvalidTarget"); // anchored once
+    await expectErr(settleV2B(b1, Buffer.alloc(32, 9)).rpc(), "BadReveal");
+    const r1 = await settleBet(b1);
+    k = await ks();
+    expect(k.revealed.toNumber()).to.equal(1);
+    expect(k.pendingBets).to.equal(0);
+    expect((await cfg()).bankrollReserved.toNumber()).to.equal(0);
+    const stakeIn = BigInt(0.1 * XNT) - BigInt(0.0015 * XNT);
+    expect(big(k.weekNetLoss)).to.equal(r1.won ? r1.payout - stakeIn : -stakeIn);
+    // chain order: the second of two bets cannot be revealed first
+    const b2 = await placeV2(eve, 1, 5000, 0, 0.05 * XNT);
+    const b3 = await placeV2(eve, 2, 20_000, 0, 0.05 * XNT);
+    await anchorWhenReady(b2);
+    await anchorWhenReady(b3);
+    await expectErr(settleV2B(b3, chain.reveal(2)).rpc(), "BadReveal");
+    await settleBet(b2);
+    await settleBet(b3);
+    // K-5: a re-arm with the current head is refused
+    k = await ks();
+    await expectErr(armB(keeper, Buffer.from(k.tip), 10, 0).rpc(), "BadReveal");
+    // chain exhaustion: length 2, the third bet has no position; no re-arm under a pending bet
+    newChain(2);
+    await armB(keeper, chain.tip, 2, 30 * XNT).rpc();
+    const b4 = await placeV2(eve, 0, 0, 0, 0.05 * XNT);
+    const b5 = await placeV2(eve, 0, 0, 1, 0.05 * XNT);
+    await expectErr(placeV2(eve, 0, 0, 1, 0.05 * XNT), "KeeperNotArmed");
+    await expectErr(armB(keeper, keccak(Buffer.from("x")), 10, 0).rpc(), "KeeperBusy");
+    // B-3: a Jackpot draw with no chain position left refunds at once (reason 3, no penalty); entries closable
+    await openGame(alice, 30);
+    await openGame(bob, 30);
+    const r = (await cfg()).jackpotRound.toNumber();
+    await enterJp(alice, r, 0, XNT).rpc();
+    await enterJp(bob, r, 1, XNT).rpc();
+    const a0 = await gameBal(alice.publicKey);
+    const dr = await retry(["RoundRunning"], () => send(drawJp(r, alice.publicKey)));
+    const br = event(dr.events, "BetRefunded");
+    expect([br.reason, br.penalty.toNumber()]).to.deep.equal([3, 0]);
+    expect((await acc.jackpotRound.fetch(P.jackpot(r))).state).to.equal(3);
+    await closeJpEntry(r, 0);
+    await closeJpEntry(r, 1);
+    expect((await gameBal(alice.publicKey)) - a0).to.equal(BigInt(XNT));
+    await settleBet(b4);
+    await settleBet(b5);
+    newChain(400);
+    await armB(keeper, chain.tip, 400, 50 * XNT).rpc();
+    expect(big((await ks()).bond)).to.equal(100n * BigInt(XNT));
   });
 
-  // Epoch 3: a deep pool so the drop reserve is worth more than one Lunar Dust floor (5 XNT).
-  // alice 70% of the score -> expected drop value 7 XNT >= 5 -> wins for sure, floor = 7 XNT.
-  // bob 30% -> 3 XNT -> wins with probability 3/5 (decided by the sealed seed).
-  const E3 = [
-    { p: alice.publicKey, t: 0, s: 700_000n },
-    { p: bob.publicKey, t: 0, s: 300_000n },
-  ];
-  const t3 = tree(E3.map((l) => claimLeaf(3, l.p, l.t, l.s)));
-  const seal = (n: number) => program.methods.sealDrop().accountsPartial({ config: P.config, epoch: P.epoch(n), slotHashes: SYSVAR_SLOT_HASHES_PUBKEY }).rpc();
-  const nextLunar = async () => (await acc.config.fetch(P.config)).artifactsMinted[0] as number;
-  const claimDrop = async (n: number, l: { p: PublicKey; t: number; s: bigint }, proof: number[][], signer: Keypair) => {
-    const serial = await nextLunar();
-    await program.methods.claimDrop(new anchor.BN(n), l.t, serial, new anchor.BN(l.s.toString()), proof).accountsPartial({
-      config: P.config, epoch: P.epoch(n), receipt: P.drop(n, l.p, l.t), player: l.p, asset: P.asset(0, serial), record: P.artifact(P.asset(0, serial)),
-      collection: P.collection, artifactAuthority: P.authority, rewardVault: P.reward, payer: signer.publicKey, coreProgram: MPL_CORE, systemProgram: SystemProgram.programId,
-    }).signers([signer]).rpc();
-    return serial;
+  // ─── B-3 Jackpot (K-1 / K-3 / ECO-2) ───────────────────────────────────────
+  it("B-3: Jackpot v3: 20 XNT cap, draw reserves a chain position, settle in chain order with the keeper reveal, winner by the TS mirror", async () => {
+    const r = (await cfg()).jackpotRound.toNumber();
+    await enterJp(alice, r, 0, 15 * XNT).rpc();
+    await expectErr(enterJp(bob, r, 1, 6 * XNT).rpc(), "PotFull");
+    await enterJp(bob, r, 1, 5 * XNT).rpc();
+    const bp = await placeV2(eve, 0, 0, 0, 0.05 * XNT); // an earlier position, still unrevealed at the draw
+    const p = betUnpack(big((await acc.bet.fetch(bp.pk)).targetSlot)).index;
+    const k0 = await ks();
+    await retry(["RoundRunning"], () => drawJp(r, alice.publicKey).rpc());
+    const round = await acc.jackpotRound.fetch(P.jackpot(r));
+    expect(round.state).to.equal(1);
+    expect(round.winningTicket.toString()).to.equal(U64_MAX.toString());
+    expect(betUnpack(big(round.targetSlot)).index).to.equal(p + 1n);
+    let k = await ks();
+    expect(k.pendingBets).to.equal(k0.pendingBets + 1);
+    expect(big(k.jackpotReserved)).to.equal(20n * BigInt(XNT));
+    await expectErr(methods.settleJackpot().accountsPartial({
+      config: P.config, round: P.jackpot(r), entry: P.jpEntry(r, 0), winnerState: P.player(alice.publicKey), rewardVault: P.reward, drawVault: P.draw,
+      architect: (await cfg()).architect, slotHashes: SYSVAR_SLOT_HASHES_PUBKEY,
+    }).rpc(), "KeeperRequired");
+    const reveal = chain.reveal(p + 1n);
+    const w = await jackpotWinnerIndex(r, reveal);
+    await expectErr((await settleJpV2B(r, w.i, reveal)).rpc(), "BadReveal"); // position p comes first
+    const after = await placeV2(eve, 0, 0, 1, 0.05 * XNT); // a bet after the draw takes a later position: the winner cannot change
+    await settleBet(bp);
+    await expectErr((await settleJpV2B(r, 1 - w.i, reveal)).rpc(), "NotWinningEntry");
+    const wb0 = await gameBal(w.player), pool0 = big(await bal(P.reward)), arch0 = big(await bal(architect.publicKey)), draw0 = await bal(P.draw);
+    const st = await send(await settleJpV2B(r, w.i, reveal));
+    const js = event(st.events, "JackpotSettled");
+    expect(big(js.winningTicket)).to.equal(w.ticket);
+    expect((await gameBal(w.player)) - wb0).to.equal(196n * BigInt(XNT) / 10n);
+    expect(big(await bal(P.reward)) - pool0).to.equal(3n * BigInt(XNT) / 10n);
+    expect(big(await bal(architect.publicKey)) - arch0).to.equal(BigInt(XNT) / 10n);
+    expect(await bal(P.draw)).to.equal(draw0);
+    k = await ks();
+    expect(big(k.jackpotReserved)).to.equal(0n);
+    await settleBet(after);
+    expect((await ks()).pendingBets).to.equal(0);
+    // a settled round: the entries close permissionlessly (rent back to their payers, nothing else moves)
+    const wbal = await gameBal(w.player);
+    await closeJpEntry(r, 0);
+    await closeJpEntry(r, 1);
+    expect(await gameBal(w.player)).to.equal(wbal);
+    // a round nobody else joined is refunded in full, without a chain position
+    const r2 = r + 1;
+    const c0 = await gameBal(carol.publicKey).catch(() => 0n);
+    await openGame(carol, 2);
+    const c1 = await gameBal(carol.publicKey);
+    await enterJp(carol, r2, 0, XNT).rpc();
+    const n0 = (await ks()).nextIndex.toNumber();
+    await retry(["RoundRunning"], () => drawJp(r2, carol.publicKey).rpc());
+    expect(await gameBal(carol.publicKey)).to.equal(c1);
+    expect((await ks()).nextIndex.toNumber()).to.equal(n0);
+    await closeJpEntry(r2, 0);
+    expect(await gameBal(carol.publicKey)).to.equal(c1);
+    void c0;
+  });
+
+  it("B-1/B-3: stall cases are set up (an unanchored bet, an anchored bet never revealed, a DRAWING round never settled)", async () => {
+    const r = (await cfg()).jackpotRound.toNumber();
+    await enterJp(alice, r, 0, 2 * XNT).rpc();
+    await enterJp(bob, r, 1, 3 * XNT).rpc();
+    await retry(["RoundRunning"], () => drawJp(r, alice.publicKey).rpc());
+    const q = betUnpack(big((await acc.jackpotRound.fetch(P.jackpot(r))).targetSlot)).index;
+    const s0 = await placeV2(eve, 0, 0, 0, 0.1 * XNT);
+    const s1 = await placeV2(eve, 0, 0, 1, 0.1 * XNT);
+    await anchorWhenReady(s1);
+    stallGroup = { jp: r, s0, s1, positions: [q, q + 1n, q + 2n] };
+    expect(betUnpack(big((await acc.bet.fetch(s1.pk)).targetSlot)).index).to.equal(q + 2n);
+  });
+
+  // ─── B-7 Artifacts (PX, split, market) ─────────────────────────────────────
+  let lunarA: PublicKey, lunarB: PublicKey;
+  it("B-7: forge Lunar at 10: 50/20/25/5 split (floor, base pot, extra pot, architect), price ×1.02, PX decay by the TS mirror, ChipsRetired", async () => {
+    const r0 = big(await bal(P.reward)), x0 = big(await bal(P.extraVault)), a0 = big(await bal(architect.publicKey)), d0 = await bal(P.draw);
+    const xs0 = await xs();
+    const f1 = await forge(alice, 0, BN(10 * XNT));
+    expect(f1.price).to.equal(10n * BigInt(XNT));
+    const sp = forgeSplit(f1.price);
+    expect(sp.backing).to.equal(5n * BigInt(XNT));
+    expect(big(await bal(P.reward)) - r0).to.equal(2n * BigInt(XNT));
+    expect(big(await bal(P.extraVault)) - x0).to.equal(25n * BigInt(XNT) / 10n);
+    expect(big(await bal(architect.publicKey)) - a0).to.equal(BigInt(XNT) / 2n);
+    expect(await bal(P.draw)).to.equal(d0);
+    const record = await acc.artifactRecord.fetch(P.artifact(f1.asset));
+    expect(big(record.backing)).to.equal(sp.backing);
+    const xs1 = await xs();
+    expect(big(xs1.accounted) - big(xs0.accounted)).to.equal(sp.extra);
+    expect(big(xs1.liveForgedBacking) - big(xs0.liveForgedBacking)).to.equal(sp.backing);
+    let c = await cfg();
+    expect(big(c.artifactPrice[0])).to.equal(nextPrice(f1.price, 0));
+    expect(big(c.artifactPrice[0])).to.equal(102n * BigInt(XNT) / 10n);
+    const data = (await connection.getAccountInfo(f1.asset))!.data;
+    const attr = (k: string, v: string) => Buffer.concat([u32(k.length), Buffer.from(k), u32(v.length), Buffer.from(v)]);
+    expect(data.includes(attr("Forge Price XNT", "10"))).to.equal(true);
+    expect(data.includes(attr("Floor XNT", "5"))).to.equal(true);
+    expect(data.includes(Buffer.from("Burn Boost"))).to.equal(false);
+    expect(data.includes(Buffer.from("Weekly Chips"))).to.equal(false);
+    lunarA = f1.asset;
+    // the next forges pay the price the mirror computes from config + the block time (1 s decay periods on localnet)
+    const mirrorOk = (f: { price: bigint; before: any; info: { blockTime: number } }, t: number) =>
+      [0, -1, 1].some((d) => currentPrice(f.before, t, f.info.blockTime + d) === f.price);
+    await expectErr(forge(bob, 0, BN(1)), "SlippageExceeded");
+    const f2 = await forge(bob, 0);
+    expect(mirrorOk(f2, 0), `PX mirror: paid ${f2.price}`).to.equal(true);
+    lunarB = f2.asset;
+    await T.untilChainTime(f2.info.blockTime + 2); // two decay periods on the validator clock (it can lag the host clock)
+    c = await cfg();
+    const f3 = await forge(carol, 0);
+    expect(f3.price < big(c.artifactPrice[0])).to.equal(true); // decayed by >= 2 periods
+    expect(mirrorOk(f3, 0)).to.equal(true);
+    const f4 = await forge(dave, 1); // Cosmic
+    expect(f4.price).to.equal(25n * BigInt(XNT));
+    expect(big((await cfg()).artifactPrice[1])).to.equal(2625n * BigInt(XNT) / 100n);
+    await openGame(alice, 0);
+    await expectErr(methods.claimArtifactChips().accountsPartial({
+      config: P.config, asset: lunarA, record: P.artifact(lunarA), collection: P.collection, playerState: P.player(alice.publicKey), owner: alice.publicKey,
+    }).signers([alice]).rpc(), "ChipsRetired");
+    expect((await acc.playerState.fetch(P.player(alice.publicKey))).chips.toNumber()).to.equal(0);
+  });
+
+  const listB = (seller: Keypair, asset: PublicKey, price: bigint, expires: number, reserved = PublicKey.default) =>
+    methods.listArtifact(BN(price), BN(expires), reserved, false).accountsPartial({
+      config: P.config, listing: P.listing(asset), asset, record: P.artifact(asset), collection: P.collection, seller: seller.publicKey, coreProgram: MPL_CORE, systemProgram: SYS,
+    }).signers([seller]);
+  const buyB = async (buyer: Keypair, asset: PublicKey, price: bigint) => {
+    const l = await acc.listing.fetch(P.listing(asset));
+    return methods.buyArtifact(BN(price)).accountsPartial({
+      config: P.config, listing: P.listing(asset), asset, record: P.artifact(asset), collection: P.collection, buyer: buyer.publicKey, seller: l.seller,
+      architect: (await cfg()).architect, rewardVault: P.reward, coreProgram: MPL_CORE, systemProgram: SYS,
+    }).signers([buyer]);
+  };
+  const updateB = (seller: Keypair, asset: PublicKey, price: bigint, expires: number, reserved = PublicKey.default) =>
+    methods.updateListing(BN(price), BN(expires), reserved).accountsPartial({
+      config: P.config, listing: P.listing(asset), asset, record: P.artifact(asset), collection: P.collection, seller: seller.publicKey, coreProgram: MPL_CORE, systemProgram: SYS,
+    }).signers([seller]);
+  const delistB = (seller: Keypair, asset: PublicKey) => methods.delistArtifact().accountsPartial({
+    config: P.config, listing: P.listing(asset), asset, collection: P.collection, seller: seller.publicKey, coreProgram: MPL_CORE, systemProgram: SYS,
+  }).signers([seller]);
+  const closeListingB = async (asset: PublicKey) => {
+    const l = await acc.listing.fetch(P.listing(asset));
+    return methods.closeListing().accountsPartial({ config: P.config, listing: P.listing(asset), seller: l.seller, asset, collection: P.collection });
   };
 
-  it("Forge Drops: 10% of the epoch becomes random Lunar Dust with a real floor, seeded by a future block", async () => {
-    await fund(payer.publicKey);
-    await program.methods.donate(0, new anchor.BN(900 * XNT)).accountsPartial({ config: P.config, donor: payer.publicKey, vault: P.reward }).rpc();
-    for (let i = 0; ; i++) {
-      try { await publish(3, t3.root, 1_000_000n, 2); break; }
-      catch (e: any) { if (!String(e).includes("EpochTooSoon") || i > 40) throw e; await sleep(1000); }
-    }
-    let e = await acc.epoch.fetch(P.epoch(3));
-    const reserve = BigInt(e.dropReserve.toString());
-    expect(reserve > 5n * BigInt(XNT)).to.equal(true);
-    await expectErr(claimDrop(3, E3[0], t3.proof(0), keeper), "DropNotSealed");
-
-    // anyone seals once the committed slot exists; never twice
-    await waitPastSlot(BigInt(e.dropSlot.toString()));
-    await seal(3);
-    await expectErr(seal(3), "DropNotPending");
-    e = await acc.epoch.fetch(P.epoch(3));
-    expect(e.dropState).to.equal(2);
-    const h = (await slotHashAtOrAfter(BigInt(e.dropSlot.toString())))!;
-    const seed = keccak(Buffer.from("MOONFORGE_DROP"), h, u64(3));
-    expect(Buffer.from(e.dropSeed).equals(seed)).to.equal(true); // anyone can recompute every outcome
-
-    // wrong score -> rejected
-    await expectErr(claimDrop(3, { ...E3[0], s: 700_001n }, t3.proof(0), keeper), "InvalidProof");
-
-    // alice: guaranteed drop, delivered by a keeper; the pool refunds the keeper's rent
-    const aliceValue = (700_000n * reserve) / 1_000_000n;
-    const reserved0 = BigInt((await acc.config.fetch(P.config)).rewardReserved.toString());
-    // someone pre-funds the next Lunar Dust address: it must not block the mint
-    const next = await nextLunar();
-    const tx = new anchor.web3.Transaction().add(SystemProgram.transfer({ fromPubkey: payer.publicKey, toPubkey: P.asset(0, next), lamports: 0.01 * XNT }));
-    await provider.sendAndConfirm(tx);
-    const keeper0 = await bal(keeper.publicKey);
-    const s0 = await claimDrop(3, E3[0], t3.proof(0), keeper);
-    const rec = await acc.artifactRecord.fetch(P.artifact(P.asset(0, s0)));
-    expect(rec.origin).to.equal(2);
-    expect(rec.backing.toString()).to.equal(aliceValue.toString());
-    const asset = (await connection.getAccountInfo(P.asset(0, s0)))!;
-    expect(new PublicKey(asset.data.subarray(1, 33)).toBase58()).to.equal(alice.publicKey.toBase58());
-    expect((await bal(keeper.publicKey)) > keeper0).to.equal(true); // tip >= rents + fee
-    expect(reserved0 - BigInt((await acc.config.fetch(P.config)).rewardReserved.toString())).to.equal(aliceValue);
-    await expectErr(claimDrop(3, E3[0], t3.proof(0), keeper), "already in use");
-
-    // the XNT fallback only exists while Lunar Dust is sold out
-    await expectErr(program.methods.claimDropXnt(new anchor.BN(3), 0, new anchor.BN(300_000), t3.proof(1)).accountsPartial({
-      config: P.config, epoch: P.epoch(3), receipt: P.drop(3, bob.publicKey, 0), player: bob.publicKey, playerState: P.player(bob.publicKey),
-      rewardVault: P.reward, payer: payer.publicKey, systemProgram: SystemProgram.programId,
-    }).rpc(), "NotSoldOut");
-
-    // bob: the outcome is a pure function of the seed, the player and the tier
-    const bobValue = (300_000n * reserve) / 1_000_000n;
-    const roll = keccak(Buffer.from("MOONFORGE_RNG"), seed, bob.publicKey.toBuffer(), Buffer.from([0])).readBigUInt64LE(0) % (5n * BigInt(XNT));
-    if (roll < bobValue) {
-      const s1 = await claimDrop(3, E3[1], t3.proof(1), bob);
-      expect((await acc.artifactRecord.fetch(P.artifact(P.asset(0, s1)))).backing.toNumber()).to.equal(5 * XNT);
-    } else {
-      await expectErr(claimDrop(3, E3[1], t3.proof(1), bob), "NoDrop");
-    }
-    // the regular claim still pays the other 90% pro-rata
-    const expected = Math.floor((700_000 * e.budget.toNumber()) / 1_000_000);
-    const a0 = await bal(alice.publicKey);
-    await program.methods.claimInstant(new anchor.BN(3), 0, new anchor.BN(700_000), t3.proof(0)).accountsPartial({
-      config: P.config, epoch: P.epoch(3), receipt: P.receipt(3, alice.publicKey, 0), player: alice.publicKey,
-      playerState: P.player(alice.publicKey), rewardVault: P.reward, payer: payer.publicKey, systemProgram: SystemProgram.programId,
-    }).rpc();
-    expect((await bal(alice.publicKey)) - a0).to.equal(expected);
-
-    // the dropped Artifact is a real one: recycling returns its whole floor
-    const r0 = await bal(alice.publicKey);
-    await program.methods.recycleArtifact().accountsPartial({ config: P.config, asset: P.asset(0, s0), record: P.artifact(P.asset(0, s0)), collection: P.collection, owner: alice.publicKey, coreProgram: MPL_CORE, systemProgram: SystemProgram.programId }).signers([alice]).rpc();
-    expect((await bal(alice.publicKey)) - r0).to.be.greaterThan(Number(aliceValue) - 10_000);
+  it("B-7: market: floor rule, expiry and self checks, public sale (5% royalty + 2% pool), private sale, M-2 update after A→B→A, stale / expired / live closes, delist", async () => {
+    const X = BigInt(XNT);
+    let now = await T.chainTime();
+    const minP = minListPrice(5n * X);
+    await expectErr(listB(alice, lunarA, minP - 1n, now + 60).rpc(), "ListingBelowFloor");
+    await expectErr(listB(alice, lunarA, 6n * X, now + 200).rpc(), "InvalidExpiry");
+    await expectErr(listB(alice, lunarA, 6n * X, now + 60, alice.publicKey).rpc(), "SelfPurchase");
+    const li = await send(listB(alice, lunarA, 6n * X, now + 60));
+    const ev = event(li.events, "ArtifactListed");
+    expect(ev.update).to.equal(false);
+    expect(big(ev.sellerNet)).to.equal(marketSplit(6n * X).net);
+    // TransferDelegate, parsed from the asset's plugin registry: authority Address(listing PDA) while listed
+    expect(delegateOf((await connection.getAccountInfo(lunarA))!.data)).to.deep.equal({ authority: CORE_AUTH.Address, address: P.listing(lunarA).toBase58() });
+    await expectErr((await buyB(bob, lunarA, 5n * X)).rpc(), "ListingPriceChanged");
+    await expectErr((await buyB(alice, lunarA, 6n * X)).rpc(), "SelfPurchase");
+    const s0 = big(await bal(alice.publicKey)), arch0 = big(await bal(architect.publicKey)), pool0 = big(await bal(P.reward));
+    const st0 = (await cfg()).stats;
+    const listingRent = big(await bal(P.listing(lunarA)));
+    const sold = await send(await buyB(bob, lunarA, 6n * X));
+    const sp = marketSplit(6n * X);
+    const as = event(sold.events, "ArtifactSold");
+    expect([big(as.royalty), big(as.poolFee), big(as.sellerNet), as.private]).to.deep.equal([sp.royalty, sp.pool, sp.net, false]);
+    expect(big(await bal(alice.publicKey)) - s0).to.equal(sp.net + listingRent);
+    expect(big(await bal(architect.publicKey)) - arch0).to.equal(sp.royalty);
+    expect(big(await bal(P.reward)) - pool0).to.equal(sp.pool);
+    expect((await assetOwner(lunarA)).toBase58()).to.equal(bob.publicKey.toBase58());
+    expect(await connection.getAccountInfo(P.listing(lunarA))).to.equal(null);
+    expect(delegateOf((await connection.getAccountInfo(lunarA))!.data)).to.deep.equal({ authority: CORE_AUTH.Owner, address: null }); // reset to Owner
+    const st1 = (await cfg()).stats;
+    expect(big(st1.toArchitect) - big(st0.toArchitect)).to.equal(sp.royalty);
+    expect(big(st1.artifactToPool) - big(st0.artifactToPool)).to.equal(sp.pool);
+    // private sale: only the reserved buyer
+    now = await T.chainTime();
+    await listB(bob, lunarA, 6n * X, now + 60, carol.publicKey).rpc();
+    await expectErr((await buyB(dave, lunarA, 6n * X)).rpc(), "ListingReserved");
+    const ps = await send(await buyB(carol, lunarA, 6n * X));
+    expect(event(ps.events, "ArtifactSold").private).to.equal(true);
+    // update_listing (M-2): stranger, floor, stale after a transfer; after A→B→A it re-delegates and the sale works
+    now = await T.chainTime();
+    await listB(carol, lunarA, 6n * X, now + 60).rpc();
+    await expectErr(updateB(dave, lunarA, 7n * X, now + 60).rpc(), "");
+    await expectErr(updateB(carol, lunarA, minP - 1n, now + 60).rpc(), "ListingBelowFloor");
+    await coreTransfer(lunarA, carol, dave.publicKey);
+    await expectErr(updateB(carol, lunarA, 7n * X, now + 60).rpc(), "ListingStale");
+    await expectErr((await buyB(bob, lunarA, 6n * X)).rpc(), "ListingStale");
+    await coreTransfer(lunarA, dave, carol.publicKey);
+    expect(delegateOf((await connection.getAccountInfo(lunarA))!.data).authority).to.equal(CORE_AUTH.Owner); // A→B→A reset it
+    const up = await send(updateB(carol, lunarA, 7n * X, now + 60));
+    expect(event(up.events, "ArtifactListed").update).to.equal(true);
+    expect(delegateOf((await connection.getAccountInfo(lunarA))!.data)).to.deep.equal({ authority: CORE_AUTH.Address, address: P.listing(lunarA).toBase58() });
+    await send(await buyB(bob, lunarA, 7n * X));
+    expect((await assetOwner(lunarA)).toBase58()).to.equal(bob.publicKey.toBase58());
+    // a live listing only leaves through the seller; delist gives the rent back
+    now = await T.chainTime();
+    await listB(bob, lunarB, 6n * X, now + 60).rpc();
+    await expectErr((await closeListingB(lunarB)).rpc(), "ListingActive");
+    const b0 = big(await bal(bob.publicKey));
+    const dl = await send(delistB(bob, lunarB));
+    expect(event(dl.events, "ArtifactDelisted").reason).to.equal(0);
+    expect(delegateOf((await connection.getAccountInfo(lunarB))!.data)).to.deep.equal({ authority: CORE_AUTH.Owner, address: null }); // back to Owner
+    expect(big(await bal(bob.publicKey)) > b0).to.equal(true);
+    // expired listing: no sale, anyone closes it (reason 2)
+    now = await T.chainTime();
+    await listB(bob, lunarB, 6n * X, now + 3).rpc();
+    await T.untilChainTime(now + 4);
+    await expectErr((await buyB(carol, lunarB, 6n * X)).rpc(), "ListingExpired");
+    const ce = await send(await closeListingB(lunarB));
+    expect(event(ce.events, "ArtifactDelisted").reason).to.equal(2);
+    // recycled while listed: stale (reason 1), closed by anyone, rent to the seller
+    now = await T.chainTime();
+    await listB(bob, lunarA, 6n * X, now + 60).rpc();
+    const xb = await xs();
+    await recycle(bob, lunarA);
+    const xa = await xs();
+    expect(big(xb.liveForgedBacking) - big(xa.liveForgedBacking)).to.equal(5n * X);
+    expect(big(xa.outSincePublish) - big(xb.outSincePublish)).to.equal(5n * X);
+    const cs = await send(await closeListingB(lunarA));
+    expect(event(cs.events, "ArtifactDelisted").reason).to.equal(1);
   });
 
-  it("expired randomness never re-rolls: drops are cancelled, a jackpot is refunded, a lottery prize goes to the pool", async () => {
-    // a jackpot round drawn but never settled
-    for (const k of [alice, bob]) await program.methods.deposit(new anchor.BN(5 * XNT)).accountsPartial({ playerState: P.player(k.publicKey), payer: payer.publicKey, systemProgram: SystemProgram.programId }).rpc();
-    const jp = (await acc.config.fetch(P.config)).jackpotRound.toNumber();
-    const enterJp = (k: Keypair, idx: number, amt: number) => program.methods.enterJackpot(new anchor.BN(jp), idx, new anchor.BN(amt))
-      .accountsPartial({ config: P.config, round: P.jackpot(jp), entry: P.jpEntry(jp, idx), playerState: P.player(k.publicKey), signer: k.publicKey, systemProgram: SystemProgram.programId }).signers([k]).rpc();
-    await enterJp(alice, 0, 1 * XNT);
-    await enterJp(bob, 1, 2 * XNT);
-    const jpBal = async () => [(await acc.playerState.fetch(P.player(alice.publicKey))).balance.toNumber(), (await acc.playerState.fetch(P.player(bob.publicKey))).balance.toNumber()];
-    for (let i = 0; ; i++) {
-      try { await program.methods.drawJackpot().accountsPartial({ config: P.config, round: P.jackpot(jp), firstPlayerState: P.player(alice.publicKey) }).rpc(); break; }
-      catch (e: any) { if (!String(e).includes("RoundRunning") || i > 30) throw e; await sleep(500); }
-    }
-    // a lottery round drawn but never settled
-    const dr = (await acc.config.fetch(P.config)).drawRound.toNumber();
-    await program.methods.enterDraw(new anchor.BN(dr), 0, new anchor.BN(0), new anchor.BN(1)).accountsPartial({
-      config: P.config, round: P.drawRound(dr), entry: P.drawEntry(dr, 0), playerState: P.player(bob.publicKey), rewardVault: P.reward,
-      drawVault: P.draw, architect: architect.publicKey, signer: bob.publicKey, systemProgram: SystemProgram.programId,
-    }).signers([bob]).rpc();
-    for (let i = 0; ; i++) {
-      try { await program.methods.drawDraw().accountsPartial({ config: P.config, round: P.drawRound(dr) }).rpc(); break; }
-      catch (e: any) { if (!String(e).includes("RoundRunning") || i > 40) throw e; await sleep(500); }
-    }
-
-    // an epoch whose drops nobody seals; its leaf also claims more than the whole epoch
-    const t4 = tree([claimLeaf(4, carol.publicKey, 0, 1000n)]);
-    for (let i = 0; ; i++) {
-      try { await publish(4, t4.root, 999n, 1); break; }
-      catch (e: any) { if (!String(e).includes("EpochTooSoon") || i > 40) throw e; await sleep(1000); }
-    }
-    await expectErr(program.methods.claimInstant(new anchor.BN(4), 0, new anchor.BN(1000), t4.proof(0)).accountsPartial({
-      config: P.config, epoch: P.epoch(4), receipt: P.receipt(4, carol.publicKey, 0), player: carol.publicKey,
-      playerState: P.player(carol.publicKey), rewardVault: P.reward, payer: payer.publicKey, systemProgram: SystemProgram.programId,
-    }).rpc(), "InvalidProof"); // a leaf can never weigh more than the epoch
-    const e = await acc.epoch.fetch(P.epoch(4));
-    // wait until the committed slot has left the SlotHashes window (512 slots)
-    await waitPastSlot(BigInt(e.dropSlot.toString()) + 530n);
-    const reserved0 = BigInt((await acc.config.fetch(P.config)).rewardReserved.toString());
-    await seal(4);
-    const e4 = await acc.epoch.fetch(P.epoch(4));
-    expect(e4.dropState).to.equal(3);
-    expect(reserved0 - BigInt((await acc.config.fetch(P.config)).rewardReserved.toString())).to.equal(BigInt(e.dropReserve.toString()));
-    await expectErr(claimDrop(4, { p: carol.publicKey, t: 0, s: 1000n }, t4.proof(0), carol), "DropNotSealed");
-    await expectErr(seal(4), "DropNotPending");
-
-    // jackpot: refunded in full, entry by entry, permissionlessly
-    const before = await jpBal();
-    await program.methods.settleJackpot().accountsPartial({
-      config: P.config, round: P.jackpot(jp), entry: P.jpEntry(jp, 0), winnerState: P.player(alice.publicKey), rewardVault: P.reward,
-      drawVault: P.draw, architect: architect.publicKey, slotHashes: SYSVAR_SLOT_HASHES_PUBKEY,
-    }).rpc();
-    expect((await acc.jackpotRound.fetch(P.jackpot(jp))).state).to.equal(3);
-    expect((await acc.config.fetch(P.config)).jackpotRound.toNumber()).to.equal(jp + 1);
-    for (const [i, k] of [[0, alice], [1, bob]] as [number, Keypair][]) {
-      await program.methods.closeJackpotEntry().accountsPartial({ round: P.jackpot(jp), playerState: P.player(k.publicKey), entry: P.jpEntry(jp, i), rentPayer: k.publicKey }).rpc();
-    }
-    const after = await jpBal();
-    expect(after[0] - before[0]).to.equal(1 * XNT);
-    expect(after[1] - before[1]).to.equal(2 * XNT);
-
-    // lottery: no winner this week; the would-be prize goes to the reward pool (never grows a later prize)
-    const vault0 = await bal(P.draw), pool0 = await bal(P.reward);
-    const expectedPrize = Math.floor((vault0 - (await connection.getMinimumBalanceForRentExemption(8))) / 2);
-    await program.methods.settleDraw().accountsPartial({
-      config: P.config, round: P.drawRound(dr), entry: P.drawEntry(dr, 0), winnerState: P.player(bob.publicKey), drawVault: P.draw,
-      rewardVault: P.reward, slotHashes: SYSVAR_SLOT_HASHES_PUBKEY,
-    }).rpc();
-    const r = await acc.drawRound.fetch(P.drawRound(dr));
-    expect(r.state).to.equal(2);
-    expect(r.winner.toBase58()).to.equal(PublicKey.default.toBase58());
-    expect(r.prize.toNumber()).to.equal(expectedPrize);
-    expect(vault0 - (await bal(P.draw))).to.equal(expectedPrize);
-    expect((await bal(P.reward)) - pool0).to.equal(expectedPrize);
-    expect((await acc.config.fetch(P.config)).drawRound.toNumber()).to.equal(dr + 1);
+  it("B-7: reclaim_orphan: an Artifact burned through Core directly gives its floor to the pool; a live one is ArtifactAlive", async () => {
+    const f = await forge(frank, 0);
+    const live = await forge(frank, 0);
+    const reclaim = (asset: PublicKey) => methods.reclaimOrphan().accountsPartial({
+      config: P.config, asset, record: P.artifact(asset), collection: P.collection, rewardVault: P.reward, extraState: P.extraState,
+    });
+    await expectErr(reclaim(live.asset).rpc(), "ArtifactAlive");
+    await coreBurn(f.asset, frank);
+    const recLamports = big(await bal(P.artifact(f.asset)));
+    const pool0 = big(await bal(P.reward)), x0 = await xs();
+    const rc = await send(reclaim(f.asset));
+    expect(event(rc.events, "ArtifactRecycled").orphan).to.equal(true);
+    expect(big(await bal(P.reward)) - pool0).to.equal(recLamports);
+    expect(big(x0.liveForgedBacking) - big((await xs()).liveForgedBacking)).to.equal(f.backing);
+    expect(await connection.getAccountInfo(P.artifact(f.asset))).to.equal(null);
   });
 
-  it("epoch expiry returns unclaimed budget to the pool and frees receipts", async () => {
-    // epoch 1 window = 90 s on localnet
-    const e1 = await acc.epoch.fetch(P.epoch(1));
-    const wait = e1.expiresAt.toNumber() * 1000 - Date.now() + 1500;
-    if (wait > 0) await sleep(wait);
-    const reservedBefore = (await acc.config.fetch(P.config)).rewardReserved.toNumber();
-    await program.methods.expireEpoch().accountsPartial({ config: P.config, epoch: P.epoch(1) }).rpc();
-    // unclaimed budget + the never-sealed drop reserve both go back to the free pool
-    const left = e1.budget.toNumber() - e1.claimed.toNumber() + e1.dropReserve.toNumber();
-    expect(reservedBefore - (await acc.config.fetch(P.config)).rewardReserved.toNumber()).to.equal(left);
-    expect((await acc.epoch.fetch(P.epoch(1))).dropState).to.equal(3);
-    await program.methods.closeReceipt().accountsPartial({ epoch: P.epoch(1), receipt: P.receipt(1, alice.publicKey, 0), rentPayer: keeper.publicKey }).rpc();
-  });
-
-  it("expiry of a sealed epoch releases only the drop reserve that was not paid", async () => {
+  // ─── B-9 Oracle seat ───────────────────────────────────────────────────────
+  const voidB = (n: number, k: Keypair, bond: bigint, rem: PublicKey[] = []) => methods.voidEpoch(BN(n), BN(bond)).accountsPartial({
+    config: P.config, epoch: P.epoch(n), seat: P.seat, rewardVault: P.reward, voider: k.publicKey, systemProgram: SYS,
+  }).remainingAccounts(rem.map((pubkey) => ({ pubkey, isSigner: false, isWritable: false }))).signers([k]);
+  it("B-9: a void inside the hold costs 10% of the budget (to the pool) and gives priority; a cold void waives the interval once; rotate_hot", async () => {
+    const t3 = tree([claimLeaf(3, alice.publicKey, 0, 10n)]);
+    await retry(["EpochTooSoon"], () => publish(3, t3.root, 10n, 1).rpc());
     const e3 = await acc.epoch.fetch(P.epoch(3));
-    const wait = e3.expiresAt.toNumber() * 1000 - Date.now() + 1500;
-    if (wait > 0) await sleep(wait);
-    const reservedBefore = BigInt((await acc.config.fetch(P.config)).rewardReserved.toString());
-    await program.methods.expireEpoch().accountsPartial({ config: P.config, epoch: P.epoch(3) }).rpc();
-    const unpaidDrops = BigInt(e3.dropReserve.toString()) - BigInt(e3.dropPaid.toString());
-    const left = BigInt(e3.budget.toString()) - BigInt(e3.claimed.toString()) + (unpaidDrops > 0n ? unpaidDrops : 0n);
-    expect(reservedBefore - BigInt((await acc.config.fetch(P.config)).rewardReserved.toString())).to.equal(left);
+    const need = voidBond(big(e3.budget));
+    await expectErr(voidB(3, dave, need - 1n).rpc(), "BondTooSmall");
+    const pool0 = big(await bal(P.reward)), res0 = big((await cfg()).rewardReserved);
+    const v = await send(voidB(3, dave, need));
+    const ev = event(v.events, "EpochVoided");
+    expect([big(ev.bond), big(ev.returnedToPool), ev.byCold]).to.deep.equal([need, big(e3.budget), false]);
+    expect(big(await bal(P.reward)) - pool0).to.equal(need);
+    expect(res0 - big((await cfg()).rewardReserved)).to.equal(big(e3.budget));
+    const seat = await acc.oracleSeat.fetch(P.seat);
+    expect(seat.priority.toBase58()).to.equal(dave.publicKey.toBase58());
+    expect(big(seat.priorityBond)).to.equal(need);
+    await expectErr(claimInstantB(3, { p: alice.publicKey, t: 0, s: 10n }, t3.proof(0), alice).rpc(), "EpochClosed");
+    await expectErr(voidB(3, dave, need).rpc(), "EpochClosed");
+    const t4 = tree([claimLeaf(4, alice.publicKey, 0, 10n)]);
+    await expectErr(publish(4, t4.root, 10n, 1).rpc(), "EpochTooSoon"); // a non-cold void keeps the interval
+    await retry(["EpochTooSoon"], () => publish(4, t4.root, 10n, 1).rpc());
+    await expectErr(voidB(4, cold, 0n, [P.epoch(2)]).rpc(), "BadEpochWindow"); // the waiver witness must be Epoch(id − 1)
+    const cv = await send(voidB(4, cold, 0n, [P.epoch(3)]));
+    expect(event(cv.events, "EpochVoided").byCold).to.equal(true);
+    expect((await cfg()).lastPublishTs.toNumber()).to.equal(0); // S-2
+    const rot = (k: Keypair, nh: PublicKey) => methods.rotateHot(nh).accountsPartial({ config: P.config, seat: P.seat, cold: k.publicKey }).signers([k]);
+    await expectErr(rot(dave, newHot.publicKey).rpc(), "OnlyCold");
+    await expectErr(rot(cold, cold.publicKey).rpc(), "InvalidTarget");
+    const ro = await send(rot(cold, newHot.publicKey));
+    expect(event(ro.events, "OracleChanged").by).to.equal(1);
+    const t5 = tree([claimLeaf(5, alice.publicKey, 0, 10n)]);
+    await expectErr(publish(5, t5.root, 10n, 1, oracle).rpc(), "OnlyOracle"); // the stolen key is dead
+    hot = newHot;
+    await publish(5, t5.root, 10n, 1).rpc(); // at once: the cold void waived the interval
+    expect((await cfg()).lastEpoch.toNumber()).to.equal(5);
   });
 
-  // ─── Moon Wars (real) ──────────────────────────────────────────────────────
-  const CARD: number[][] = [[2, 2, 1], [4, 3, 2], [6, 4, 3], [10, 10, 5]]; // power, defense, cost
-  const warPda = (c: PublicKey, n: number) => pda(Buffer.from("war"), c.toBuffer(), u64(n));
-  const settleWarAccounts = (w: any, war: PublicKey) => ({
-    config: P.config, war, creatorState: P.player(w.creator), opponentState: P.player(w.opponent), rewardVault: P.reward,
-    drawVault: P.draw, architect: architect.publicKey, rentPayer: w.rentPayer,
+  // ─── B-10 Extra pot ────────────────────────────────────────────────────────
+  const claimExtraB = (n: number, i: number, w: PublicKey, amount: bigint, proof: number[][], payerK = payer) =>
+    methods.claimExtra(BN(n), i, BN(amount), proof).accountsPartial({
+      config: P.config, extraState: P.extraState, extraEpoch: P.extraEpoch(n), extraVault: P.extraVault, wallet: w, payer: payerK.publicKey, systemProgram: SYS,
+    }).signers(payerK === payer ? [] : [payerK]);
+  const voidExtraB = (n: number, k: Keypair, bond: bigint) => methods.voidExtraEpoch(BN(n), BN(bond)).accountsPartial({
+    config: P.config, extraState: P.extraState, extraEpoch: P.extraEpoch(n), epoch: P.epoch(n), seat: P.seat, rewardVault: P.reward, voider: k.publicKey, systemProgram: SYS,
+  }).signers([k]);
+  const extraBound = (x: any, weeks = 1n) => {
+    const free = big(x.accounted) - big(x.reserved);
+    const backing = big(x.liveForgedBacking) + big(x.outSincePublish);
+    const a = (free * 800n) / 10_000n, b = ((backing * 400n) / 10_000n) * weeks;
+    return a < b ? a : b;
+  };
+  let X3: { amounts: bigint[]; wallets: PublicKey[]; total: bigint; tr: ReturnType<typeof tree> };
+  it("B-10: extra pot: oracle only, in order, base epoch required, weeks bound, heartbeats, 8%/4% bound ignores stray lamports, hold, bitmap, X-1, S-1 void bond, recycle bookkeeping", async () => {
+    const zero = Buffer.alloc(32);
+    await expectErr(publishExtra(1, zero, 0n, 0, stranger).rpc(), "OnlyOracle");
+    await expectErr(publishExtra(2, zero, 0n, 0).rpc(), "ExtraEpochOrder");
+    await expectErr(publishExtra(6, zero, 0n, 0).rpc(), "ExtraBaseEpochMissing");
+    await expectErr(publishExtra(1, zero, 0n, 0, hot, 2).rpc(), "BadEpochWindow"); // epoch 1: one week
+    const h1 = await send(publishExtra(1, zero, 0n, 0));
+    expect(event(h1.events, "ExtraEpochPublished").weeks).to.equal(1);
+    await publishExtra(2, zero, 0n, 0).rpc(); // heartbeats need no interval (X-3)
+    let x = await xs();
+    const bound = extraBound(x);
+    expect(bound > 10_000_000n).to.equal(true);
+    const total = bound - (bound % 2n);
+    const wallets = [fresh.publicKey, alice.publicKey, bob.publicKey, carol.publicKey];
+    const amounts = [1_000_000n, total / 2n - 1_000_000n, total / 2n, total]; // Σ = 2 × total
+    const tr = tree(wallets.map((w, i) => extraLeaf(3, i, w, amounts[i])));
+    await expectErr(publishExtra(3, tr.root, bound + 1n, 4).rpc(), "ExtraBudgetExceeded");
+    await provider.sendAndConfirm(new anchor.web3.Transaction().add(SystemProgram.transfer({ fromPubkey: payer.publicKey, toPubkey: P.extraVault, lamports: 50 * XNT })));
+    expect(extraBound(await xs())).to.equal(bound); // stray lamports are not counted
+    await expectErr(publishExtra(3, tr.root, bound + 1n, 4).rpc(), "ExtraBudgetExceeded");
+    // the two "too early" refusals ride in ONE transaction with the publish (one clock): on a slow host the 2-s hold
+    // or the 6-s interval could end before a separate check lands (r5, 2026-10-25); the refused transaction reverts the
+    // publish with it, which is then sent alone
+    const p3Ix = await publishExtra(3, tr.root, total, 4).instruction();
+    await expectErr(T.sendIxs([p3Ix, await claimExtraB(3, 0, fresh.publicKey, amounts[0], tr.proof(0)).instruction()], [payer, hot]), "ClaimOnHold");
+    await expectErr(T.sendIxs([p3Ix, await publishExtra(4, zero, 1n, 1).instruction()], [payer, hot]), "ExtraEpochOrder"); // real extras 6 s apart
+    const p3 = await send(publishExtra(3, tr.root, total, 4));
+    expect(big(event(p3.events, "ExtraEpochPublished").total)).to.equal(total);
+    X3 = { amounts, wallets, total, tr };
+    expect(await bal(fresh.publicKey)).to.equal(0);
+    const c0 = await retry(["ClaimOnHold"], () => send(claimExtraB(3, 0, fresh.publicKey, amounts[0], tr.proof(0))));
+    expect(big(event(c0.events, "ExtraClaimed").amount)).to.equal(amounts[0]);
+    expect(await bal(fresh.publicKey)).to.equal(Number(amounts[0])); // a fresh wallet with 0 lamports receives 0.001 XNT
+    await expectErr(claimExtraB(3, 0, fresh.publicKey, amounts[0], tr.proof(0)).rpc(), "ExtraAlreadyClaimed");
+    await expectErr(claimExtraB(3, 1, alice.publicKey, amounts[1] + 1n, tr.proof(1)).rpc(), "InvalidProof");
+    await claimExtraB(3, 1, alice.publicKey, amounts[1], tr.proof(1)).rpc();
+    await claimExtraB(3, 2, bob.publicKey, amounts[2], tr.proof(2), dave).rpc();
+    expect(big((await acc.extraEpoch.fetch(P.extraEpoch(3))).claimed)).to.equal(total);
+    await expectErr(claimExtraB(3, 3, carol.publicKey, amounts[3], tr.proof(3)).rpc(), "BudgetExhausted"); // X-1
+    x = await xs();
+    const vaultFree = big(await bal(P.extraVault)) - big(await rent8());
+    expect(vaultFree >= big(x.reserved) && vaultFree >= big(x.accounted)).to.equal(true);
+    // a real extra voided by a stranger: the bond is priced on the base epoch too (S-1) and lands in reward_vault
+    // the void must land inside the 2-s hold: publish and void in ONE transaction (one clock), so a slow host cannot let
+    // the hold end in between (r5 run 2 answered HoldOver); the 6-s interval after extra 3 is waited for by the retry
+    const t4 = tree([extraLeaf(4, 0, alice.publicKey, 1_000_000n)]);
+    const e4 = await acc.epoch.fetch(P.epoch(4));
+    const need = voidBond(big(e4.budget) > 1_000_000n ? big(e4.budget) : 1_000_000n);
+    const p4Ix = await publishExtra(4, t4.root, 1_000_000n, 1).instruction();
+    const pubVoid = async (bond: bigint) => T.sendIxs([p4Ix, await voidExtraB(4, dave, bond).instruction()], [dave, hot]);
+    await expectErr(retry(["ExtraEpochOrder"], () => pubVoid(BigInt(L.VOID_BOND_MIN))), "BondTooSmall");
+    const pool0 = big(await bal(P.reward)), xr0 = big((await xs()).reserved);
+    const ve = await T.txInfo(await retry(["ExtraEpochOrder"], () => pubVoid(need)));
+    coverage.ok("publish_extra_epoch"); coverage.ok("void_extra_epoch"); // B-13: sent raw, recorded here
+    expect(big(event(ve.events, "ExtraEpochPublished").total)).to.equal(1_000_000n);
+    expect(big(event(ve.events, "ExtraEpochVoided").returnedToPot)).to.equal(1_000_000n);
+    expect(big(await bal(P.reward)) - pool0).to.equal(need);
+    expect(big((await xs()).reserved), "published and voided in one transaction: the 1,000,000 returned to the pot").to.equal(xr0);
+    // recycle: the floor leaves the live forged set and is counted once more for the next bound; the publish resets it
+    const f = await forge(frank, 0);
+    const xb = await xs();
+    await recycle(frank, f.asset);
+    const xa = await xs();
+    expect(big(xb.liveForgedBacking) - big(xa.liveForgedBacking)).to.equal(f.backing);
+    expect(big(xa.outSincePublish) - big(xb.outSincePublish)).to.equal(f.backing);
+    const t5 = tree([extraLeaf(5, 0, alice.publicKey, 1_000_000n)]);
+    await retry(["ExtraEpochOrder"], () => publishExtra(5, t5.root, 1_000_000n, 1).rpc());
+    expect((await xs()).outSincePublish.toNumber()).to.equal(0);
+    // no extra instruction debits reward_vault: the vault only grew by the void bond above (checked), never shrank here
   });
-  async function openWar(stakeXnt: number) {
+
+  // ─── B-5 Duel / B-6 Wars ───────────────────────────────────────────────────
+  const rakeCheck = async (f: () => Promise<any>, pot: bigint) => {
+    const pool0 = big(await bal(P.reward)), arch0 = big(await bal(architect.publicKey)), draw0 = await bal(P.draw);
+    const r = await f();
+    expect(big(await bal(P.reward)) - pool0).to.equal((pot * 150n) / 10_000n);
+    expect(big(await bal(architect.publicKey)) - arch0).to.equal((pot * 50n) / 10_000n);
+    expect(await bal(P.draw)).to.equal(draw0);
+    return r;
+  };
+  it("B-5: Duel: plain join retired, sealed join (no ticket), no cancel after the join, open + reveal pays 98% (1.5% pool, 0.5% architect), unopened join lapses to the pool", async () => {
+    await openGame(alice, 5);
+    await openGame(bob, 5);
+    const create = async (k: Keypair, stake: number, element: number, salt: Buffer) => {
+      const nonce = (await acc.playerState.fetch(P.player(k.publicKey))).nonce.toNumber();
+      const duel = P.duel(k.publicKey, nonce);
+      await methods.createDuel(BN(stake), Array.from(keccak(Buffer.from("MOONFORGE_DUEL"), Buffer.from([element]), salt, duel.toBuffer()))).accountsPartial({
+        config: P.config, creatorState: P.player(k.publicKey), duel, owner: k.publicKey, asset: SYS, record: SYS, collection: SYS, systemProgram: SYS,
+      }).signers([k]).rpc();
+      return duel;
+    };
+    const joinAcc = (duel: PublicKey, k: Keypair) => ({ config: P.config, duel, opponentState: P.player(k.publicKey), opponent: k.publicKey, asset: SYS, record: SYS, collection: SYS });
+    const resolve = async (duel: PublicKey, opp: Keypair) => ({
+      config: P.config, duel, creatorState: P.player(alice.publicKey), opponentState: P.player(opp.publicKey), rewardVault: P.reward, drawVault: P.draw,
+      architect: (await cfg()).architect, rentPayer: alice.publicKey,
+    });
+    const salt = Buffer.alloc(32, 9), jsalt = Buffer.alloc(32, 7);
+    const duel = await create(alice, XNT, 0, salt); // Lunar
+    await expectErr(methods.joinDuel(1).accountsPartial(joinAcc(duel, bob)).signers([bob]).rpc(), "SealedJoinRequired");
+    const jc = keccak(Buffer.from("MOONFORGE_DUEL_JOIN"), Buffer.from([1]), jsalt, duel.toBuffer(), bob.publicKey.toBuffer());
+    await expectErr(methods.joinDuelSealed(Array.from(jc)).accountsPartial(joinAcc(duel, alice)).signers([alice]).rpc(), "SelfDuel");
+    const jn = await send(methods.joinDuelSealed(Array.from(jc)).accountsPartial(joinAcc(duel, bob)), [bob]);
+    await expectErr(methods.cancelDuel().accountsPartial({ duel, creatorState: P.player(alice.publicKey), creator: alice.publicKey }).signers([alice]).rpc(), "DuelState");
+    await expectErr(methods.revealDuel(0, Array.from(salt)).accountsPartial({ resolve: await resolve(duel, bob), creator: alice.publicKey }).signers([alice]).rpc(), "DuelState");
+    await T.untilChainTime(jn.blockTime + 1);
+    await expectErr(methods.revealDuelJoin(2, Array.from(jsalt)).accountsPartial({ duel, opponent: bob.publicKey }).signers([bob]).rpc(), "BadCommitment");
+    await retry(["NotReady"], () => methods.revealDuelJoin(1, Array.from(jsalt)).accountsPartial({ duel, opponent: bob.publicKey }).signers([bob]).rpc());
+    const bob0 = await gameBal(bob.publicKey);
+    const rd = await rakeCheck(async () => send(methods.revealDuel(0, Array.from(salt)).accountsPartial({ resolve: await resolve(duel, bob), creator: alice.publicKey }), [alice]), 2n * BigInt(XNT));
+    expect(event(rd.events, "DuelResolved").winner.toBase58()).to.equal(bob.publicKey.toBase58()); // Cosmic beats Lunar
+    expect((await gameBal(bob.publicKey)) - bob0).to.equal(196n * BigInt(XNT) / 100n);
+    // a sealed join never opened: the creator gets its stake back, the joiner's goes to the pool
+    const d2 = await create(alice, 0.5 * XNT, 2, salt);
+    await methods.joinDuelSealed(Array.from(keccak(Buffer.from("MOONFORGE_DUEL_JOIN"), Buffer.from([3]), jsalt, d2.toBuffer(), bob.publicKey.toBuffer())))
+      .accountsPartial(joinAcc(d2, bob)).signers([bob]).rpc();
+    const a0 = await gameBal(alice.publicKey), pool0 = big(await bal(P.reward));
+    await retry(["DeadlineNotReached"], async () => methods.claimDuelTimeout().accountsPartial(await resolve(d2, bob)).rpc());
+    expect((await gameBal(alice.publicKey)) - a0).to.equal(BigInt(0.5 * XNT));
+    expect(big(await bal(P.reward)) - pool0).to.equal(BigInt(0.5 * XNT));
+    // an unjoined duel is cancelled with a full refund
+    const d3 = await create(alice, 0.2 * XNT, 1, salt);
+    const a1 = await gameBal(alice.publicKey);
+    await methods.cancelDuel().accountsPartial({ duel: d3, creatorState: P.player(alice.publicKey), creator: alice.publicKey }).signers([alice]).rpc();
+    expect((await gameBal(alice.publicKey)) - a1).to.equal(BigInt(0.2 * XNT));
+  });
+
+  it("B-6: Moon Wars sealed start: create/join retired, no cancel or settle once joined, seed + reveal (WarSeedOpened), full match pays 98%, both lapses", async () => {
+    await openGame(alice, 4);
+    await openGame(bob, 4);
+    const CARD = [[2, 2, 1], [4, 3, 2], [6, 4, 3], [10, 10, 5]];
+    const createSealed = async (stake: number, entropy: Buffer) => {
+      const nonce = (await acc.playerState.fetch(P.player(alice.publicKey))).nonce.toNumber();
+      const war = P.war(alice.publicKey, nonce);
+      await methods.createWarSealed(BN(stake), PublicKey.default, Array.from(keccak(Buffer.from("MOONFORGE_WAR_ENTROPY"), entropy, war.toBuffer()))).accountsPartial({
+        config: P.config, creatorState: P.player(alice.publicKey), war, owner: alice.publicKey, asset: SYS, record: SYS, collection: SYS, systemProgram: SYS,
+      }).signers([alice]).rpc();
+      return war;
+    };
+    const joinAcc = (war: PublicKey) => ({ config: P.config, war, opponentState: P.player(bob.publicKey), opponent: bob.publicKey, asset: SYS, record: SYS, collection: SYS });
+    const joinSealed = (war: PublicKey, secret: Buffer) => methods.joinWarSealed(Array.from(keccak(Buffer.from("MOONFORGE_WAR_JOIN"), secret, war.toBuffer(), bob.publicKey.toBuffer(), PublicKey.default.toBuffer())))
+      .accountsPartial(joinAcc(war)).signers([bob]);
+    const settleAcc = async (war: PublicKey) => {
+      const w = await acc.war.fetch(war);
+      return { config: P.config, war, creatorState: P.player(w.creator), opponentState: P.player(w.opponent), rewardVault: P.reward, drawVault: P.draw, architect: (await cfg()).architect, rentPayer: w.rentPayer };
+    };
+    const move = (war: PublicKey, k: Keypair, m: any) => m.accountsPartial({ war, signer: k.publicKey }).signers([k]).rpc();
     const nonce = (await acc.playerState.fetch(P.player(alice.publicKey))).nonce.toNumber();
-    const war = warPda(alice.publicKey, nonce);
-    await program.methods.createWar(new anchor.BN(stakeXnt * XNT), PublicKey.default).accountsPartial({
-      config: P.config, creatorState: P.player(alice.publicKey), war, owner: alice.publicKey,
-      asset: P.asset(0, 0), record: P.artifact(P.asset(0, 0)), collection: P.collection, systemProgram: SystemProgram.programId,
-    }).signers([alice]).rpc();
-    return war;
-  }
-  async function joinAndStart(war: PublicKey) {
-    await program.methods.joinWar(PublicKey.default).accountsPartial({
-      config: P.config, war, opponentState: P.player(bob.publicKey), opponent: bob.publicKey,
-      asset: P.asset(1, 0), record: P.artifact(P.asset(1, 0)), collection: P.collection,
-    }).signers([bob]).rpc();
-    const w = await acc.war.fetch(war);
-    await waitPastSlot(BigInt(w.targetSlot.toString()));
-    for (let i = 0; ; i++) {
-      try { await program.methods.startWar().accountsPartial({ war, slotHashes: SYSVAR_SLOT_HASHES_PUBKEY }).rpc(); break; }
-      catch (e: any) { if (!String(e).includes("NotReady") || i > 20) throw e; await sleep(400); }
-    }
-  }
-
-  it("Moon Wars (real): Artifact ticket, seeded decks, every move validated on-chain, winner paid 98%", async () => {
-    for (const k of [alice, bob]) await program.methods.deposit(new anchor.BN(3 * XNT)).accountsPartial({ playerState: P.player(k.publicKey), payer: payer.publicKey, systemProgram: SystemProgram.programId }).rpc();
-    const war = await openWar(1);
-    // a player can only use an Artifact it really holds as its ticket
-    await expectErr(program.methods.joinWar(PublicKey.default).accountsPartial({
-      config: P.config, war, opponentState: P.player(bob.publicKey), opponent: bob.publicKey,
-      asset: P.asset(0, 0), record: P.artifact(P.asset(0, 0)), collection: P.collection,
-    }).signers([bob]).rpc(), "NotArtifactOwner");
-    await joinAndStart(war);
-    let w = await acc.war.fetch(war);
-    expect(w.state).to.equal(2);
-    expect(w.sides[0].handLen).to.equal(3);
-    expect(w.sides[1].handLen).to.equal(3);
-    expect(w.sides[0].mana).to.equal(1);
-    await expectErr(program.methods.warEndTurn().accountsPartial({ war, signer: bob.publicKey }).signers([bob]).rpc(), "NotYourTurn");
-    await expectErr(program.methods.warSummon(9).accountsPartial({ war, signer: alice.publicKey }).signers([alice]).rpc(), "InvalidMove");
-
-    // alice plays greedily (summon the most expensive card she can, then attack); bob only ends his turns
+    await expectErr(methods.createWar(BN(XNT), PublicKey.default).accountsPartial({
+      config: P.config, creatorState: P.player(alice.publicKey), war: P.war(alice.publicKey, nonce), owner: alice.publicKey, asset: SYS, record: SYS, collection: SYS, systemProgram: SYS,
+    }).signers([alice]).rpc(), "SealedJoinRequired");
+    const entropy = Buffer.alloc(32, 0x11), secret = Buffer.alloc(32, 0x22);
+    const war = await createSealed(XNT, entropy);
+    await expectErr(methods.joinWar(PublicKey.default).accountsPartial(joinAcc(war)).signers([bob]).rpc(), "SealedJoinRequired");
+    await joinSealed(war, secret).rpc();
+    await expectErr(methods.cancelWar().accountsPartial({ war, creatorState: P.player(alice.publicKey), creator: alice.publicKey }).signers([alice]).rpc(), "WarState");
+    await expectErr(methods.revealWar(Array.from(secret), PublicKey.default).accountsPartial({ war, signer: bob.publicKey }).signers([bob]).rpc(), "WarState");
+    await expectErr(methods.seedWar(Array.from(Buffer.alloc(32, 0x12))).accountsPartial({ war, signer: alice.publicKey }).signers([alice]).rpc(), "BadCommitment");
+    await methods.seedWar(Array.from(entropy)).accountsPartial({ war, signer: alice.publicKey }).signers([alice]).rpc();
+    const rv = await send(methods.revealWar(Array.from(secret), PublicKey.default).accountsPartial({ war, signer: bob.publicKey }), [bob]);
+    const so = event(rv.events, "WarSeedOpened");
+    expect(Buffer.from(so.creatorEntropy).equals(entropy) && Buffer.from(so.joinerSecret).equals(secret)).to.equal(true);
+    expect(event(rv.events, "WarStarted").seed).to.deep.equal(Array.from(keccak(Buffer.from("MOONFORGE_WAR_V2"), entropy, secret, war.toBuffer())));
+    await expectErr(methods.settleWar().accountsPartial(await settleAcc(war)).rpc(), "WarState"); // ACTIVE
+    // alice plays greedily, bob only ends his turns
     const players = [alice, bob];
-    let txs = 0;
-    for (; txs < 400; txs++) {
-      w = await acc.war.fetch(war);
+    for (let i = 0; i < 400; i++) {
+      const w = await acc.war.fetch(war);
       if (w.state !== 2) break;
       const k = players[w.turn];
-      const send = (m: any) => m.accountsPartial({ war, signer: k.publicKey }).signers([k]).rpc();
       if (w.turn === 0) {
         const me = w.sides[0];
         let best = -1;
-        for (let i = 0; i < me.handLen; i++) {
-          const c = CARD[me.hand[i]];
-          if (c[2] <= me.mana && me.fieldLen < 6 && (best < 0 || c[2] > CARD[me.hand[best]][2])) best = i;
-        }
-        if (best >= 0) { await send(program.methods.warSummon(best)); continue; }
+        for (let j = 0; j < me.handLen; j++) { const c = CARD[me.hand[j]]; if (c[2] <= me.mana && me.fieldLen < 6 && (best < 0 || c[2] > CARD[me.hand[best]][2])) best = j; }
+        if (best >= 0) { await move(war, k, methods.warSummon(best)); continue; }
         const ready = me.field.slice(0, me.fieldLen).findIndex((u: any) => u.ready);
-        if (ready >= 0) { await send(program.methods.warAttack(ready, w.sides[1].fieldLen === 0 ? 255 : 0)); continue; }
+        if (ready >= 0) { await move(war, k, methods.warAttack(ready, w.sides[1].fieldLen === 0 ? 255 : 0)); continue; }
       }
-      await send(program.methods.warEndTurn());
+      await move(war, k, methods.warEndTurn());
     }
-    w = await acc.war.fetch(war);
-    expect(w.state).to.equal(3);
-    expect(w.winner.toBase58()).to.equal(alice.publicKey.toBase58());
-    expect(w.sides[1].health).to.be.at.most(0);
-
-    const a0 = (await acc.playerState.fetch(P.player(alice.publicKey))).balance.toNumber();
-    const pool0 = await bal(P.reward);
-    await program.methods.settleWar().accountsPartial(settleWarAccounts(w, war)).rpc();
-    expect((await acc.playerState.fetch(P.player(alice.publicKey))).balance.toNumber() - a0).to.equal(1.96 * XNT);
-    expect((await bal(P.reward)) - pool0).to.equal(0.02 * XNT); // 1% of the 2 XNT pot
-    expect(await connection.getAccountInfo(war)).to.equal(null);
+    const done = await acc.war.fetch(war);
+    expect(done.state).to.equal(3);
+    expect(done.winner.toBase58()).to.equal(alice.publicKey.toBase58());
+    const a0 = await gameBal(alice.publicKey);
+    await rakeCheck(async () => methods.settleWar().accountsPartial(await settleAcc(war)).rpc(), 2n * BigInt(XNT));
+    expect((await gameBal(alice.publicKey)) - a0).to.equal(196n * BigInt(XNT) / 100n);
+    // the joiner never reveals: the creator wins on time
+    const w2 = await createSealed(0.5 * XNT, entropy);
+    await joinSealed(w2, secret).rpc();
+    await methods.seedWar(Array.from(entropy)).accountsPartial({ war: w2, signer: alice.publicKey }).signers([alice]).rpc();
+    await retry(["DeadlineNotReached"], () => methods.claimWarTimeout().accountsPartial({ war: w2 }).rpc());
+    expect((await acc.war.fetch(w2)).winner.toBase58()).to.equal(alice.publicKey.toBase58());
+    const a1 = await gameBal(alice.publicKey);
+    await methods.settleWar().accountsPartial(await settleAcc(w2)).rpc();
+    expect((await gameBal(alice.publicKey)) - a1).to.equal(98n * BigInt(XNT) / 100n);
+    // the creator never seeds: a draw, both stakes back
+    const w3 = await createSealed(0.3 * XNT, entropy);
+    await joinSealed(w3, secret).rpc();
+    await retry(["DeadlineNotReached"], () => methods.claimWarTimeout().accountsPartial({ war: w3 }).rpc());
+    expect((await acc.war.fetch(w3)).draw).to.equal(true);
+    const a2 = await gameBal(alice.publicKey), b2 = await gameBal(bob.publicKey);
+    await methods.settleWar().accountsPartial(await settleAcc(w3)).rpc();
+    expect([(await gameBal(alice.publicKey)) - a2, (await gameBal(bob.publicKey)) - b2]).to.deep.equal([BigInt(0.3 * XNT), BigInt(0.3 * XNT)]);
+    // an unjoined match is cancelled with a full refund
+    const w4 = await createSealed(0.2 * XNT, entropy);
+    const a3 = await gameBal(alice.publicKey);
+    await methods.cancelWar().accountsPartial({ war: w4, creatorState: P.player(alice.publicKey), creator: alice.publicKey }).signers([alice]).rpc();
+    expect((await gameBal(alice.publicKey)) - a3).to.equal(BigInt(0.2 * XNT));
   });
 
-  it("Moon Wars (real): running out of turn time loses; an unjoined match is cancelled with a full refund", async () => {
-    const war = await openWar(0.5);
-    await joinAndStart(war);
-    const b0 = (await acc.playerState.fetch(P.player(bob.publicKey))).balance.toNumber();
-    // alice (to move) does nothing: after the turn timer anyone can award the match to bob
-    for (let i = 0; ; i++) {
-      try { await program.methods.claimWarTimeout().accountsPartial({ war }).rpc(); break; }
-      catch (e: any) { if (!String(e).includes("DeadlineNotReached") || i > 30) throw e; await sleep(500); }
-    }
-    const w = await acc.war.fetch(war);
-    expect(w.winner.toBase58()).to.equal(bob.publicKey.toBase58());
-    expect(w.timeout).to.equal(true);
-    await program.methods.settleWar().accountsPartial(settleWarAccounts(w, war)).rpc();
-    expect((await acc.playerState.fetch(P.player(bob.publicKey))).balance.toNumber() - b0).to.equal(0.98 * XNT);
-
-    const before = (await acc.playerState.fetch(P.player(alice.publicKey))).balance.toNumber();
-    const lonely = await openWar(0.2);
-    await program.methods.cancelWar().accountsPartial({ war: lonely, creatorState: P.player(alice.publicKey), creator: alice.publicKey }).signers([alice]).rpc();
-    expect((await acc.playerState.fetch(P.player(alice.publicKey))).balance.toNumber()).to.equal(before);
+  // ─── stalls and expiries ───────────────────────────────────────────────────
+  it("B-1/B-3: stalls: anchored-unrevealed pays as a win (reason 1), an expired DRAWING round refunds from the bond (reason 2), an unanchored bet refunds (reason 0), skips; round 4: every house stall is paid by the bond, the bankroll keeps the stake, the pool gets nothing", async () => {
+    const g = stallGroup!;
+    const X = BigInt(XNT);
+    // reason 1: anchored, not revealed within KEEPER_STALL_SLOTS
+    const s1 = await acc.bet.fetch(g.s1.pk);
+    await T.waitPastSlot(betUnpack(big(s1.targetSlot)).anchor + BigInt(L.KEEPER_STALL_SLOTS) + 1n);
+    await expectErr(settleV2B(g.s1, chain.reveal(g.positions[2])).rpc(), "BetStalled");
+    let k0 = await ks();
+    let pool0 = big(await bal(P.reward)), e0 = await gameBal(eve.publicKey), bank0 = big(await bal(P.bankroll));
+    const rf1 = await send(refundB(g.s1));
+    const edge = (big(s1.stake) * 150n) / 10_000n, stakeIn = big(s1.stake) - edge;
+    const ev1 = event(rf1.events, "BetRefunded");
+    expect([ev1.reason, big(ev1.penalty)]).to.deep.equal([1, stakeIn]);
+    expect((await gameBal(eve.publicKey)) - e0).to.equal(big(s1.payout));
+    expect(big(await bal(P.reward)) - pool0, "round 4: no stall pays the pool").to.equal(0n);
+    expect(big(await bal(P.bankroll)) - bank0, "round 4: the bankroll keeps the stake (a lost bet)").to.equal(0n);
+    expect(big(k0.bond) - big((await ks()).bond)).to.equal(big(s1.payout));
+    expect(big((await ks()).penalties) - big(k0.penalties)).to.equal(stakeIn);
+    // reason 2: the DRAWING round's anchor left SlotHashes; every entry is refunded, the bond pays min(bond, pot)
+    const round = await acc.jackpotRound.fetch(P.jackpot(g.jp));
+    await T.waitHashGone(betUnpack(big(round.targetSlot)).anchor);
+    k0 = await ks();
+    pool0 = big(await bal(P.reward));
+    const ex = await send(await settleJpV2B(g.jp, 0, Buffer.alloc(32, 1)));
+    const br = event(ex.events, "BetRefunded");
+    expect([br.reason, big(br.penalty)]).to.deep.equal([2, big(round.total)]);
+    expect(big(await bal(P.reward)) - pool0).to.equal(big(round.total));
+    let k = await ks();
+    expect(big(k0.bond) - big(k.bond)).to.equal(big(round.total));
+    expect(big(k.jackpotReserved)).to.equal(0n);
+    const al0 = await gameBal(alice.publicKey), bo0 = await gameBal(bob.publicKey);
+    await closeJpEntry(g.jp, 0);
+    await closeJpEntry(g.jp, 1);
+    expect([(await gameBal(alice.publicKey)) - al0, (await gameBal(bob.publicKey)) - bo0]).to.deep.equal([2n * X, 3n * X]);
+    // reason 0: never anchored; once its block left SlotHashes it cannot be anchored and refunds in full
+    const s0 = await acc.bet.fetch(g.s0.pk);
+    await T.waitHashGone(betUnpack(big(s0.targetSlot)).anchor);
+    await expectErr(anchorB(g.s0).rpc(), "BetStalled");
+    k0 = await ks();
+    pool0 = big(await bal(P.reward));
+    e0 = await gameBal(eve.publicKey);
+    bank0 = big(await bal(P.bankroll));
+    const seatL0 = big(await bal(P.keeper));
+    const rf0 = await send(refundB(g.s0));
+    const edge0 = (big(s0.stake) * 150n) / 10_000n;
+    const ev0 = event(rf0.events, "BetRefunded");
+    expect([ev0.reason, big(ev0.penalty)], "r4-fix: the penalty is the forfeited stake_in").to.deep.equal([0, big(s0.stake) - edge0]);
+    expect((await gameBal(eve.publicKey)) - e0, "made whole").to.equal(big(s0.stake));
+    expect(big(await bal(P.reward)) - pool0, "round 4: no stall pays the pool").to.equal(0n);
+    expect(big(await bal(P.bankroll)) - bank0, "r4-fix: the bankroll returns stake_in (the unanchored bet is undone)").to.equal(-(big(s0.stake) - edge0));
+    expect(big(k0.bond) - big((await ks()).bond), "the bond loses the whole stake (was 2 × edge before round 4)").to.equal(big(s0.stake));
+    expect(seatL0 - big(await bal(P.keeper)), "r4-fix: only the edge leaves the seat; the forfeited stake_in stays in it, owed to nobody").to.equal(edge0);
+    // the keeper skips the three dead positions
+    for (const pos of g.positions) await revealKeeperB(chain.reveal(pos)).rpc();
+    await expectErr(revealKeeperB(chain.reveal(g.positions[2] + 1n)).rpc(), "BadReveal"); // nothing handed out beyond
+    await expectErr(revealKeeperB(chain.reveal(g.positions[2] + 1n), stranger).rpc(), "OnlyKeeper");
+    k = await ks();
+    expect([k.pendingBets, k.revealed.toString()]).to.deep.equal([0, k.nextIndex.toString()]);
+    // K-2 b: a keeper reveal past a pending anchored bet makes it refundable at once as a win
+    const b = await placeV2(eve, 0, 0, 0, 0.1 * XNT);
+    await anchorWhenReady(b);
+    const idx = betUnpack(big((await acc.bet.fetch(b.pk)).targetSlot)).index;
+    await expectErr(refundB(b).rpc(), "BetNotStalled");
+    await revealKeeperB(chain.reveal(idx)).rpc();
+    await expectErr(settleV2B(b, chain.reveal(idx + 1n)).rpc(), "BetStalled");
+    const rb = await send(refundB(b));
+    expect(event(rb.events, "BetRefunded").reason).to.equal(1);
   });
 
-  // ─── Predictions (real) ────────────────────────────────────────────────────
-  const OBS = new PublicKey("4oUvUgziz4S6VXxMkjqorjgPrgT3wrxXN9kDuja8pkPZ");
-  const predPda = (r: number) => pda(Buffer.from("pred"), u64(r));
-  const predEntry = (r: number, p: PublicKey) => pda(Buffer.from("pred_entry"), u64(r), p.toBuffer());
-  const chainTime = async () => (await connection.getBlockTime(await connection.getSlot("confirmed")))!;
-  const untilChainTime = async (t: number) => { while ((await chainTime()) < t) await sleep(500); };
-  const enterPred = (k: Keypair, r: number, side: number, xnt: number) => program.methods.enterPrediction(new anchor.BN(r), side, new anchor.BN(xnt * XNT))
-    .accountsPartial({ round: predPda(r), entry: predEntry(r, k.publicKey), playerState: P.player(k.publicKey), owner: k.publicKey, systemProgram: SystemProgram.programId })
-    .signers([k]).rpc();
-  const lockPred = (r: number) => program.methods.lockPrediction().accountsPartial({ round: predPda(r), observation: OBS }).rpc();
-  const claimPred = (r: number, p: PublicKey) => program.methods.claimPrediction().accountsPartial({
-    config: P.config, round: predPda(r), entry: predEntry(r, p), playerState: P.player(p), rentPayer: p,
-  }).rpc();
-  const closeRound = async (r: number) => {
-    const round = await acc.predRound.fetch(predPda(r));
-    await program.methods.closePredictionRound().accountsPartial({ config: P.config, round: predPda(r), rewardVault: P.reward, rentPayer: round.rentPayer }).rpc();
-  };
-  async function retry(code: string[], f: () => Promise<any>) {
-    for (let i = 0; ; i++) {
-      try { return await f(); } catch (e: any) { if (!code.some((c) => String(e).includes(c)) || i > 60) throw e; await sleep(500); }
-    }
-  }
-
-  it("Predictions (real): XNT up/down priced by the XDEX on-chain TWAP; winners share the pot minus 2%", async () => {
-    // localnet schedule: a round every 40 s, entries for 20 s, resolved 20 s after the lock
-    let t = await chainTime();
-    while (t % 40 < 2 || t % 40 > 12) { await sleep(1000); t = await chainTime(); }
-    const r = Math.floor(t / 40);
-    await enterPred(alice, r, 1, 1); // UP
-    await enterPred(bob, r, 0, 1); // DOWN
-    await expectErr(enterPred(alice, r, 0, 1), "already in use"); // one entry per wallet per round
-    await expectErr(program.methods.enterPrediction(new anchor.BN(r), 1, new anchor.BN(XNT)).accountsPartial({
-      round: predPda(r), entry: predEntry(r, bot.publicKey), playerState: P.player(bob.publicKey), owner: bot.publicKey, systemProgram: SystemProgram.programId,
-    }).signers([bot]).rpc(), ""); // a bot session key cannot bet in a shared pot
-    await expectErr(lockPred(r), "RoundRunning");
-
-    await untilChainTime(r * 40 + 20);
-    await retry(["RoundRunning", "NotReady"], () => lockPred(r));
-    let round = await acc.predRound.fetch(predPda(r));
-    expect(round.state).to.equal(1);
-    expect(BigInt(round.startPriceX32.toString()) > 0n).to.equal(true);
-    await expectErr(enterPred(carol, r, 1, 1), ""); // closed after the lock
-
-    await untilChainTime(r * 40 + 40);
-    const pool0 = await bal(P.reward);
-    await retry(["RoundRunning", "NotReady"], () => program.methods.settlePrediction().accountsPartial({
-      config: P.config, round: predPda(r), observation: OBS, rewardVault: P.reward, drawVault: P.draw, architect: architect.publicKey,
-    }).rpc());
-    round = await acc.predRound.fetch(predPda(r));
-    expect(round.state).to.equal(2);
-    expect(round.outcome).to.equal(1); // the synthetic price rises → UP
-    expect(BigInt(round.endPriceX32.toString()) > BigInt(round.startPriceX32.toString())).to.equal(true);
-    expect((await bal(P.reward)) - pool0).to.equal(0.02 * XNT);
-    const a0 = (await acc.playerState.fetch(P.player(alice.publicKey))).balance.toNumber();
-    const b0 = (await acc.playerState.fetch(P.player(bob.publicKey))).balance.toNumber();
-    await claimPred(r, alice.publicKey);
-    await claimPred(r, bob.publicKey);
-    expect((await acc.playerState.fetch(P.player(alice.publicKey))).balance.toNumber() - a0).to.equal(1.96 * XNT);
-    expect((await acc.playerState.fetch(P.player(bob.publicKey))).balance.toNumber() - b0).to.equal(0);
-    expect(await connection.getAccountInfo(predEntry(r, bob.publicKey))).to.equal(null);
-    // once every entry is claimed the round closes: dust to the pool, rent back to the first entrant
-    const roundRent = await bal(predPda(r));
-    const alice0 = await bal(alice.publicKey);
-    await closeRound(r);
-    expect(await connection.getAccountInfo(predPda(r))).to.equal(null);
-    expect((await bal(alice.publicKey)) - alice0).to.equal(roundRent);
-
-    // next round, nobody on the other side: refunded in full at the lock
-    const r2 = r + 1;
-    await untilChainTime(r2 * 40 + 1);
-    await enterPred(alice, r2, 0, 0.5);
-    await expectErr(closeRound(r2), "PredState"); // not before it is resolved and fully claimed
-    const a1 = (await acc.playerState.fetch(P.player(alice.publicKey))).balance.toNumber();
-    await untilChainTime(r2 * 40 + 20);
-    await retry(["RoundRunning", "NotReady"], () => lockPred(r2));
-    expect((await acc.predRound.fetch(predPda(r2))).state).to.equal(3);
-    await claimPred(r2, alice.publicKey);
-    expect((await acc.playerState.fetch(P.player(alice.publicKey))).balance.toNumber() - a1).to.equal(0.5 * XNT);
-    await closeRound(r2);
-    expect(await connection.getAccountInfo(predPda(r2))).to.equal(null);
+  it("B-1: keeper withdrawal: request, 3-s notice, busy with a pending bet, keeps >= 20 XNT or 0 (parked), toggle cancels (K-4)", async () => {
+    const wd = (amount: bigint | number) => methods.keeperWithdraw(BN(amount)).accountsPartial(keeperOnly(keeper)).signers([keeper]);
+    // the "too early" refusal rides in ONE transaction with the request (one clock): a separate withdrawal could land
+    // after the 3-s notice on a slow host (r5 run 4 saw that with the hand-over below); the refused transaction reverts
+    // the request with it, which is then sent alone
+    await expectErr(T.sendIxs([await wd(0).instruction(), await wd(5 * XNT).instruction()], [keeper]), "KeeperNotice");
+    await wd(0).rpc();
+    const wts = (await ks()).withdrawTs.toNumber();
+    expect(wts).to.not.equal(0);
+    // the notice runs on the validator clock, which can lag the host clock (acceptance run 9: a 3.5-s sleep was not
+    // enough and the check answered KeeperNotice): wait for the notice on chain, then only KeeperBusy can refuse. The
+    // wait comes BEFORE the bet: an anchored bet must be settled within KEEPER_STALL_SLOTS (40 slots, ~18 s here) of
+    // its placement, and a chain-clock wait inside that window let it stall on a slower run (r5, 2026-10-25)
+    await T.untilChainTime(wts + L.KEEPER_NOTICE + 1);
+    const b = await placeV2(eve, 0, 0, 1, 0.05 * XNT);
+    await expectErr(wd(5 * XNT).rpc(), "KeeperBusy");
+    await settleBet(b);
+    const bond = big((await ks()).bond);
+    const kb0 = big(await bal(keeper.publicKey));
+    await retry(["KeeperNotice"], () => wd(bond - 20n * BigInt(XNT)).rpc());
+    expect(big((await ks()).bond)).to.equal(20n * BigInt(XNT));
+    expect(big(await bal(keeper.publicKey)) - kb0 > bond - 21n * BigInt(XNT)).to.equal(true);
+    await expectErr(wd(1).rpc(), "KeeperBondTooSmall");
+    await wd(0).rpc();
+    await T.untilChainTime((await ks()).withdrawTs.toNumber() + L.KEEPER_NOTICE + 1); // the notice on the validator clock, never a host-clock sleep
+    await retry(["KeeperNotice"], () => wd(20n * BigInt(XNT)).rpc());
+    expect((await ks()).bond.toNumber()).to.equal(0);
+    await expectErr(placeV2(eve, 0, 0, 1, 0.05 * XNT), "KeeperBondTooSmall"); // parked
+    await wd(0).rpc();
+    await wd(0).rpc();
+    expect((await ks()).withdrawTs.toNumber()).to.equal(0); // the second request cancels the first
+    newChain(400);
+    await armB(keeper, chain.tip, 400, 60 * XNT).rpc();
   });
 
-  it("solvency invariant: every vault still covers its obligations", async () => {
-    const c = await acc.config.fetch(P.config);
-    const rent = await connection.getMinimumBalanceForRentExemption(8);
-    expect((await bal(P.reward)) - rent).to.be.at.least(c.rewardReserved.toNumber());
-    expect((await bal(P.bankroll)) - rent).to.be.at.least(c.bankrollReserved.toNumber());
+  // ─── B-2 Keeper seat ───────────────────────────────────────────────────────
+  it("B-2: keeper hand-over: named successor after the notice gets the seat, old bond returned in full; and back", async () => {
+    const take = (k: Keypair, c: KeeperChain, deposit: number, old: PublicKey) => methods.takeKeeper(Array.from(c.tip), BN(c.length), BN(deposit)).accountsPartial({
+      config: P.config, keeperSeat: P.keeper, oldKeeper: old, taker: k.publicKey, rewardVault: P.reward, systemProgram: SYS,
+    }).signers([k]);
+    const c2 = new KeeperChain(Buffer.alloc(32, 0x5a), 50);
+    // both refusals ride in ONE transaction with the proposal (one clock): on a slow host a separate take landed after the
+    // 3-s notice and succeeded (r5 run 4), which handed the seat over early and broke every suite after it; the refused
+    // transaction reverts the proposal with it, which is then sent alone
+    const proposeIx = await methods.proposeKeeper(keeper2.publicKey).accountsPartial(keeperOnly(keeper)).instruction();
+    await expectErr(T.sendIxs([proposeIx, await take(keeper2, c2, 20 * XNT, keeper.publicKey).instruction()], [keeper2, keeper]), "KeeperNotice");
+    await expectErr(T.sendIxs([proposeIx, await take(stranger, c2, 20 * XNT, keeper.publicKey).instruction()], [stranger, keeper]), "KeeperAlive");
+    await methods.proposeKeeper(keeper2.publicKey).accountsPartial(keeperOnly(keeper)).signers([keeper]).rpc();
+    await T.untilChainTime((await ks()).pendingTs.toNumber() + L.KEEPER_NOTICE + 1); // the notice on the validator clock, never a host-clock sleep
+    const bond = big((await ks()).bond), k10 = big(await bal(keeper.publicKey));
+    const tk = await retry(["KeeperNotice"], () => send(take(keeper2, c2, 20 * XNT, keeper.publicKey)));
+    expect(event(tk.events, "KeeperChanged").by).to.equal(0);
+    expect(big(await bal(keeper.publicKey)) - k10).to.equal(bond);
+    expect((await ks()).keeper.toBase58()).to.equal(keeper2.publicKey.toBase58());
+    // and back to the fixture keeper (the stress suite and the kit run with it)
+    await methods.proposeKeeper(keeper.publicKey).accountsPartial(keeperOnly(keeper2)).signers([keeper2]).rpc();
+    await T.untilChainTime((await ks()).pendingTs.toNumber() + L.KEEPER_NOTICE + 1); // the notice on the validator clock, never a host-clock sleep
+    newChain(400);
+    await retry(["KeeperNotice"], () => take(keeper, chain, 60 * XNT, keeper2.publicKey).rpc());
+    expect((await ks()).keeper.toBase58()).to.equal(keeper.publicKey.toBase58());
+  });
+
+  // ─── B-8 tail: expiry, receipts ────────────────────────────────────────────
+  it("B-8: expire_epoch after the 90-s window returns the unclaimed budget; close_receipt refunds the receipt rent to its payer", async () => {
+    for (const n of [1, 2]) {
+      const e = await acc.epoch.fetch(P.epoch(n));
+      await T.untilChainTime(e.expiresAt.toNumber() + 1);
+      const res0 = big((await cfg()).rewardReserved);
+      const ee = await retry(["ClaimWindowOpen"], () => send(methods.expireEpoch().accountsPartial({ config: P.config, epoch: P.epoch(n) })));
+      expect(big(event(ee.events, "EpochExpired").returnedToPool)).to.equal(big(e.budget) - big(e.claimed));
+      expect(res0 - big((await cfg()).rewardReserved)).to.equal(big(e.budget) - big(e.claimed));
+    }
+    const r = await acc.claimReceipt.fetch(P.receipt(1, alice.publicKey, 0));
+    expect(r.rentPayer.toBase58()).to.equal(dave.publicKey.toBase58());
+    const d0 = await bal(dave.publicKey), rr = await bal(P.receipt(1, alice.publicKey, 0));
+    await methods.closeReceipt().accountsPartial({ epoch: P.epoch(1), receipt: P.receipt(1, alice.publicKey, 0), rentPayer: dave.publicKey }).rpc();
+    expect((await bal(dave.publicKey)) - d0).to.equal(rr);
+    await methods.closeReceipt().accountsPartial({ epoch: P.epoch(2), receipt: P.receipt(2, alice.publicKey, 0), rentPayer: alice.publicKey }).rpc();
+    await expectErr(methods.expireEpoch().accountsPartial({ config: P.config, epoch: P.epoch(1) }).rpc(), "EpochClosed");
+  });
+
+  it("B-10: after the 90-s window: ExtraClaimWindow, close returns budget − claimed (rent to the oracle that paid it), voided and heartbeat epochs close with 0", async () => {
+    const x5 = await acc.extraEpoch.fetch(P.extraEpoch(5));
+    await T.untilChainTime(x5.publishedAt.toNumber() + L.CLAIM_WINDOW + 1);
+    await expectErr(claimExtraB(3, 3, carol.publicKey, X3.amounts[3], X3.tr.proof(3)).rpc(), "ExtraClaimWindow");
+    const closeX = (n: number, rp: PublicKey) => methods.closeExtraEpoch().accountsPartial({ extraState: P.extraState, extraEpoch: P.extraEpoch(n), rentPayer: rp });
+    await expectErr(closeX(3, stranger.publicKey).rpc(), "WrongRentPayer"); // X-2
+    for (const n of [1, 2, 3, 4]) {
+      const ce = await send(closeX(n, newHot.publicKey));
+      expect(big(event(ce.events, "ExtraEpochClosed").returned)).to.equal(0n);
+    }
+    const x0 = await xs(), h0 = await bal(newHot.publicKey), rent = await bal(P.extraEpoch(5));
+    const c5 = await send(closeX(5, newHot.publicKey));
+    expect(big(event(c5.events, "ExtraEpochClosed").returned)).to.equal(1_000_000n);
+    const x1 = await xs();
+    expect(big(x0.reserved) - big(x1.reserved)).to.equal(1_000_000n);
+    expect(big(x1.totalReturned) - big(x0.totalReturned)).to.equal(1_000_000n);
+    expect((await bal(newHot.publicKey)) - h0).to.equal(rent);
+  });
+
+  // ─── B-9 tail: hand-over back, dead seat ───────────────────────────────────
+  it("B-9: two-step oracle hand-over; a seat with no surviving epoch for 28 s is taken by the priority voider (bond forfeited to the pool)", async () => {
+    const oo = (k: Keypair) => ({ config: P.config, signer: k.publicKey });
+    await expectErr(methods.proposeOracle(oracle.publicKey).accountsPartial(oo(oracle)).signers([oracle]).rpc(), "OnlyOracle");
+    // round 4 (review R9): the architect payee is never the oracle key: propose_oracle refuses it ...
+    await expectErr(methods.proposeOracle(architect.publicKey).accountsPartial(oo(newHot)).signers([newHot]).rpc(), "InvalidTarget");
+    const pr = await send(methods.proposeOracle(oracle.publicKey).accountsPartial(oo(newHot)), [newHot]);
+    expect(event(pr.events, "OracleHandoverProposed").pendingOracle.toBase58()).to.equal(oracle.publicKey.toBase58());
+    await expectErr(methods.acceptOracle().accountsPartial(oo(stranger)).signers([stranger]).rpc(), "NotPendingOracle");
+    // ... and accept_oracle refuses a pending key that set_architect made the payee after the proposal
+    const setArchTo = (from: Keypair, to: Keypair) => methods.setArchitect(to.publicKey).accountsPartial({
+      config: P.config, architect: from.publicKey, newArchitect: to.publicKey, rewardVault: P.reward,
+    }).remainingAccounts([{ pubkey: to.publicKey, isSigner: true, isWritable: false }]).signers([from, to]);
+    await send(setArchTo(architect, oracle));
+    await expectErr(methods.acceptOracle().accountsPartial(oo(oracle)).signers([oracle]).rpc(), "InvalidTarget");
+    await send(setArchTo(oracle, architect));
+    expect((await cfg()).architect.toBase58()).to.equal(architect.publicKey.toBase58());
+    const ac = await send(methods.acceptOracle().accountsPartial(oo(oracle)), [oracle]);
+    expect(event(ac.events, "OracleChanged").by).to.equal(0);
+    hot = oracle;
+    // dead: the newest epoch (5) is older than 28 s and nothing newer survived
+    const e5 = await acc.epoch.fetch(P.epoch(5));
+    await T.untilChainTime(e5.publishedAt.toNumber() + 30);
+    const seat0 = await acc.oracleSeat.fetch(P.seat);
+    const pool0 = big(await bal(P.reward));
+    const take = async (k: Keypair) => methods.takeSeat(oracle.publicKey, cold.publicKey, PublicKey.default).accountsPartial({
+      config: P.config, seat: P.seat, rewardVault: P.reward, taker: k.publicKey, systemProgram: SYS,
+    }).remainingAccounts(await walkPairs()).signers([k]);
+    await expectErr(methods.takeSeat(oracle.publicKey, cold.publicKey, PublicKey.default).accountsPartial({
+      config: P.config, seat: P.seat, rewardVault: P.reward, taker: dave.publicKey, systemProgram: SYS,
+    }).signers([dave]).rpc(), "BadEpochWindow"); // the walk needs the epoch accounts
+    const ts = await retry(["SeatAlive"], async () => send(await take(dave)));
+    const sc = event(ts.events, "SeatChanged");
+    expect([sc.reason, big(sc.forfeited)]).to.deep.equal([1, big(seat0.bond)]);
+    const seat = await acc.oracleSeat.fetch(P.seat);
+    expect(seat.generation.toNumber()).to.equal(seat0.generation.toNumber() + 1);
+    expect(big(await bal(P.reward)) - pool0).to.equal(big(seat0.bond));
+    expect((await cfg()).oracle.toBase58()).to.equal(oracle.publicKey.toBase58());
+  });
+
+  // ─── B-12 Predictions resolution ───────────────────────────────────────────
+  it("B-12: Predictions v2: wrong observation = BadPriceAccount; the odd round (+5%) settles UP with the 2% rake, the even round (no move) is refunded; rounds close", async () => {
+    await predEntries;
+    if (predError) throw predError;
+    const lockB = (r: number, obs = OBS) => methods.lockPrediction().accountsPartial({ round: P.pred(r), observation: obs });
+    for (const r of predRounds) {
+      await T.untilChainTime(r * L.PRED_PERIOD + L.PRED_LOCK_OFFSET + 1);
+      await expectErr(lockB(r, SYS).rpc(), "BadPriceAccount");
+      await retry(["RoundRunning"], () => lockB(r).rpc());
+      expect((await acc.predRound.fetch(P.pred(r))).state).to.equal(1);
+    }
+    for (const r of predRounds) {
+      await T.untilChainTime(r * L.PRED_PERIOD + L.PRED_LOCK_OFFSET + L.PRED_HORIZON + 1);
+      const c = await cfg();
+      const pool0 = big(await bal(P.reward)), arch0 = big(await bal(c.architect));
+      await retry(["RoundRunning"], () => methods.settlePrediction().accountsPartial({
+        config: P.config, round: P.pred(r), observation: OBS, rewardVault: P.reward, drawVault: P.draw, architect: c.architect,
+      }).rpc());
+      const round = await acc.predRound.fetch(P.pred(r));
+      const a0 = await gameBal(predA.publicKey), b0 = await gameBal(predB.publicKey);
+      const claim = (k: Keypair) => methods.claimPrediction().accountsPartial({
+        config: P.config, round: P.pred(r), entry: P.predEntry(r, k.publicKey), playerState: P.player(k.publicKey), rentPayer: k.publicKey,
+      }).rpc();
+      await claim(predA);
+      await claim(predB);
+      if (r % 2 !== 0) {
+        expect([round.state, round.outcome]).to.deep.equal([2, 1]);
+        expect(big(round.endPriceX32) * 100n >= big(round.startPriceX32) * 104n).to.equal(true);
+        expect(big(await bal(P.reward)) - pool0).to.equal(3n * BigInt(XNT) / 100n);
+        expect(big(await bal(c.architect)) - arch0).to.equal(BigInt(XNT) / 100n);
+        expect([(await gameBal(predA.publicKey)) - a0, (await gameBal(predB.publicKey)) - b0]).to.deep.equal([196n * BigInt(XNT) / 100n, 0n]);
+      } else {
+        expect(round.state).to.equal(3); // |move| < 1%: no contest
+        expect(big(round.endPriceX32)).to.equal(big(round.startPriceX32));
+        expect([(await gameBal(predA.publicKey)) - a0, (await gameBal(predB.publicKey)) - b0]).to.deep.equal([BigInt(XNT), BigInt(XNT)]);
+      }
+      const rr = await bal(P.pred(r)), pa0 = await bal(predA.publicKey);
+      await methods.closePredictionRound().accountsPartial({ config: P.config, round: P.pred(r), rewardVault: P.reward, rentPayer: predA.publicKey }).rpc();
+      expect(await connection.getAccountInfo(P.pred(r))).to.equal(null);
+      expect((await bal(predA.publicKey)) - pa0 <= rr).to.equal(true);
+    }
+  });
+
+  // ─── B-13: the airdrop list (architect-signed: before B-11 renounces the payee) ──────────────────
+  it("B-13: airdrop list: a claim before the root is AirdropNotSet; the architect sets it once (then AirdropRootSet); one claim mints a free Lunar", async () => {
+    const tr = tree(airdropWallets.map((k) => airdropLeaf(k.publicKey)));
+    const w0 = airdropWallets[0];
+    await fund(w0.publicKey);
+    const claimB = (k: Keypair, serial: number, proof: number[][]) => methods.claimAirdrop(serial, proof).accountsPartial({
+      config: P.config, receipt: P.pda(Buffer.from("airdrop"), k.publicKey.toBuffer()), asset: P.asset(0, serial), record: P.artifact(P.asset(0, serial)),
+      collection: P.collection, artifactAuthority: P.authority, claimant: k.publicKey, coreProgram: MPL_CORE, systemProgram: SYS,
+    }).signers([k]);
+    let c = await cfg();
+    await expectErr(claimB(w0, c.artifactsMinted[0], tr.proof(0)).rpc(), "AirdropNotSet");
+    const setRoot = (k: Keypair) => methods.setAirdropRoot(Array.from(tr.root)).accountsPartial({ config: P.config, architect: k.publicKey }).signers([k]);
+    await expectErr(setRoot(stranger).rpc(), "OnlyArchitect");
+    await setRoot(architect).rpc();
+    await expectErr(setRoot(architect).rpc(), "AirdropRootSet");
+    c = await cfg();
+    expect(Buffer.from(c.airdropRoot).equals(tr.root)).to.equal(true);
+    await expectErr(claimB(w0, c.artifactsMinted[0], tr.proof(1)).rpc(), "InvalidProof");
+    const alive0 = c.artifactsAlive[0], price0 = big(c.artifactPrice[0]);
+    const ci = await send(claimB(w0, c.artifactsMinted[0], tr.proof(0)));
+    const ev = event(ci.events, "ArtifactForged");
+    expect([big(ev.price), big(ev.backing)]).to.deep.equal([0n, 0n]);
+    c = await cfg();
+    expect([c.airdropClaimed, c.artifactsAlive[0] - alive0]).to.deep.equal([1, 1]);
+    expect(big(c.artifactPrice[0])).to.equal(price0); // a free Lunar never moves the PX price
+    await expectErr(claimB(w0, c.artifactsMinted[0], tr.proof(0)).rpc(), "already in use"); // one per wallet
+  });
+
+  // ─── B-11 tail: renounce ───────────────────────────────────────────────────
+  it("B-11: renouncing the architect payee to reward_vault: forges pay the vault", async () => {
+    const r = await send(methods.setArchitect(P.reward).accountsPartial({ config: P.config, architect: architect.publicKey, newArchitect: P.reward, rewardVault: P.reward }), [architect]);
+    expect(event(r.events, "ArchitectChanged").newArchitect.toBase58()).to.equal(P.reward.toBase58());
+    await expectErr(methods.setArchitect(oracle.publicKey).accountsPartial({ config: P.config, architect: architect.publicKey, newArchitect: oracle.publicKey, rewardVault: P.reward })
+      .remainingAccounts([{ pubkey: oracle.publicKey, isSigner: true, isWritable: false }]).signers([architect, oracle]).rpc(), "OnlyArchitect");
+    const pool0 = big(await bal(P.reward));
+    const f = await forge(frank, 0);
+    const sp = forgeSplit(f.price);
+    expect(big(await bal(P.reward)) - pool0).to.equal(sp.pool + sp.architect);
+  });
+
+  // ─── B-4 Lottery / ECO-3 ───────────────────────────────────────────────────
+  it("B-4: the Burn Lottery takes no tickets (LotteryRetired); no player ever holds chips; the draw vault received nothing", async () => {
+    const c = await cfg();
+    const r = c.drawRound.toNumber();
+    await expectErr(methods.enterDraw(BN(r), 0, BN(0), BN(1)).accountsPartial({
+      config: P.config, round: P.drawRound(r), entry: P.drawEntry(r, 0), playerState: P.player(alice.publicKey), rewardVault: P.reward, drawVault: P.draw,
+      architect: c.architect, signer: alice.publicKey, systemProgram: SYS,
+    }).signers([alice]).rpc(), "LotteryRetired");
+    const disc = Buffer.from(idl.accounts.find((a: any) => a.name === "PlayerState").discriminator);
+    const all = await connection.getProgramAccounts(pid, { filters: [{ memcmp: { offset: 0, bytes: anchor.utils.bytes.bs58.encode(disc) } }] });
+    expect(all.length).to.be.greaterThan(5);
+    for (const a of all) expect(big(program.coder.accounts.decode("playerState", a.account.data).chips)).to.equal(0n);
+    expect(await bal(P.draw)).to.equal(await rent8());
+  });
+
+  // ─── B-13 coverage table ───────────────────────────────────────────────────
+  // the ASSERTED table (with its allowlist) runs last, at the end of v3-gaps.test.ts, over all three suites
+  it("B-13: coverage of error codes, instructions and new events so far (interim report)", async () => {
+    const NEW_EVENTS = ["WarSeedOpened", "OracleChanged", "OracleHandoverProposed", "SeatChanged", "SeatResigned", "EpochVoided", "ExtraEpochVoided",
+      "ExtraEpochPublished", "ExtraClaimed", "ExtraEpochClosed", "ArtifactListed", "ArtifactDelisted", "ArtifactSold", "CollectionRoyaltiesLocked",
+      "KeeperArmed", "KeeperChanged", "BetRefunded", "ArchitectChanged"];
+    const rep = coverage.report(idl.errors.map((e: any) => e.name), idl.instructions.map((i: any) => i.name), NEW_EVENTS);
+    console.log(`      B-13 coverage: errors ${rep.errors}/${idl.errors.length}, instructions ${rep.ix}/${idl.instructions.length}, new events ${rep.events}/${NEW_EVENTS.length}`);
+    console.log(`        errors not observed: ${rep.missE.join(", ")}`);
+    console.log(`        instructions without a success: ${rep.missI.join(", ")}`);
+    console.log(`        new events not seen: ${rep.missV.join(", ")}`);
+    expect(rep.events).to.be.greaterThan(15);
+  });
+
+  // ─── B-14 Solvency ─────────────────────────────────────────────────────────
+  it("B-14: every vault covers its obligations; the seats hold rent + bond; the keeper bond covers pending payouts and DRAWING pots", async () => {
+    const c = await cfg();
+    const rent = big(await rent8());
+    expect(big(await bal(P.reward)) - rent >= big(c.rewardReserved)).to.equal(true);
+    expect(big(await bal(P.bankroll)) - rent >= big(c.bankrollReserved)).to.equal(true);
+    const x = await xs();
+    const xf = big(await bal(P.extraVault)) - rent;
+    expect(xf >= big(x.reserved) && xf >= big(x.accounted)).to.equal(true);
+    const k = await ks();
+    const kInfo = (await connection.getAccountInfo(P.keeper))!;
+    // r4-fix: reason-0 forfeits stay in the seat above the bond (owed to nobody), so the seat holds AT LEAST rent + bond
+    expect(big(kInfo.lamports) >= big(await T.rentFor(kInfo.data.length)) + big(k.bond)).to.equal(true);
+    expect(big(k.bond) >= big(c.bankrollReserved) + big(k.jackpotReserved)).to.equal(true);
+    const s = await acc.oracleSeat.fetch(P.seat);
+    const sInfo = (await connection.getAccountInfo(P.seat))!;
+    expect(big(sInfo.lamports)).to.equal(big(await T.rentFor(sInfo.data.length)) + big(s.bond));
+    for (const l of await acc.listing.all()) {
+      const owner = await assetOwner(l.account.asset);
+      const d = delegateOf((await connection.getAccountInfo(l.account.asset))!.data);
+      expect(d.address === l.publicKey.toBase58() || !owner.equals(l.account.seller)).to.equal(true);
+    }
   });
 });

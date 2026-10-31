@@ -41,8 +41,9 @@ test-ledger/
 deploy-wallet.json
 # Program binaries dumped for local tests (fetched by tests/run-local.sh)
 tests/fixtures/*.so
-# NOTE: tests/fixtures/test-oracle.json and test-architect.json ARE committed on purpose:
-# they are worthless keys used only by the `localnet` test build.
+# NOTE: tests/fixtures/test-oracle.json, test-architect.json, test-keeper.json and test-cold.json ARE committed on
+# purpose: they are worthless keys used only by the `localnet` test build (constants.rs localnet ARCHITECT,
+# INITIAL_ORACLE, INITIAL_KEEPER, SEAT_COLD_INITIAL); a clean clone needs all four to run the localnet suite.
 
 # ── INTERNAL SCRIPTS (one-time deploy helpers — not for community) ───────────
 scripts/init-simple.js
