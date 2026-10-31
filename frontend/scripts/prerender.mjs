@@ -109,7 +109,7 @@ ${section('How much can it pay', `<p>An epoch pays at most ${F.epochRules.budget
 ${section('How to do it, step by step', `<ol>${F.steps.map((s) => `<li><strong>${esc(s.title)}.</strong> ${esc(s.text)}</li>`).join('')}</ol>`)}
 ${section('Verify it yourself', `<ul>${F.verifyChecklist.map((c) => `<li><strong>${esc(c.title)}.</strong> ${esc(c.text)}</li>`).join('')}</ul>`)}
 ${verifyBlock(F)}
-${section('What Moon Forge will never do', `<ul>${li(F.never)}</ul><p class="muted">Official places only: this site, the GitHub repository and X @MoonXenForge. No chat group is official.</p>`)}
+${section('What Moon Forge will never do', `<ul>${li(F.never)}</ul><p class="muted">Official places only: this site, the GitHub repository and X @MoonXenForge. No chat group is official. X: ${esc(F.xNote)}</p>`)}
 ${section('Risks, plainly', `<ul>${li(F.risks)}</ul>`)}
 <section id="faq"><h2>Questions people ask</h2>${faqHtml(F)}</section>
 ${noticesHtml(F)}
@@ -287,6 +287,7 @@ Rules described: program tag ${F.rules.program}, oracle ${F.rules.oracle}, valid
 - Artifacts (Metaplex Core NFTs): ${F.forgeSplit.floorPct}% of the price stays inside as a floor you can take back, ${F.forgeSplit.poolPct}% goes to the reward pool, ${F.forgeSplit.lotteryPct}% lottery, ${F.forgeSplit.architectPct}% architect; recycle any time.
 - House games (Coin Flip, High-Low, Void Rush): fixed ${F.fees.houseEdgePct}% edge. Jackpot, Artifact Duel and Moon Wars: ${F.fees.p2pRakePct}% rake only when someone wins. Moon Wars real-XNT matches are paused on the site; Predictions are in the program but not offered by this site or the agent kit, and a round can be blocked or steered cheaply (known issue GAM-3).
 - Official places: ${site}, ${L.github}, ${L.x}. Nobody from Moon Forge messages anyone first; no chat group is official.
+- X ${L.x}: ${F.xNote}
 `;
 }
 
@@ -324,7 +325,7 @@ function llmsFullTxt(F, meta) {
     for (const r of F.risks) lines.push(`- ${r}`);
     h('What Moon Forge will never do');
     for (const n of F.never) lines.push(`- ${n}`);
-    lines.push('', `Official places only: ${site}, ${L.github}, ${L.x}. Nobody from Moon Forge messages, e-mails or calls anyone first; no chat group is official.`);
+    lines.push('', `Official places only: ${site}, ${L.github}, ${L.x}. Nobody from Moon Forge messages, e-mails or calls anyone first; no chat group is official.`, `X ${L.x}: ${F.xNote}`);
     h('FAQ');
     for (const f of F.faq) lines.push(`Q: ${f.q}`, `A: ${f.a}`, '');
     h('For AI agents');

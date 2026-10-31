@@ -6,9 +6,14 @@
  * own labels, in the register too (GAM-M3 matured withdrawal never expires, GAM-L1 breaker ignores open bets,
  * GAM-L3 keeper flooding, GAM-X151 unsettled bets become LP income).
  * Planned fixes name no rules-3 detail (prices, splits, chip values, new caps or windows) before the final upgrade ships.
+ * Under rules 3 (src/v3/detect.ts: the upgraded program is live) the block is labelled as the issues of the program
+ * before the upgrade, which concern only what was opened before it, without the "planned fix" lines; panels whose
+ * content is all post-upgrade pass no id. False on the live program, which keeps this block exactly as it is.
  */
 import { PROJECT_LINKS } from '../../lib/constants';
 import { P } from '../../lib/protocol';
+import { useRules3 } from '../../v3/detect';
+import { S7_VALID_FROM } from '../../v3/facts-s7';
 
 export const KNOWN_ISSUES_DATE = '2026-10-22';
 
@@ -90,6 +95,34 @@ export const KNOWN_ISSUES = {
 export type KnownIssueId = keyof typeof KNOWN_ISSUES;
 
 export default function KnownIssues({ ids, className = '' }: { ids: readonly KnownIssueId[]; className?: string }) {
+    const rules3 = useRules3();
+    if (ids.length === 0) return null;
+    if (rules3) {
+        return (
+            <details className={`rounded-xl border border-white/10 bg-space-700/30 text-sm ${className}`}>
+                <summary className="cursor-pointer px-3 py-2 text-lunar-300">
+                    Known issues of the program before the final upgrade{S7_VALID_FROM ? ` (${S7_VALID_FROM})` : ''} ({ids.length}): they concern bets, rounds,
+                    matches and requests opened before it · notice dated {KNOWN_ISSUES_DATE}
+                </summary>
+                <ul className="px-3 pb-2 space-y-2 text-lunar-300">
+                    {ids.map((id) => {
+                        const k = KNOWN_ISSUES[id];
+                        return (
+                            <li key={id} id={`known-${id}`}>
+                                <span className="font-mono text-xs text-amber-300">{id}</span>{' '}
+                                <span className="text-xs text-lunar-500">{k.severity}</span> · <strong className="text-white">{k.title}.</strong>{' '}{k.text}
+                            </li>
+                        );
+                    })}
+                </ul>
+                <p className="px-3 pb-3 text-xs text-lunar-500">
+                    The status of each issue after the upgrade is in{' '}
+                    <a href={PROJECT_LINKS.knownIssuesMd} target="_blank" rel="noopener noreferrer" className="underline">docs/KNOWN-ISSUES.md</a> and{' '}
+                    <a href={PROJECT_LINKS.securityMd} target="_blank" rel="noopener noreferrer" className="underline">SECURITY.md</a>.
+                </p>
+            </details>
+        );
+    }
     return (
         <details className={`rounded-xl border border-amber-500/30 bg-amber-500/5 text-sm ${className}`}>
             <summary className="cursor-pointer px-3 py-2 text-amber-200">

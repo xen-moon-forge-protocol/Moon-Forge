@@ -12,12 +12,16 @@ import { useNow, usePoll, useTx } from '../../lib/hooks';
 import { AddrLink, Notice, Row, TxStatus, Xnt } from '../ui';
 import KnownIssues from './KnownIssues';
 import type { GameCtx } from './types';
+import { useRules3 } from '../../v3/detect';
+import { gamesS7 } from '../../v3/facts-s7';
 
 const STATE = ['Open', 'Drawing', 'Settled'];
 
 /** `exitsOnly` (R1): shown only while a round waits to be closed or settled (permissionless); no Enter. */
 export default function LotteryPanel({ ctx, exitsOnly = false }: { ctx: GameCtx; exitsOnly?: boolean }) {
     const { provider, player, proto, refresh } = ctx;
+    // rules 3 (src/v3/detect.ts): tickets and chips are retired; only the exits of an open round remain. False on the live program.
+    const rules3 = useRules3();
     const dr = usePoll(() => fetchDraw(), [], 20_000);
     const tx = useTx();
     const now = useNow(1000);
@@ -66,7 +70,7 @@ export default function LotteryPanel({ ctx, exitsOnly = false }: { ctx: GameCtx;
                     <Row label="Draw vault"><Xnt lamports={proto ? proto.drawVault : null} /></Row>
                     <Row label="Total weight (chips + tickets)">{d ? (round ? formatNumber(Number(round.totalWeight)) : 0) : '--'}</Row>
                     <Row label="Entries">{d ? (round ? round.entries : 0) : '--'}</Row>
-                    <Row label="Your chips">{player ? formatNumber(myChips) : '--'}</Row>
+                    {!rules3 && <Row label="Your chips">{player ? formatNumber(myChips) : '--'}</Row>}
 
                     {!exitsOnly && <>
                     <div className="grid grid-cols-2 gap-2 mt-4">
@@ -101,6 +105,7 @@ export default function LotteryPanel({ ctx, exitsOnly = false }: { ctx: GameCtx;
                 </div>
 
                 <div className="text-sm text-lunar-400 space-y-3">
+                    {rules3 ? <p className="text-xs">{gamesS7.lottery}</p> : <>
                     <div>
                         <div className="text-white font-bold mb-1">Where chips come from</div>
                         <ul className="list-disc list-inside space-y-1">
@@ -122,6 +127,7 @@ export default function LotteryPanel({ ctx, exitsOnly = false }: { ctx: GameCtx;
                             Only the wallet owner can enter: session keys (bots) cannot.
                         </p>
                     </div>
+                    </>}
                     <div className="text-xs">
                         Previous round: {prev ? (prev.state === 2
                             ? (Number(prev.totalWeight) === 0 ? 'no entries'

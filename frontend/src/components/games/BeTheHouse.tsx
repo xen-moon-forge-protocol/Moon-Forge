@@ -12,6 +12,8 @@ import { Notice, Row, TxStatus, Xnt } from '../ui';
 import KnownIssues from './KnownIssues';
 import { fetchOpenBets, LP_RESERVED_WARN_BPS, LP_RESULTS_URL, reservedBps, settleReadyBets } from '../../lib/protocol';
 import type { GameCtx } from './types';
+import { useRules3 } from '../../v3/detect';
+import { gamesS7 } from '../../v3/facts-s7';
 
 const pct = (bps: number) => `${(bps / 100).toFixed(2)}%`;
 const signed = (bps: number) => `${bps >= 0 ? '+' : ''}${(bps / 100).toFixed(2)}%`;
@@ -52,6 +54,8 @@ function LpResults() {
 /** `exitsOnly` (R1): your shares, Request withdraw and Withdraw only (no deposit), for "Your balances and exits". */
 export default function BeTheHouse({ ctx, exitsOnly = false }: { ctx: GameCtx; exitsOnly?: boolean }) {
     const { provider, owner, proto, refresh } = ctx;
+    // rules 3: the upgraded program's limits, breaker and withdrawal window; false on the live program, which keeps this panel as it is
+    const rules3 = useRules3();
     const share = usePoll(() => (owner ? fetchHouseShare(owner) : Promise.resolve(null)), [owner?.toBase58()], 30_000);
     const tx = useTx();
     const now = useNow(5000);
@@ -155,7 +159,16 @@ export default function BeTheHouse({ ctx, exitsOnly = false }: { ctx: GameCtx; e
                     <TxStatus busy={tx.busy} error={tx.error} lastTx={tx.lastTx} />
                 </div>
             </div>
-            {!exitsOnly && <Notice kind="warn" className="mt-4">
+            {!exitsOnly && rules3 && <Notice kind="warn" className="mt-4">
+                You take the house side: your share rises when players lose and falls when they win. There is no rate and no promised return; you can lose part
+                of your deposit, and in a bad run most of it. Deposits are priced as if every open bet loses (nobody can buy shares cheaply while bets are open).
+                {' '}{gamesS7.houseWithdraw} The amount is priced when you withdraw (not when you request), as if every open bet wins, so nobody leaves with
+                money owed to winners; a new request replaces the old one. This page sets a 1% slippage limit on deposits and withdrawals and blocks both
+                while open bets reserve more than {pct(LP_RESERVED_WARN_BPS)} of the bankroll (you can override). {gamesS7.limits} The first deposit mints
+                permanent protocol shares for the value already in the bankroll (bankroll donations made before the first LP included); later donations raise
+                the value of every share.
+            </Notice>}
+            {!exitsOnly && !rules3 && <Notice kind="warn" className="mt-4">
                 You take the house side: your share rises when players lose and falls when they win. There is no rate and no promised return; you can lose part
                 of your deposit, and in a bad run most of it. Deposits are priced as if every open bet loses (nobody can buy shares cheaply while bets are open).
                 Withdrawals need a request and a {P.houseWithdrawHours} h cooldown; the amount is priced when you withdraw (not when you request), as if every
@@ -167,13 +180,21 @@ export default function BeTheHouse({ ctx, exitsOnly = false }: { ctx: GameCtx; e
                 the first LP included); later donations raise the value of every share. Until the final upgrade, a house bet nobody settles within about
                 3 minutes counts as lost and its stake stays in the bankroll, so LPs gain from missed settlements (GAM-X151 below).
             </Notice>}
-            {exitsOnly && (
+            {exitsOnly && rules3 && (
+                <p className="text-xs text-lunar-500 mt-3">
+                    {gamesS7.houseWithdraw} The amount is priced when you withdraw, as if every open bet wins, with a 1% slippage limit. A new request replaces
+                    the old one.
+                </p>
+            )}
+            {exitsOnly && !rules3 && (
                 <p className="text-xs text-lunar-500 mt-3">
                     Withdrawals need a request and a {P.houseWithdrawHours} h cooldown; the amount is priced when you withdraw, as if every open bet wins, with a
                     1% slippage limit. A new request replaces the old one and restarts the timer.
                 </p>
             )}
-            <KnownIssues ids={exitsOnly ? ['GAM-2', 'GAM-M3'] : ['GAM-2', 'GAM-M3', 'GAM-L1', 'GAM-1', 'GAM-X151']} className="mt-4" />
+            {/* rules 3: the "until the final upgrade" block is not shown on this live panel (its rows describe the program before the
+                upgrade; their status after it is in docs/KNOWN-ISSUES.md); the 1% guard above keeps its own warning */}
+            <KnownIssues ids={rules3 ? [] : exitsOnly ? ['GAM-2', 'GAM-M3'] : ['GAM-2', 'GAM-M3', 'GAM-L1', 'GAM-1', 'GAM-X151']} className="mt-4" />
         </div>
     );
 }

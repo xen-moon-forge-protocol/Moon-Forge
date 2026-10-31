@@ -18,6 +18,11 @@ import {
 import { formatDuration, formatNumber } from '../lib/constants';
 import { AddrLink, Notice, Row, StatTile, TxStatus, Xnt } from './ui';
 import { DATED, NEUTRAL } from '../content/interim';
+import { useDetection } from '../v3/detect';
+import { CLAIM_HOLD_SECONDS, KEEPER_TIP_MIN_CLAIM as KEEPER_TIP_MIN_CLAIM_V3 } from '../v3/constants';
+import { S7_VALID_FROM } from '../v3/facts-s7';
+import ExtraClaims from '../v3/ui/ExtraClaims';
+import VerifyLeafPanel from '../v3/ui/VerifyLeafPanel';
 
 export default function MissionControl() {
     const { x1Connected, x1Address, x1Provider, connectX1, isConnecting } = useWallet();
@@ -82,6 +87,11 @@ function Dashboard({ owner, readOnly, provider }: { owner: string; readOnly: boo
     const tx = useTx();
     const now = useNow(5000);
     const [confirmEject, setConfirmEject] = useState<string | null>(null);
+    // Rules detection (src/v3/detect.ts): both false on the live program and oracle, which keeps this page exactly as it is.
+    const det = useDetection();
+    const rules3 = det.rules === 3;
+    const rewards3 = det.rewards === 3;
+    const onHold = (l: MyLeaf) => rules3 && !!l.publishedAt && now < l.publishedAt + CLAIM_HOLD_SECONDS;
 
     const reloadAll = () => { leaves.reload(); missions.reload(); player.reload(); };
 
@@ -107,7 +117,9 @@ function Dashboard({ owner, readOnly, provider }: { owner: string; readOnly: boo
                 <StatTile label="Claimable leaves" value={leaves.data ? pending.length : '--'} sub={leaves.data ? <>≈ <Xnt lamports={pending.reduce((a, l) => a + l.estimate, 0)} digits={2} /></> : undefined} />
                 <StatTile label="Vesting missions" value={missions.data ? missions.data.length : '--'} />
                 <StatTile label="Game balance" value={ps ? <Xnt lamports={Number(ps.balance)} digits={3} /> : player.loading ? '--' : '0 XNT'} sub={<Link to="/games" className="text-forge-orange hover:underline">Games</Link>} />
-                <StatTile label="Lottery chips" value={ps ? formatNumber(Number(ps.chips)) : player.loading ? '--' : '0'} sub="Burn Lottery entries" />
+                {rules3
+                    ? <StatTile label="Claims open" value="48 h" sub="after each publication (upgraded program)" />
+                    : <StatTile label="Lottery chips" value={ps ? formatNumber(Number(ps.chips)) : player.loading ? '--' : '0'} sub="Burn Lottery entries" />}
             </div>
 
             {/* Claimable */}
@@ -150,6 +162,7 @@ function Dashboard({ owner, readOnly, provider }: { owner: string; readOnly: boo
                                                 : l.expired ? <span className="text-lunar-500">Expired (returned to pool)</span>
                                                     : !l.onChain ? <span className="text-amber-400">Epoch not on chain yet</span>
                                                         : readOnly ? <span className="text-lunar-300">Claimable</span>
+                                                            : onHold(l) ? <span className="text-amber-400">Opens in {formatDuration(l.publishedAt! + CLAIM_HOLD_SECONDS - now)}</span>
                                                             : (
                                                                 <button onClick={() => doClaim(l)} disabled={!!tx.busy} className="btn-forge !px-3 !py-1 text-xs">
                                                                     Claim
@@ -181,10 +194,18 @@ function Dashboard({ owner, readOnly, provider }: { owner: string; readOnly: boo
                     straight to your wallet (a payout that would leave a brand-new wallet below the rent-exempt minimum is credited to your game
                     balance instead); Orbit / Moon Landing open a vesting mission that starts vesting at the claim. Claims are permissionless:
                     when the public keeper is running it may submit them for you (its runs are irregular and can be hours or days late); its {P.keeperTip} XNT tip per claim of
-                    at least {P.keeperTipMinClaim} XNT is paid by the pool, never from your amount. Whoever submits a claim pays a small rent deposit:
+                    at least {rules3 ? Number(KEEPER_TIP_MIN_CLAIM_V3) / 1e9 : P.keeperTipMinClaim} XNT is paid by the pool, never from your amount. Whoever submits a claim pays a small rent deposit:
                     the claim receipt's rent is refunded to them after the epoch closes, a vesting mission's rent when the mission ends (the game
                     wallet created at a first claim is not refundable). Unclaimed budgets return to the pool after {P.claimWindowDays} days.
                 </p>
+                {rules3 ? (
+                    <p className="text-xs text-lunar-500 mt-2">
+                        Forge Drops were part of epochs published before the final upgrade{S7_VALID_FROM ? ` (${S7_VALID_FROM})` : ''}: the upgraded program
+                        reserves no drop for a new epoch. A drop already drawn keeps its {P.claimWindowDays}-day window here (receive it with "Receive drop"
+                        or let the keeper deliver it), and this column stays until then. Epoch 1's drop reserve drew no winner and returns to the pool
+                        when its window closes.
+                    </p>
+                ) : <>
                 <p className="text-xs text-lunar-500 mt-2">
                     Forge Drops: up to {P.dropBudgetPct}% of every epoch budget (max {P.maxDropsPerEpoch * P.dropBackingXnt} XNT) is not paid pro-rata
                     but drawn as Lunar Dust Artifacts whose floor is the drop value, at least {P.dropBackingXnt} XNT (recycle any time for it). This
@@ -200,7 +221,11 @@ function Dashboard({ owner, readOnly, provider }: { owner: string; readOnly: boo
                     {DATED}: {NEUTRAL.oracleRules} A drop already won keeps its {P.claimWindowDays}-day window here, and this column stays until then.
                     Epoch 1's drop reserve drew no winner and returns to the pool when its window closes.
                 </p>
+                </>}
             </section>
+
+            {rules3 && <ExtraClaims owner={owner} readOnly={readOnly} provider={provider} now={now} />}
+            {rewards3 && <VerifyLeafPanel owner={owner} leaves={leaves.data} />}
 
             {/* Missions */}
             <section className="glass-card">
@@ -279,8 +304,8 @@ function Dashboard({ owner, readOnly, provider }: { owner: string; readOnly: boo
                 <p className="text-xs text-lunar-500 mt-3">
                     Vesting starts when the leaf is claimed (by you or a keeper). The keeper does not push vested XNT automatically: use
                     "Withdraw vested" (it is permissionless, so anyone can push it to you). Ejecting pays the vested part in full plus
-                    {` ${100 - P.tiers[1].penaltyPct}%`} (Orbit) / {100 - P.tiers[2].penaltyPct}% (Moon Landing) of the unvested part. Chips are
-                    credited on the vested XNT you actually withdraw or receive at eject, never on the part lost to a penalty. A mission's rent
+                    {` ${100 - P.tiers[1].penaltyPct}%`} (Orbit) / {100 - P.tiers[2].penaltyPct}% (Moon Landing) of the unvested part.{rules3 ? '' : <> Chips are
+                    credited on the vested XNT you actually withdraw or receive at eject, never on the part lost to a penalty.</>} A mission's rent
                     is refunded to whoever paid it when the mission ends.
                 </p>
             </section>
@@ -292,13 +317,14 @@ function Dashboard({ owner, readOnly, provider }: { owner: string; readOnly: boo
                 {ps ? (
                     <div className="grid md:grid-cols-2 gap-x-8">
                         <Row label="Balance"><Xnt lamports={Number(ps.balance)} /></Row>
-                        <Row label="Lottery chips">{formatNumber(Number(ps.chips))}</Row>
+                        {!rules3 && <Row label="Lottery chips">{formatNumber(Number(ps.chips))}</Row>}
                         <Row label="Total wagered"><Xnt lamports={Number(ps.totalWagered)} /></Row>
                         <Row label="Total won"><Xnt lamports={Number(ps.totalWon)} /></Row>
                     </div>
                 ) : (
                     <p className="text-sm text-lunar-400">{player.loading ? 'Reading…' : 'No game wallet yet. It is created automatically at your first claim or deposit (its rent is not refundable).'}</p>
                 )}
+                {!rules3 && <>
                 <p className="text-xs text-lunar-500 mt-2">
                     Chips: {P.chipPerClaimedXnt} per XNT actually received from burns (Launchpad at claim; Orbit / Moon Landing as vested XNT is
                     withdrawn or at eject, never on the penalty part), 1 per {P.chipPerWageredXnt} XNT wagered in house games, plus weekly chips
@@ -308,6 +334,7 @@ function Dashboard({ owner, readOnly, provider }: { owner: string; readOnly: boo
                 <p className="text-xs text-lunar-500 mt-2">
                     {DATED}: {NEUTRAL.programRules}
                 </p>
+                </>}
             </section>
         </div>
     );

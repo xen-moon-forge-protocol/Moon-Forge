@@ -25,6 +25,9 @@ import PredictionExits from '../components/games/PredictionsPanel';
 import PlayGate from '../components/games/PlayGate';
 import ExitsPanel from '../components/games/ExitsPanel';
 import type { GameCtx } from '../components/games/types';
+import { useRules3 } from '../v3/detect';
+import { BankTabV3, DuelTabV3, GamesNoticeV3, HouseTabV3, JackpotTabV3, LotteryTabV3, WarsTabV3 } from '../v3/ui/GamesV3';
+import { gamesS7 } from '../v3/facts-s7';
 
 // Predictions (XNT up/down rounds) are off this site since 2026-10-22: no tab, only the exits view below (T4-24).
 const TABS = [
@@ -44,6 +47,8 @@ export default function GamesPage() {
     const owner = x1Connected && x1Address ? new PublicKey(x1Address) : null;
     const player = usePoll(() => (owner ? fetchPlayer(owner) : Promise.resolve(null)), [x1Address, x1Connected], 15_000);
     const proto = useProtocol(15_000);
+    // rules 3 (src/v3/detect.ts): the upgraded program's game rules; false on the live program, which keeps every panel as it is
+    const rules3 = useRules3();
 
     const ctx: GameCtx = {
         provider: x1Connected ? x1Provider : null,
@@ -52,7 +57,8 @@ export default function GamesPage() {
         proto: proto.data,
         refresh: () => { player.reload(); proto.reload(); },
     };
-    const practice = tab === 'wars' && warsMode === 'practice';
+    // rules 3: the Moon Wars tab is the free practice plus the exits of the wallet's own matches (WarsTabV3), outside the gate
+    const practice = tab === 'wars' && (rules3 || warsMode === 'practice');
     const needsWallet = !practice;
 
     const panels = (
@@ -62,12 +68,13 @@ export default function GamesPage() {
             )}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 <div className={needsWallet ? 'lg:col-span-2 space-y-6' : 'lg:col-span-3 space-y-6'}>
-                    {tab === 'house' && <HouseGames ctx={ctx} />}
-                    {tab === 'jackpot' && <JackpotPanel ctx={ctx} />}
-                    {tab === 'duel' && <DuelPanel ctx={ctx} />}
-                    {tab === 'lottery' && <LotteryPanel ctx={ctx} />}
-                    {tab === 'bank' && <BeTheHouse ctx={ctx} />}
-                    {tab === 'wars' && (
+                    {tab === 'house' && (rules3 ? <HouseTabV3 ctx={ctx} /> : <HouseGames ctx={ctx} />)}
+                    {tab === 'jackpot' && (rules3 ? <JackpotTabV3 ctx={ctx} /> : <JackpotPanel ctx={ctx} />)}
+                    {tab === 'duel' && (rules3 ? <DuelTabV3 ctx={ctx} /> : <DuelPanel ctx={ctx} />)}
+                    {tab === 'lottery' && (rules3 ? <LotteryTabV3 ctx={ctx} /> : <LotteryPanel ctx={ctx} />)}
+                    {tab === 'bank' && (rules3 ? <BankTabV3 ctx={ctx} /> : <BeTheHouse ctx={ctx} />)}
+                    {tab === 'wars' && rules3 && <WarsTabV3 ctx={ctx} />}
+                    {tab === 'wars' && !rules3 && (
                         <>
                             <div className="flex gap-2">
                                 {(['practice', 'real'] as const).map((m) => (
@@ -99,14 +106,14 @@ export default function GamesPage() {
         <div className="max-w-6xl mx-auto">
             <div className="text-center mb-8">
                 <h1 className="font-space text-4xl font-bold mb-2"><Gamepad2 className="inline w-9 h-9 text-forge-orange mr-2" />Games</h1>
-                <p className="text-lunar-400 max-w-3xl mx-auto">
+                {rules3 ? <p className="text-lunar-400 max-w-3xl mx-auto">{gamesS7.intro}</p> : <p className="text-lunar-400 max-w-3xl mx-auto">
                     Every XNT game is an instruction of the Moon Forge program on X1. House-game outcomes come from the hash of the slot after the bet
                     (not known to the player or the protocol when betting) and are verifiable by anyone; the producer of the drawing slot can influence the roll
                     (until the upgrade; see the known issues on each panel). Part of every stake feeds the burners' reward pool.
-                </p>
+                </p>}
             </div>
 
-            <Notice kind="info" className="mb-6">
+            {rules3 ? <GamesNoticeV3 /> : <Notice kind="info" className="mb-6">
                 <ul className="list-disc list-inside space-y-1">
                     <li>
                         House games: {P.houseEdgePct}% edge ({P.edgeToPoolPct}% → burners' pool, {P.edgeToArchitectPct}% → architect, {P.edgeToBankrollPct}% → bankroll).
@@ -131,7 +138,7 @@ export default function GamesPage() {
                     </li>
                     <li>The program is upgradeable during the test period, and the known unfixed issues are listed on every panel: play only with amounts you can afford to lose.</li>
                 </ul>
-            </Notice>
+            </Notice>}
 
             <div className="flex flex-wrap gap-2 mb-6">
                 {TABS.map((t) => (

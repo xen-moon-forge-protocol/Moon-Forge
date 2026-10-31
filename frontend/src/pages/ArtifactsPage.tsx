@@ -2,7 +2,7 @@
  * Moon Forge Artifacts — Metaplex Core NFTs forged and recycled by the Moon Forge program.
  * Single NFT page (also served at /nft and /marketplace).
  */
-import { useState } from 'react';
+import { lazy, Suspense, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { PublicKey } from '@solana/web3.js';
 import { Gem, Recycle, Ticket, Gift, Store } from 'lucide-react';
@@ -15,6 +15,7 @@ import {
     P, PDA, recycleArtifact, SECONDARY_ROYALTY_PCT, WEEK_SECONDS,
 } from '../lib/protocol';
 import { AddrLink, Notice, Row, TxStatus, Xnt } from '../components/ui';
+import { useRules3 } from '../v3/detect';
 import lunarPreview from '../assets/nft/lunar_dust_preview.jpg';
 import cosmicPreview from '../assets/nft/cosmic_shard_preview.jpg';
 import solarPreview from '../assets/nft/solar_core_preview.jpg';
@@ -24,7 +25,8 @@ const PREVIEWS = [lunarPreview, cosmicPreview, solarPreview, voidPreview];
 const VARIANT_IMAGES = import.meta.glob('../assets/nft/*/*.jpg', { eager: true, import: 'default' }) as Record<string, string>;
 const variantsOf = (slug: string) => Object.entries(VARIANT_IMAGES).filter(([k]) => k.includes(`/nft/${slug}/`)).map(([k, v]) => ({ name: k.split('/').pop()!.replace('.jpg', '').replace(/_/g, ' '), src: v }));
 
-export default function ArtifactsPage() {
+/** The live (rules 2) page, unchanged; ArtifactsPage below picks it until rules detection reads 3. */
+function ArtifactsPageV2() {
     const { x1Provider, x1Address, x1Connected, connectX1, isConnecting } = useWallet();
     const proto = useProtocol(30_000);
     const ready = usePoll(() => fetchArtifactsReady(), [], 120_000);
@@ -77,7 +79,7 @@ export default function ArtifactsPage() {
                         <li>
                             The program is permissionless, so a script can still forge under the current rules without this site. An Artifact forged before the
                             upgrade keeps its floor (recyclable at any time), but the rules that replace the current ones are written for Artifacts forged after it,
-                            and its on-chain attribute texts may be refreshed by the upgrade.
+                            and its on-chain attribute texts stay as minted: the final binary cannot rewrite them.
                         </li>
                         <li>Recycling and the weekly chips claim keep working here. Genesis: see the notice in the Genesis card below.</li>
                     </ul>
@@ -242,7 +244,7 @@ export default function ArtifactsPage() {
                                 upgrade does not happen, the live deadline stands.
                             </li>
                             <li>
-                                What a Genesis Lunar Dust is after the upgrade: a free collectible with a cosmetic badge. No floor, no rebate, no burn boost,
+                                What a Genesis Lunar Dust is after the upgrade: a collectible with no floor and a cosmetic badge. No rebate, no burn boost,
                                 no chips, no ticket, and it is not needed to play any game. Recycling it returns only the record's rent. (This bullet is about
                                 Genesis Lunar Dust only; for every other Artifact see the notice at the top.)
                             </li>
@@ -294,5 +296,18 @@ export default function ArtifactsPage() {
                 ))}
             </div>
         </div>
+    );
+}
+
+const ArtifactsV3 = lazy(() => import('../v3/pages/ArtifactsV3'));
+
+/** Rules detection (src/v3/detect.ts): the upgraded program's page only once X1 shows the upgrade; the live page otherwise. */
+export default function ArtifactsPage() {
+    const rules3 = useRules3();
+    if (!rules3) return <ArtifactsPageV2 />;
+    return (
+        <Suspense fallback={<div className="text-center text-lunar-400 py-20">Loading…</div>}>
+            <ArtifactsV3 />
+        </Suspense>
     );
 }

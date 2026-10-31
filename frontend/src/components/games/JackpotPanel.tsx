@@ -11,12 +11,18 @@ import { useNow, usePoll, useTx } from '../../lib/hooks';
 import { AddrLink, Notice, Row, TxStatus, Xnt } from '../ui';
 import KnownIssues from './KnownIssues';
 import type { GameCtx } from './types';
+import { useRules3 } from '../../v3/detect';
+import { JACKPOT_MAX_POT, P2P_RAKE_BPS, RAKE_TO_ARCHITECT_BPS, RAKE_TO_POOL_BPS } from '../../v3/constants';
 
 const STATE = ['Open', 'Drawing', 'Settled', 'Refunded'];
 
-/** `exitsOnly` (R1): shown only when this wallet has a stake in the round or a refund to collect; close/settle/refund, no Enter. */
-export default function JackpotPanel({ ctx, exitsOnly = false }: { ctx: GameCtx; exitsOnly?: boolean }) {
+/** `exitsOnly` (R1): shown only when this wallet has a stake in the round or a refund to collect; close/settle/refund, no Enter.
+ *  `keeperDraws` (rules 3 only, src/v3/ui/GamesV3.tsx): the house keeper draws and settles on its hash chain, so the
+ *  slot-hash close/settle button of the live program is not offered. Absent on the live site. */
+export default function JackpotPanel({ ctx, exitsOnly = false, keeperDraws = false }: { ctx: GameCtx; exitsOnly?: boolean; keeperDraws?: boolean }) {
     const { provider, owner, player, refresh } = ctx;
+    // rules 3: the upgraded program's Jackpot (keeper hash chain, 20 XNT cap, new rake split); false on the live program
+    const upgraded = useRules3() || keeperDraws;
     const jp = usePoll(() => fetchJackpot(), [], 10_000);
     const refunds = usePoll(() => fetchPendingRefunds(), [], 60_000);
     const tx = useTx();
@@ -81,7 +87,10 @@ export default function JackpotPanel({ ctx, exitsOnly = false }: { ctx: GameCtx;
                     )}
                     {!exitsOnly && provider && lamports > balance && <p className="text-xs text-amber-400 mt-1">Above your game balance. Deposit first.</p>}
                     {exitsOnly && open && mine > 0 && <p className="text-xs text-lunar-400 mt-3">Your stake is in the current round; it can be closed once the round ends.</p>}
-                    {(ended || drawing) && (
+                    {(ended || drawing) && keeperDraws && (
+                        <p className="text-xs text-lunar-400 mt-3">The house keeper closes and draws this round on its hash chain; if it stalls, the round is refunded.</p>
+                    )}
+                    {(ended || drawing) && !keeperDraws && (
                         <button className="btn-outline !px-4 !py-2 text-sm mt-3 w-full" disabled={!provider || !!tx.busy}
                             onClick={() => provider && tx.run(ended ? 'Closing the round' : 'Settling the round', async () => {
                                 const sig = await advanceRound(provider, 'jackpot');
@@ -125,6 +134,15 @@ export default function JackpotPanel({ ctx, exitsOnly = false }: { ctx: GameCtx;
                 </div>
             </div>
 
+            {upgraded ? (
+                <p className="text-xs text-lunar-500 mt-4">
+                    Rules: the house keeper closes and draws each round on its hash chain; a stalled round is refunded, and so is a round with a single
+                    player. The pot is capped at {Number(JACKPOT_MAX_POT) / 1e9} XNT. One winner is drawn with probability proportional to the amount entered. Rake {Number(P2P_RAKE_BPS) / 100}% only when there is a winner
+                    ({Number(RAKE_TO_POOL_BPS) / 100}% reward pool, {Number(RAKE_TO_ARCHITECT_BPS) / 100}% architect; nothing to the Burn Lottery). Entries come from your game balance; prizes are credited to the
+                    winner's game balance. Only the wallet owner can enter: session keys (bots) cannot. Other entrants may be automated agents: the
+                    project's kit is public.
+                </p>
+            ) : <>
             <p className="text-xs text-lunar-500 mt-4">
                 Rules: the round closes {P.jackpotMinutes} minutes after the first entry. Then anyone can close it; one winner is drawn with
                 probability proportional to the amount entered, from the hash of a future slot. Rake {P.p2pRakePct}% only when there is a winner
@@ -136,6 +154,7 @@ export default function JackpotPanel({ ctx, exitsOnly = false }: { ctx: GameCtx;
                 keys (bots) cannot. Other entrants may be automated agents: the project's kit is public.
             </p>
             <KnownIssues ids={['GAM-1']} className="mt-4" />
+            </>}
         </div>
     );
 }

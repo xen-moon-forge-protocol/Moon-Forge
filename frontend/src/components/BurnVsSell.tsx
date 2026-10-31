@@ -19,6 +19,7 @@ import { CHAINS, EVM_CHAINS, formatNumber, formatUSD, normalizeAmountInput } fro
 import { useProtocol } from '../lib/hooks';
 import { Row } from './ui';
 import { xenMarketLive } from '../lib/market';
+import { useRules3 } from '../v3/detect';
 
 const WARP_FEE_USD = 1;
 const WARP_MIN_USD = 10;
@@ -55,6 +56,9 @@ export default function BurnVsSell({ chainKey: chainProp, xenAmount: amountProp,
     const [xntUsd, setXntUsd] = useState<number | null>(null);
     const [priceErr, setPriceErr] = useState<string | null>(null);
     const { data: proto } = useProtocol(60_000);
+    // rules 3: Artifacts give no burn boost and the upgraded program reserves no Forge Drop for a new epoch, so the boost
+    // selector and the boost / drop sentences are not shown. False on the live program, which keeps this card as it is.
+    const rules3 = useRules3();
 
     // follow the parent form when embedded in The Forge
     useEffect(() => { if (chainProp) setChainKey(chainProp); }, [chainProp]);
@@ -80,7 +84,7 @@ export default function BurnVsSell({ chainKey: chainProp, xenAmount: amountProp,
     const xen = Number(normalizeAmountInput(amount) ?? 0) || 0;
     const s = Math.min(50, Math.max(0, Number(slippage) || 0)) / 100;
     const value = xenUsd !== null && xen > 0 ? xen * xenUsd : null;
-    const boost = boostTier >= 0 ? ARTIFACTS[boostTier].boostPct / 100 : 0;
+    const boost = !rules3 && boostTier >= 0 ? ARTIFACTS[boostTier].boostPct / 100 : 0;
     const mult = P.tiers[tier].multiplier;
 
     // what this chain's XEN liquidity could really absorb (constant-product AMM) — used by BOTH routes
@@ -123,12 +127,12 @@ export default function BurnVsSell({ chainKey: chainProp, xenAmount: amountProp,
                 </div>
             )}
             <div className="grid grid-cols-2 gap-3 mb-3">
-                <label className="text-xs text-lunar-400">Artifact boost (raises your share only)
+                {!rules3 && <label className="text-xs text-lunar-400">Artifact boost (raises your share only)
                     <select className="input-forge mt-1 !py-2" value={boostTier} onChange={(e) => setBoostTier(Number(e.target.value))}>
                         <option value={-1}>None</option>
                         {ARTIFACTS.map((a) => <option key={a.tier} value={a.tier}>{a.name} (+{a.boostPct}%)</option>)}
                     </select>
-                </label>
+                </label>}
                 <label className="text-xs text-lunar-400">XNT buy slippage on XDEX (%)
                     <input className="input-forge mt-1 !py-2" inputMode="decimal" value={slippage} onChange={(e) => setSlippage(e.target.value)} />
                 </label>
@@ -157,8 +161,8 @@ export default function BurnVsSell({ chainKey: chainProp, xenAmount: amountProp,
                 Estimate only. The market route ignores gas and uses your slippage guess. Moon Forge pays your share of the epoch budget,
                 never more than the cap above; if many burners share a small budget, or others burn on the same chain, you receive less.
                 The oracle prices each burn at the burn-hour price of this chain's XEN (a 24 h median), which can differ from the spot price.
-                An Artifact boost only raises your share of the same epoch, never the total: if you are the only burner, it gains nothing.
-                Forge Drops (part of the budget, drawn at random) make individual results vary.
+                {!rules3 && <>{' '}An Artifact boost only raises your share of the same epoch, never the total: if you are the only burner, it gains nothing.
+                    Forge Drops (part of the budget, drawn at random) make individual results vary.</>}
                 {' '}Prices: XEN markets from GeckoTerminal, XNT from x1report.com.
                 {tier > 0 && ` ${P.tiers[tier].name} pays over ${P.tiers[tier].vestingDays} days.`}
                 {priceErr && ` (${priceErr})`}

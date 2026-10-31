@@ -19,6 +19,7 @@ import { countedUsd, useChainMarkets, weekCapacity } from '../lib/market';
 import { P, toXnt } from '../lib/protocol';
 import { useProtocol } from '../lib/hooks';
 import { fetchXntUsd } from './BurnVsSell';
+import { useRules3 } from '../v3/detect';
 
 const PRESETS = [1e9, 1e11, 1e12, 1e13, 1e14];
 const compactXen = (n: number) => (n >= 1e12 ? `${n / 1e12}T` : n >= 1e9 ? `${n / 1e9}B` : n >= 1e6 ? `${n / 1e6}M` : `${n}`);
@@ -35,6 +36,9 @@ export default function FairValueEngine({ compact = false }: { compact?: boolean
     const [xntUsd, setXntUsd] = useState<number | null>(null);
     const [amount, setAmount] = useState(1e12);
     const [tier, setTier] = useState(0);
+    // rules 3: the upgraded program reserves no Forge Drop for a new epoch, so the drop clause below is not shown
+    // (the capacity number keeps the drop deduction, which can only understate it). False on the live program.
+    const rules3 = useRules3();
     useEffect(() => { fetchXntUsd().then(setXntUsd).catch(() => undefined); }, [updatedAt]);
 
     const budgetXnt = proto.data ? toXnt(proto.data.nextEpochBudget) : null;
@@ -74,9 +78,10 @@ export default function FairValueEngine({ compact = false }: { compact?: boolean
 
             {cap && (
                 <div className={`rounded-xl p-3 text-sm ${cap.remainingUsd > 1 ? 'bg-green-500/10 text-green-200' : 'bg-amber-500/10 text-amber-200'}`}>
-                    <strong>Fair capacity this week:</strong> of the budget ({money(cap.budgetUsd)}), {money(cap.cashUsd)} is paid in XNT (the rest is drawn as Forge Drops),
-                    so XNT can pay at least the value of a sale for up to {money(cap.cashUsd)} of counted value in total (vesting tiers count 2× / 3×).
+                    <strong>Fair capacity this week:</strong>{rules3 ? '' : <> of the budget ({money(cap.budgetUsd)}), {money(cap.cashUsd)} is paid in XNT (the rest is drawn as Forge Drops),
+                    so</>} XNT can pay at least the value of a sale for up to {money(cap.cashUsd)} of counted value in total (vesting tiers count 2× / 3×).
                     {' '}Already burned this week: {money(cap.countedWeekUsd)}. <strong>Left: {money(cap.remainingUsd)}.</strong>
+                    {cap.unread.length > 0 && <> Not counted right now: {cap.unread.join(', ')} (could not be read), so what is left may be lower.</>}
                     {' '}Burns beyond that are still paid, but pro-rata, so they would likely pay less than selling. The capacity grows with the reward pool
                     (every game stake, Artifact sale and donation adds to it).
                 </div>
@@ -130,7 +135,7 @@ export default function FairValueEngine({ compact = false }: { compact?: boolean
                                             {stale ? <span className="text-amber-300"> · source busy, last value shown</span> : ''}
                                         </div>
                                     </td>
-                                    <td className="py-2 pr-3 text-right font-mono tabular-nums">{loading ? '…' : c.ok ? money(c.marketValue) : 'no market'}</td>
+                                    <td className="py-2 pr-3 text-right font-mono tabular-nums">{loading ? '…' : c.ok ? money(c.marketValue) : typeof c.r === 'object' && c.r.marketError ? 'source busy · retry' : 'no market'}</td>
                                     <td className="py-2 pr-3 text-right font-mono tabular-nums">{c.ok ? money(c.L) : loading ? '…' : '--'}</td>
                                     <td className="py-2 pr-3 text-right font-mono tabular-nums">{c.ok ? (live ? money(c.weekUsd) : '—') : loading ? '…' : '--'}</td>
                                     <td className="py-2 pr-3 text-right font-mono tabular-nums">{c.ok ? pct(c.factor) : loading ? '…' : '--'}</td>

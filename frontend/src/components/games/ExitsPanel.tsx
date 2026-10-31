@@ -15,8 +15,11 @@ import MoonWarsReal from './MoonWarsReal';
 import PredictionExits from './PredictionsPanel';
 import { PendingHouseBets } from './HouseGames';
 import type { GameCtx } from './types';
+import { useRules3 } from '../../v3/detect';
 
 export default function ExitsPanel({ ctx }: { ctx: GameCtx }) {
+    // rules 3 (src/v3/detect.ts): the Jackpot is closed and drawn by the house keeper; false on the live program
+    const rules3 = useRules3();
     return (
         <section className="mt-6 space-y-4" aria-labelledby="exits-title">
             <div className="glass-card">
@@ -38,7 +41,7 @@ export default function ExitsPanel({ ctx }: { ctx: GameCtx }) {
                     <BeTheHouse ctx={ctx} exitsOnly />
                     <DuelPanel ctx={ctx} exitsOnly />
                     <MoonWarsReal ctx={ctx} exitsOnly />
-                    <JackpotPanel ctx={ctx} exitsOnly />
+                    <JackpotPanel ctx={ctx} exitsOnly keeperDraws={rules3} />
                     <LotteryPanel ctx={ctx} exitsOnly />
                     <PredictionExits ctx={ctx} />
                 </>

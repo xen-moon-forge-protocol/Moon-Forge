@@ -4,6 +4,9 @@
  * aggregator price are ignored; spot = reserve-weighted price; XEN-side liquidity = half the reserves.
  * Plus on-chain state per chain: XEN supply and XEN burned through the Moon Forge portal.
  * Results are cached for 5 minutes; GeckoTerminal calls are queued and retried when throttled.
+ * E2E-site-chains: every chain is read on its own, every read has a time limit (READ_TIMEOUT_MS), and a source that
+ * fails or throttles is an error of that chain ("source busy"), never "no market": one slow or throttled chain no
+ * longer holds the others, and only that chain's burn waits for its data.
  */
 import { useEffect, useState } from 'react';
 import { ethers } from 'ethers';
@@ -12,6 +15,22 @@ import { fetchEpochFile, fetchEpochIndex, P, PORTAL_ABI } from './protocol';
 
 const GT = 'https://api.geckoterminal.com/api/v2';
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+/** A read that has not answered after this long counts as failed for its chain (it is retried at the next refresh). */
+export const READ_TIMEOUT_MS = 20_000;
+/** The promise, or a rejection after `ms` (the late answer is ignored). */
+export function withTimeout<T>(p: Promise<T>, ms: number, what: string): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+        const t = setTimeout(() => reject(new Error(`${what}: no answer within ${Math.round(ms / 1000)} s`)), ms);
+        p.then((v) => { clearTimeout(t); resolve(v); }, (e) => { clearTimeout(t); reject(e); });
+    });
+}
+const timeoutSignal = (ms: number): AbortSignal | undefined => {
+    try {
+        return typeof AbortSignal !== 'undefined' && typeof (AbortSignal as any).timeout === 'function' ? (AbortSignal as any).timeout(ms) : undefined;
+    } catch {
+        return undefined;
+    }
+};
 
 /** GeckoTerminal's free API allows about 30 calls a minute and answers 429 to bursts:
  *  calls go out one at a time, spaced, and a throttled call is retried with backoff. */
@@ -19,7 +38,8 @@ let gtQueue: Promise<unknown> = Promise.resolve();
 function gtJson(url: string): Promise<any> {
     const run = async () => {
         for (let i = 0; i < 4; i++) {
-            const r = await fetch(url, { headers: { accept: 'application/json' } }).catch(() => null);
+            // a hung call would hold every later call in the queue: each attempt has a time limit
+            const r = await withTimeout(fetch(url, { headers: { accept: 'application/json' }, signal: timeoutSignal(READ_TIMEOUT_MS) }), READ_TIMEOUT_MS + 1_000, 'GeckoTerminal').catch(() => null);
             if (r && r.status === 429) { await sleep(2500 * 2 ** i); continue; }
             return r && r.ok ? r.json() : null;
         }
@@ -108,12 +128,13 @@ export function chainBurnState(chainKey: string): Promise<{ supply: number | nul
         const c = CHAINS[chainKey];
         const p = new ethers.JsonRpcProvider(c.rpcUrl, c.chainId, { staticNetwork: true });
         const xen = new ethers.Contract(c.xenToken, ['function totalSupply() view returns (uint256)'], p);
-        const supply = await xen.totalSupply().then((v: bigint) => Number(ethers.formatUnits(v, 18))).catch(() => null);
-        let burnedAllTime: number | null = 0;
+        const supplyP = withTimeout<bigint>(xen.totalSupply(), READ_TIMEOUT_MS, `${c.name} RPC`).then((v) => Number(ethers.formatUnits(v, 18))).catch(() => null);
+        let burnedP: Promise<number | null> = Promise.resolve(0);
         if (isPortalDeployed(chainKey)) {
             const portal = new ethers.Contract(c.portalAddress, PORTAL_ABI, p);
-            burnedAllTime = await portal.totalBurned().then((v: bigint) => Number(ethers.formatUnits(v, 18))).catch(() => null);
+            burnedP = withTimeout<bigint>(portal.totalBurned(), READ_TIMEOUT_MS, `${c.name} RPC`).then((v) => Number(ethers.formatUnits(v, 18))).catch(() => null);
         }
+        const [supply, burnedAllTime] = await Promise.all([supplyP, burnedP]);
         return { supply, burnedAllTime };
     });
 }
@@ -159,12 +180,13 @@ export function useChainMarkets(refreshMs = 300_000, compare = false) {
     useEffect(() => {
         let alive = true;
         (async () => {
-            const counted = await burnedInPublishedEpochs().catch(() => new Map<number, number>());
-            for (const k of EVM_CHAINS) {
-                if (!readByDefault(k) && !compare) continue;
-                const [m, state] = await Promise.all([
+            const countedP = burnedInPublishedEpochs().catch(() => new Map<number, number>());
+            // every chain on its own (E2E-site-chains): a slow or failing chain sets only its own row
+            await Promise.all(EVM_CHAINS.filter((k) => readByDefault(k) || compare).map(async (k) => {
+                const [m, state, counted] = await Promise.all([
                     xenMarketLive(k).then((market) => ({ market, err: false }), () => ({ market: null, err: true })),
                     chainBurnState(k).catch(() => ({ supply: null, burnedAllTime: null })),
+                    countedP,
                 ]);
                 if (!alive) return;
                 const burnedWeek = state.burnedAllTime === null ? null : Math.max(0, state.burnedAllTime - (counted.get(CHAINS[k].chainId) ?? 0));
@@ -174,7 +196,7 @@ export function useChainMarkets(refreshMs = 300_000, compare = false) {
                     if (m.err && oldRow?.market) return { ...prev, [k]: { ...oldRow, stale: true } };
                     return { ...prev, [k]: { market: m.market, supply: state.supply ?? oldRow?.supply ?? null, burnedWeek, stale: false, marketError: m.err } };
                 });
-            }
+            }));
             if (alive) setUpdatedAt(Date.now());
         })();
         return () => { alive = false; };
@@ -197,23 +219,27 @@ export function countedUsd(m: XenMarketLive, burnedWeekXen: number, xen: number)
  * capacity = that XNT part in USD; remaining = capacity − counted value already burned this week.
  * Approximate before the epoch: other people's tiers (Orbit / Moon Landing count 2× / 3×) and the burn-hour
  * prices are known only when it is built, so other burns are counted at 1× here.
+ * Null while a live chain is still being read (each read is time-limited) or when no live chain could be read. A chain
+ * whose burns this week could not be valued (its portal or its market did not answer) is left out and named in
+ * `unread`, so the page can say the capacity left may be lower than shown, instead of blocking every chain.
  */
 export function weekCapacity(rows: Record<string, ChainRow>, budgetXnt: number | null, xntUsd: number | null, rateCapK: number) {
     if (budgetXnt === null || !xntUsd) return null;
     let counted = 0;
+    let read = 0;
+    const unread: string[] = [];
     for (const k of EVM_CHAINS) {
         if (!isPortalDeployed(k)) continue;
         const r = rows[k];
-        // Unknown until every live chain is read: a burn on a chain whose market failed to load would
-        // otherwise count as $0 and overstate what is left.
-        if (r === 'loading' || r === 'off' || r.burnedWeek === null) return null;
+        if (r === 'loading' || r === 'off') return null;
+        // a burn on a chain whose market failed to load would count as $0 and overstate what is left: name it instead
+        if (r.burnedWeek === null || (!r.market && r.marketError && r.burnedWeek > 0)) { unread.push(CHAINS[k].name); continue; }
+        read++;
         if (!r.burnedWeek) continue;
-        if (!r.market) {
-            if (r.marketError) return null;
-            continue; // no eligible market at all: the oracle values these burns at 0 too
-        }
+        if (!r.market) continue; // no eligible market at all: the oracle values these burns at 0 too
         counted += countedUsd(r.market, 0, r.burnedWeek);
     }
+    if (read === 0) return null;
     const budgetUsd = budgetXnt * xntUsd;
     const dropXnt = Math.min((budgetXnt * P.dropBudgetPct) / 100, P.maxDropsPerEpoch * P.dropBackingXnt);
     const cashUsd = (budgetXnt - dropXnt) * xntUsd;
@@ -226,5 +252,7 @@ export function weekCapacity(rows: Record<string, ChainRow>, budgetXnt: number |
         remainingUsd: Math.max(0, cashUsd - counted),
         /** XNT-dollars paid per counted dollar if nothing else is burned this week (capped at K) */
         rateNow: counted > 0 ? Math.min(rateCapK, budgetUsd / counted) : rateCapK,
+        /** live chains whose burns this week could not be valued right now (left out of countedWeekUsd) */
+        unread,
     };
 }

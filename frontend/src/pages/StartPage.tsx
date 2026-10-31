@@ -14,7 +14,7 @@ import { useChainMarkets, weekCapacity } from '../lib/market';
 import { money } from '../components/FairValueEngine';
 import { AddrLink, Notice, Xnt } from '../components/ui';
 import { DATED, INTERIM } from '../content/interim';
-import { LINKS, LINKS_URL, PUBLIC_PLACES } from '../lib/links';
+import { LINKS, LINKS_URL, officialLink, PUBLIC_PLACES } from '../lib/links';
 import { faq as FAQ } from '../facts';
 
 const WEEK = 7 * 86_400;
@@ -154,6 +154,7 @@ export default function StartPage() {
                         that XEN would return, in XNT alone (the liquidity discount is the same math as selling into the pool); beyond it, burns are paid pro-rata and likely pay less.
                         Vesting tiers count 2× / 3× toward it.
                         The Forge checks your burn against it before you sign.
+                        {cap.unread.length > 0 && <> Not counted right now: {cap.unread.join(', ')} (could not be read), so what is left may be lower.</>}
                     </p>
                 )}
                 <p className="text-xs text-lunar-500">
@@ -308,7 +309,7 @@ export default function StartPage() {
                         {LINKS.never.map((n) => <li key={n}>{n}</li>)}
                     </ul>
                     <p className="text-xs text-lunar-500 mt-3">
-                        Official places only: <Places />. {LINKS.notOfficial}{' '}
+                        Official places only: <Places />. {LINKS.notOfficial} X: {officialLink('x')?.note}{' '}
                         <a className="text-forge-orange hover:underline" href={LINKS_URL} target="_blank" rel="noopener noreferrer">This list as a file (links.json)</a>.
                     </p>
                 </div>

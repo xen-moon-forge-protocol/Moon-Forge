@@ -17,6 +17,7 @@ import { useNow, usePoll, useTx } from '../../lib/hooks';
 import { AddrLink, Notice, TxStatus, Xnt } from '../ui';
 import KnownIssues from './KnownIssues';
 import { ELEMENT_ICONS, type GameCtx } from './types';
+import { useRules3 } from '../../v3/detect';
 
 const STATE_LABEL = ['Waiting for an opponent', 'Starting (waiting for the seed block)', 'In progress', 'Finished, waiting for payout'];
 
@@ -137,8 +138,13 @@ function Match({ ctx, w, onDone }: { ctx: GameCtx; w: { publicKey: PublicKey; ac
     );
 }
 
-/** `exitsOnly` (R1): only this wallet's existing matches (moves, start, cancel, timeout, payout); no create and no join. */
-export default function MoonWarsReal({ ctx, exitsOnly = false }: { ctx: GameCtx; exitsOnly?: boolean }) {
+/** `exitsOnly` (R1): only this wallet's existing matches (moves, start, cancel, timeout, payout); no create and no join.
+ *  Under rules 3 (the upgraded program; src/v3/detect.ts) only that exits view is ever rendered: real matches stay paused on
+ *  this site until a keeper meets its service level for a week, and the live program's rake, shuffle and ticket texts
+ *  below no longer describe the program. False on the live program, which keeps this panel as it is. */
+export default function MoonWarsReal({ ctx, exitsOnly: exitsOnlyProp = false }: { ctx: GameCtx; exitsOnly?: boolean }) {
+    const rules3 = useRules3();
+    const exitsOnly = exitsOnlyProp || rules3;
     const { provider, owner, player, refresh } = ctx;
     const wars = usePoll(() => fetchWars(owner), [owner?.toBase58()], exitsOnly ? 15_000 : 4000);
     const arts = usePoll(() => (owner ? fetchMyArtifacts(owner) : Promise.resolve([])), [owner?.toBase58()], 60_000);

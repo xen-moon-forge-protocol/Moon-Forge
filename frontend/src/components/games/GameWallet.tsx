@@ -10,10 +10,13 @@ import { formatNumber, parseXNT, PROJECT_LINKS, shortenAddress } from '../../lib
 import { useTx, useNow } from '../../lib/hooks';
 import { Row, TxStatus, Xnt } from '../ui';
 import type { GameCtx } from './types';
+import { useRules3 } from '../../v3/detect';
 
 /** `exitsOnly` (R1): balance and Withdraw only, for "Your balances and exits" outside the play notice (no deposit, no session key). */
 export default function GameWallet({ ctx, exitsOnly = false }: { ctx: GameCtx; exitsOnly?: boolean }) {
     const { provider, player, refresh } = ctx;
+    // rules 3 (src/v3/detect.ts): chips are retired by the upgraded program, so the chips tile is not shown; false on the live program
+    const rules3 = useRules3();
     const tx = useTx();
     const now = useNow(10_000);
     const [dep, setDep] = useState('');
@@ -43,10 +46,12 @@ export default function GameWallet({ ctx, exitsOnly = false }: { ctx: GameCtx; e
                     <div className="text-xs text-lunar-400">Balance</div>
                     <div className="font-space text-xl text-forge-gold"><Xnt lamports={balance} /></div>
                 </div>
-                <div>
-                    <div className="text-xs text-lunar-400">Lottery chips</div>
-                    <div className="font-space text-xl text-white">{player ? formatNumber(Number(player.chips)) : '--'}</div>
-                </div>
+                {!rules3 && (
+                    <div>
+                        <div className="text-xs text-lunar-400">Lottery chips</div>
+                        <div className="font-space text-xl text-white">{player ? formatNumber(Number(player.chips)) : '--'}</div>
+                    </div>
+                )}
             </div>
             {!player && provider && <p className="text-xs text-lunar-400 mb-3">{exitsOnly ? 'No game wallet for this X1 wallet: nothing to withdraw.' : 'No game wallet yet: your first deposit creates it (a small rent deposit, which is not refundable).'}</p>}
 

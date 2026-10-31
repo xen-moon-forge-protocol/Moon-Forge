@@ -23,6 +23,10 @@ import { usePoll, useProtocol } from '../lib/hooks';
 import { DATED, INTERIM, NEUTRAL } from '../content/interim';
 import { LINKS, LINKS_URL } from '../lib/links';
 import { deniedDestination, inspectDestination } from '../lib/destination';
+import { boundaryHold as boundaryHoldOf, useDetection } from '../v3/detect';
+import { BoundaryNotice, HowV3Card, QuotePanel, type V3Gate } from '../v3/ui/QuotePanel';
+import { V3_BOUNDARY } from '../v3/facts-v3';
+import { KEEPER_TIP_MIN_CLAIM as KEEPER_TIP_MIN_CLAIM_V3 } from '../v3/constants';
 
 /** Below this free reward pool the UI warns burners that the next epoch can pay little. */
 const LOW_POOL_XNT = 100;
@@ -54,6 +58,21 @@ export default function TheForge() {
     const [burnHash, setBurnHash] = useState<string | null>(null);
     const [result, setResult] = useState<ReturnType<typeof parseMissionStarted>>(null);
     const [error, setError] = useState<string | null>(null);
+    // Rewards v3 (src/v3/detect.ts: the newest epoch file is version 3, or the announced boundary transaction is the newest
+    // publication): the binding quote replaces the v2 estimate. False on the live oracle, which keeps this page exactly as it is.
+    const det = useDetection();
+    const v3 = det.rewards === 3;
+    // The live (v2) estimate and the burn on v2 checks: always while no boundary is announced (today); once it is, only
+    // while detection positively reads rewards 2 before the planned date and before the boundary transaction exists.
+    // Otherwise the burn is held (fail-closed: a failed read after the announcement never falls back to the v2 estimate).
+    // The clock is read at render; the 60 s pool polls below re-render the page.
+    const hold = v3 ? null : boundaryHoldOf(det.rewards, V3_BOUNDARY, Date.now());
+    const v2Path = !v3 && hold === null;
+    const boundaryHold = !v3 && !v2Path;
+    // Rules 3 (the upgraded program writes no drop reserve for a new epoch; Artifacts give no boost, chips or ticket):
+    // the drop and boost texts below describe only the program before the upgrade. False on the live program.
+    const rules3 = det.rules === 3;
+    const [v3Gate, setV3Gate] = useState<V3Gate>({ ok: false, requote: async () => false });
 
     // Prefill the destination once from the connected X1 wallet (never overwrite what the user typed).
     useEffect(() => {
@@ -126,7 +145,8 @@ export default function TheForge() {
     const fair = useMemo(() => {
         const cap = weekCapacity(markets.rows, poolNow ? Number(poolNow.nextEpochBudget) / 1e9 : null, xntUsd, P.rateCapK);
         const r = markets.rows[chainKey];
-        if (!cap || !amountWei || typeof r !== 'object' || !r.market) return null;
+        // this chain's own market and its own burns this week must be known (another chain's failure only adds a caveat)
+        if (!cap || !amountWei || typeof r !== 'object' || !r.market || r.burnedWeek === null) return null;
         const xen = Number(ethers.formatUnits(amountWei, 18));
         const counted = countedUsd(r.market, r.burnedWeek ?? 0, xen);
         const score = counted * P.tiers[tier].multiplier;
@@ -143,7 +163,8 @@ export default function TheForge() {
     // Fail closed: without this chain's market and the week's capacity there is no quote to check the burn against.
     const quoteMissing = amountWei !== null && !fair;
     const destSafe = destCheck.ok && destAcct.data !== null && !destAcct.loading && !destBlocked && (!destUnusual || destRiskAck);
-    const canBurn = !!evmAddress && portalReady && amountWei !== null && !overBalance && destSafe && ack && !!fair && (fair.fits || overAck) && !busy;
+    const quoteOk = v3 ? v3Gate.ok : v2Path ? !!fair && (fair.fits || overAck) : false;
+    const canBurn = !!evmAddress && portalReady && amountWei !== null && !overBalance && destSafe && ack && quoteOk && !busy;
 
     const handleBurn = async () => {
         if (!amountWei || !window.ethereum) return;
@@ -163,6 +184,9 @@ export default function TheForge() {
                 if (Number(net.chainId) !== chain.chainId) throw new Error(`Your wallet is still on chain ${net.chainId}. Switch to ${chain.name} and retry.`);
             }
             const signer = await provider.getSigner();
+
+            // rewards v3: re-quote from fresh data right before signing; refuse if the quote got worse than what was shown
+            if (v3 && !(await v3Gate.requote())) throw new Error('The quote changed since it was shown (or could not be recomputed). Review the new numbers and confirm again.');
 
             // 2. exact-amount approve (only if needed) + enterForge
             const receipt = await burnXen(signer, chain.portalAddress, chain.xenToken, amountWei, tier, dest.trim(), (s, hash) => {
@@ -217,7 +241,9 @@ export default function TheForge() {
                 </Notice>
             )}
 
-            {pool && (
+            {V3_BOUNDARY && <BoundaryNotice boundary={V3_BOUNDARY} className="mb-6" />}
+
+            {pool && v2Path && !rules3 && (
                 <Notice kind="info" className="mb-6">
                     <strong>Forge Drops:</strong> up to {P.dropBudgetPct}% of each epoch budget (max {P.maxDropsPerEpoch * P.dropBackingXnt} XNT) is drawn
                     among that epoch's burners as Lunar Dust Artifacts whose floor is the drop value (at least {P.dropBackingXnt} XNT). Drops are part of
@@ -382,7 +408,7 @@ export default function TheForge() {
                                 {destKind?.kind === 'unknown' && (
                                     <p className="mt-1 text-xs text-amber-400">This address could not be checked on X1 right now (RPC unavailable). Make sure it is your own X1 wallet.</p>
                                 )}
-                                {artifactElsewhere && (
+                                {artifactElsewhere && v2Path && !rules3 && (
                                     <p className="mt-1 text-xs text-amber-400">
                                         Your connected X1 wallet holds {walletArtifacts.data} Artifact{walletArtifacts.data === 1 ? '' : 's'} and this destination holds none.
                                         Under the current rules the Artifact boost counts only for burns whose destination is the wallet holding the Artifact at two
@@ -408,20 +434,53 @@ export default function TheForge() {
                                 </ul>
                             </div>
 
-                            {quoteMissing && portalReady && (
+                            {v3 && portalReady && (
+                                <QuotePanel chainKey={chainKey} chainId={chain.chainId} amountWei={amountWei} tier={tier} busy={busy} onGate={setV3Gate} x1={destKey} />
+                            )}
+
+                            {boundaryHold && portalReady && (
+                                <Notice kind="warn" className="mb-4">
+                                    <div className="font-bold text-white">Burning from this page is paused right now</div>
+                                    <div>
+                                        {hold === 'tx-known'
+                                            ? 'Burns sent now are paid under the v3 rules, and this page could not yet confirm the boundary in the published epoch files, so it has no quote to show.'
+                                            : hold === 'date-reached'
+                                                ? `The last epoch under the current reward rules is planned for publication on ${V3_BOUNDARY?.date ?? 'the announced date'} (UTC), and a burn made after its publish transaction is paid under the v3 rules. From that date this page holds the burn until an update of this site names that transaction${V3_BOUNDARY?.releaseUtc ? ` (planned for ${V3_BOUNDARY.releaseUtc} UTC)` : ''}. A burn made after that transaction is never paid under the current rules: if the final upgrade comes later, it waits for the first epoch built under the v3 rules, with its own time.`
+                                                : det.pending
+                                                    ? 'This page is still reading the published epoch files to tell which reward rules a burn sent now falls under.'
+                                                    : 'This page could not read the published epoch files, so it cannot tell which reward rules a burn sent now falls under.'}
+                                        {hold === 'date-reached' ? '' : ' It checks again every few minutes; reload the page to retry now.'}
+                                        {' '}Nothing here stops a burn you send from another client, and such a burn is scored under the published rules.
+                                    </div>
+                                </Notice>
+                            )}
+
+                            {v2Path && quoteMissing && portalReady && (
                                 <Notice kind="warn" className="mb-4">
                                     <div>
-                                        No quote yet: the XEN market data for {chain.name} or this week's capacity has not loaded (the price source may be busy, or this chain has no
-                                        eligible market). Burning stays disabled until it loads, because without a market price a burn can be valued at $0.
+                                        {(() => {
+                                            // E2E-site-chains: say which source is missing; a busy or rate-limited source is not "no market"
+                                            const row = markets.rows[chainKey];
+                                            if (row === 'loading') return `Loading the XEN market of ${chain.name} and this week's burns there. Burning stays disabled until they load.`;
+                                            if (typeof row === 'object' && !row.market && row.marketError) return `No quote yet: the XEN price source did not answer for ${chain.name} (busy or rate-limited; this does not mean it has no market). Burning on ${chain.name} stays disabled until it loads; other chains are not affected.`;
+                                            if (typeof row === 'object' && !row.market) return `${chain.name} has no eligible XEN market right now, so a burn there would be valued at $0. Burning on ${chain.name} stays disabled until it has one.`;
+                                            if (typeof row === 'object' && row.burnedWeek === null) return `No quote yet: the portal on ${chain.name} could not be read (its RPC did not answer), so this week's burns there are unknown. Burning on ${chain.name} stays disabled until it loads; other chains are not affected.`;
+                                            return 'No quote yet: this week\'s capacity has not loaded (the reward pool, the XNT price or another chain is still being read). Burning stays disabled until it loads, because without it a burn cannot be checked against the capacity.';
+                                        })()}
                                     </div>
                                     <button onClick={markets.refresh} className="btn-outline !px-3 !py-1 text-sm mt-2" disabled={busy}>Retry</button>
                                 </Notice>
                             )}
 
-                            {fair && (fair.fits ? (
+                            {v2Path && fair && fair.unread.length > 0 && (
+                                <p className="text-xs text-amber-400 mb-2">
+                                    Not counted right now: this week's burns on {fair.unread.join(', ')} (the data could not be read), so the capacity left may be lower than shown below.
+                                </p>
+                            )}
+                            {v2Path && fair && (fair.fits ? (
                                 <Notice kind="success" className="mb-4">
                                     Fits this week's fair capacity ({money(fair.remainingUsd)} left). This burn counts for about {money(fair.counted)}{tierInfo.multiplier > 1 ? ` (×${tierInfo.multiplier} for ${tierInfo.name})` : ''};
-                                    at today's numbers the epoch should pay about {money(fair.estimateUsd)} in XNT, at least what selling it would return, plus (under the current rules) a chance at a Forge Drop.
+                                    at today's numbers the epoch should pay about {money(fair.estimateUsd)} in XNT, at least what selling it would return{rules3 ? '. ' : ', plus (under the current rules) a chance at a Forge Drop. '}
                                     It can still drop if others burn before Sunday, and other people's Orbit / Moon Landing burns weigh 2× / 3×.
                                     {' '}Gas is paid separately (two transactions: approve, then burn) and your wallet shows it before you sign: if it is more than {money(fair.estimateUsd)}, this burn costs more than it pays.
                                 </Notice>
@@ -480,22 +539,22 @@ export default function TheForge() {
 
                 {/* Side: how the payout works */}
                 <div className="space-y-6">
-                    <div className="glass-card">
+                    {v3 ? <HowV3Card /> : v2Path ? <div className="glass-card">
                         <h3 className="font-space text-lg text-forge-gold mb-3">How your payout is computed</h3>
                         <ul className="text-sm text-lunar-300 space-y-2 list-disc list-inside">
                             <li>Value of a burn = XEN amount × burn-hour price of that chain's XEN × L/(L+V), a liquidity discount (L = XEN-side liquidity of that chain's eligible pools, V = total value burned on that chain in the epoch).</li>
-                            <li>Score = value × tier multiplier ({tierInfo.multiplier}× for {tierInfo.name}) × your best Artifact boost.</li>
-                            <li>Each epoch budget is at most {P.epochBudgetBps / 100}% of the free reward pool, split by score (Forge Drops are part of it).</li>
-                            <li>An epoch pays at most {P.tiers.map((t) => `${P.rateCapK * t.multiplier}×`).join(' / ')} the liquidity-adjusted value burned ({P.tiers.map((t) => t.name).join(' / ')}), Forge Drops included, in XNT at the epoch price. Boosts only shift shares between burners of the same epoch, never the total. Whatever is not paid stays in the pool.</li>
+                            <li>Score = value × tier multiplier ({tierInfo.multiplier}× for {tierInfo.name}){rules3 ? '.' : ' × your best Artifact boost.'}</li>
+                            <li>Each epoch budget is at most {P.epochBudgetBps / 100}% of the free reward pool, split by score{rules3 ? '.' : ' (Forge Drops are part of it).'}</li>
+                            <li>An epoch pays at most {P.tiers.map((t) => `${P.rateCapK * t.multiplier}×`).join(' / ')} the liquidity-adjusted value burned ({P.tiers.map((t) => t.name).join(' / ')}){rules3 ? '' : ', Forge Drops included,'} in XNT at the epoch price.{rules3 ? '' : ' Boosts only shift shares between burners of the same epoch, never the total.'} Whatever is not paid stays in the pool.</li>
                             <li>Launchpad is paid at claim. Orbit and Moon Landing vest linearly from the claim; vested XNT is withdrawn with "Withdraw vested" (anyone can push it; the keeper does not). Claim within {P.claimWindowDays} days of the epoch, or the amount returns to the pool.</li>
-                            <li>When the public keeper is running it may submit your claim for you (its runs are irregular and can be hours or days late); its tip ({P.keeperTip} XNT per claim of at least {P.keeperTipMinClaim} XNT) is paid by the pool, never from your amount.</li>
+                            <li>When the public keeper is running it may submit your claim for you (its runs are irregular and can be hours or days late); its tip ({P.keeperTip} XNT per claim of at least {rules3 ? Number(KEEPER_TIP_MIN_CLAIM_V3) / 1e9 : P.keeperTipMinClaim} XNT) is paid by the pool, never from your amount.</li>
                             <li className="text-lunar-500">
                                 {DATED}: these are the current oracle rules. They are scheduled to be replaced ({INTERIM.rulesChangeWhen}); every burn made before that
                                 date is scored under the rules of the epoch it falls in. What replaces them is published with the announcement, not before.
                             </li>
                         </ul>
-                    </div>
-                    <BurnVsSell chainKey={chainKey} xenAmount={amount} tier={tier} compact />
+                    </div> : null}
+                    {v2Path && <BurnVsSell chainKey={chainKey} xenAmount={amount} tier={tier} compact />}
                     <div className="glass-card text-sm text-lunar-300">
                         <div className="text-white font-medium mb-1">Once your XNT arrives</div>
                         It is an ordinary X1 balance in your wallet: keep it, move it, or use it anywhere on X1. Nothing here needs you to do anything else with it.
@@ -503,7 +562,7 @@ export default function TheForge() {
                     </div>
                 </div>
             </div>
-            <div className="mt-6"><FairValueEngine compact /></div>
+            {v2Path && <div className="mt-6"><FairValueEngine compact /></div>}
         </div>
     );
 }

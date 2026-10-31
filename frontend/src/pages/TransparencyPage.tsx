@@ -14,6 +14,10 @@ import { LINKS, LINKS_URL } from '../lib/links';
 import { AddrLink, Notice, Row, Xnt } from '../components/ui';
 import FairValueEngine from '../components/FairValueEngine';
 import { INTERIM } from '../content/interim';
+import { lazy, Suspense } from 'react';
+import { useRules3 } from '../v3/detect';
+
+const UpgradedProgramCard = lazy(() => import('../v3/ui/UpgradedProgramCard'));
 
 const n = (x: any): number | null => (x === null || x === undefined ? null : Number(x.toString()));
 const ts = (x: any) => (n(x) ? new Date(n(x)! * 1000).toLocaleString() : '--');
@@ -30,6 +34,7 @@ export default function TransparencyPage() {
     const authority = upg.data?.authority;
     // "No authority" is shown only when the ProgramData account was actually read; any failed or partial read shows "--".
     const noAuthority = !upg.error && !!upg.data && !authority && !!upg.data.programData && upg.data.lastDeploySlot !== null;
+    const rules3 = useRules3();
 
     return (
         <div className="max-w-6xl mx-auto space-y-8">
@@ -39,6 +44,13 @@ export default function TransparencyPage() {
                     Live state of the Moon Forge program on X1, the full list of who can do what, every fee, and how to verify each epoch yourself.
                 </p>
             </div>
+
+            {/* rules 3 (src/v3/detect.ts): the accounts and IDL of the upgraded program; nothing on the live program */}
+            {rules3 && (
+                <Suspense fallback={null}>
+                    <UpgradedProgramCard />
+                </Suspense>
+            )}
 
             {/* Verify you are on the real site (X-064 / T9-30): the facts come verbatim from public/links.json */}
             <section className="glass-card">

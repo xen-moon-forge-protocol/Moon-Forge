@@ -1,11 +1,11 @@
 {
   "version": 1,
-  "updated": "2026-10-24",
+  "updated": "2026-10-31",
   "site": "https://xen-moon-forge-protocol.github.io/Moon-Forge/",
   "official": [
     { "id": "site", "label": "Site", "url": "https://xen-moon-forge-protocol.github.io/Moon-Forge/", "note": "The only place to burn, claim, forge or play. Check the address bar: xen-moon-forge-protocol.github.io/Moon-Forge/." },
     { "id": "github", "label": "GitHub", "url": "https://github.com/xen-moon-forge-protocol/Moon-Forge", "note": "Source code, documents, epoch files, releases, issues." },
-    { "id": "x", "label": "X", "url": "https://x.com/MoonXenForge", "handle": "@MoonXenForge", "note": "Announcements only. The account never sends DMs first." },
+    { "id": "x", "label": "X", "url": "https://x.com/MoonXenForge", "handle": "@MoonXenForge", "note": "Announcements only. The account never sends DMs first. Posts dated before 2026-10-01 describe earlier plans and are outdated: the current rules are on this site and in the GitHub repository (notice of 2026-10-31)." },
     { "id": "mailbox", "label": "Project mailbox", "url": "mailto:xen-moon-forge-protocol@tutamail.com", "note": "Security and support only; this is also the private channel for vulnerability reports (see /.well-known/security.txt). Nobody writes to you first from this address." }
   ],
   "securityTxt": {

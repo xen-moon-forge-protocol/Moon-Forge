@@ -250,6 +250,8 @@ export const oldBurns =
 export const never: readonly string[] = linksJson.never;
 /** "Nothing else is official" sentence, from public/links.json. */
 export const notOfficial: string = linksJson.notOfficial;
+/** The X account's note (announcements only; posts dated before 2026-10-01 are outdated), from public/links.json. */
+export const xNote: string = linksJson.official.find((l) => l.id === 'x')?.note ?? '';
 /** The facts that identify the real Moon Forge (X-064), from public/links.json. */
 export const verify = linksJson.verify;
 
@@ -388,7 +390,7 @@ export const sitemapFiles: readonly string[] = ['llms.txt', 'llms-full.txt', 'ag
 
 export const facts = {
     INTERIM, rules, identity, officialLinks, chains, liveChains, epochRules, tiers, fees, artifacts, forgeSplit, artifactRules,
-    games, gameRules, notices, disambiguation, oldBurns, never, notOfficial, verify, risks, trust, verifyChecklist, steps, faq, whitepaper, routes, sitemapFiles,
+    games, gameRules, notices, disambiguation, oldBurns, never, notOfficial, xNote, verify, risks, trust, verifyChecklist, steps, faq, whitepaper, routes, sitemapFiles,
 } as const;
 
 // ── Drift guard: the identity facts above must equal public/links.json (one source for every surface, T9-30 / X-064) ──

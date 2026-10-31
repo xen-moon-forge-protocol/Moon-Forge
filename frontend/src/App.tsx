@@ -14,6 +14,9 @@ import { Notice, StatTile, Xnt } from './components/ui';
 import { useProtocol } from './lib/hooks';
 import { ARTIFACTS, FORGE_SPLIT, P } from './lib/protocol';
 import { formatNumber } from './lib/constants';
+// Rules detection (src/v3/detect.ts): both render nothing on the live program and oracle.
+import DetectionBanner from './v3/ui/DetectionBanner';
+import RulesChangedBanner from './v3/ui/RulesChangedBanner';
 
 const GamesPage = lazy(() => import('./pages/GamesPage'));
 const ArtifactsPage = lazy(() => import('./pages/ArtifactsPage'));
@@ -25,8 +28,10 @@ function App() {
     return (
         <div className="min-h-screen relative z-10">
             <Header />
+            <DetectionBanner />
 
             <main className="container mx-auto px-4 py-8 pb-24">
+                <RulesChangedBanner />
                 <Suspense fallback={<div className="text-center text-lunar-400 py-20">Loading…</div>}>
                     <Routes>
                         <Route path="/" element={<Home />} />
