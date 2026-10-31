@@ -10,7 +10,8 @@ import * as fs from "fs";
 import * as path from "path";
 import {
   AnyEpochFile, BPS, buildEpochFileV3, clampL, computeEpochV3, DAY, EpochFileV3, EpochInputsV3, FP, firstLiquidityCapV3, HOUR, L_DROP_BPS, L_FIRST_BASE_MICRO,
-  L_FIRST_PER_DAY_MICRO, L_GROWTH_BPS, L_STEP_MICRO, liquidityReadingV3, liquidityRuleV3, liquiditySamplesV3, liquidityStatV3, nextLiquidityV3, PEG_GUARD_BPS,
+  L_FIRST_PER_DAY_MICRO, L_GROWTH_BPS, L_STEP_MICRO, liquidityReadingV3, liquidityRuleV3, liquidityStatOfV3, liquidityStatV3, nextLiquidityV3, PEG_GUARD_BPS,
+  recordedLiquiditySamplesV3, switchLiquidityV3, L_SWITCH_MIN_FULL_DAYS, liquidityCarriedV3,
   PLAN_BPS, trancheCapV3, verifyEpochV3, windowStateV3, xdexReadingOf, XDEX_TRANCHE_BPS, xntPegV3, XNT_POOL_DEFAULT, xntPoolActiveV3, xntPoolRecordV3, anomalyGateV3,
 } from "../src/rewards";
 
@@ -62,19 +63,64 @@ test("D-13: stat = the minimum over the last 7 days of each day's median (zeros 
   assert.throws(() => liquidityStatV3([S(endH - 24 * 8, 1n)], end), /no sample/);
 });
 
-test("D-13: the recorded samples are checked (ascending, not after the end); the build's own reading is the sample of the end's hour", () => {
+test("D-13: the recorded samples are checked (ascending, not after the end); the build's own reading is used only when none is recorded", () => {
   const end = 1_800_000_000;
   const endH = Math.floor(end / HOUR);
-  const r = liquiditySamplesV3([{ hour: endH - 2, micro: "5" }, { hour: endH - 1, micro: "6" }], end, 9n, "c");
-  assert.deepStrictEqual(r, [S(endH - 2, 5n), S(endH - 1, 6n), S(endH, 9n)]);
-  // a recorded sample for the end's hour wins over the build's reading
-  assert.deepStrictEqual(liquiditySamplesV3([{ hour: endH, micro: "4" }], end, 9n, "c"), [S(endH, 4n)]);
-  assert.deepStrictEqual(liquiditySamplesV3(undefined, end, 9n, "c"), [S(endH, 9n)]);
-  assert.throws(() => liquiditySamplesV3([{ hour: endH - 1, micro: "5" }, { hour: endH - 1, micro: "6" }], end, 9n, "c"), /strictly ascending/);
-  assert.throws(() => liquiditySamplesV3([{ hour: endH + 1, micro: "5" }], end, 9n, "c"), /after the window end/);
-  assert.throws(() => liquiditySamplesV3([{ hour: endH - 1, micro: "-5" }], end, 9n, "c"), /canonical unsigned integer/);
-  assert.throws(() => liquiditySamplesV3([{ hour: endH - 1, micro: "5", extra: 1 }], end, 9n, "c"), /exactly the members/);
-  assert.throws(() => liquiditySamplesV3({}, end, 9n, "c"), /not an array/);
+  const r = recordedLiquiditySamplesV3([{ hour: endH - 2, micro: "5" }, { hour: endH - 1, micro: "6" }], end, "c");
+  assert.deepStrictEqual(r, [S(endH - 2, 5n), S(endH - 1, 6n)]);
+  // r6-review 3: recorded samples exist, so the build's own reading (9) is never one of the statistic's samples
+  assert.strictEqual(liquidityStatOfV3(r, end, 9n), 5n, "the median of the recorded 5 and 6 (floor), not of 5, 6 and 9");
+  assert.strictEqual(liquidityStatOfV3(recordedLiquiditySamplesV3([{ hour: endH, micro: "4" }], end, "c"), end, 9n), 4n);
+  assert.strictEqual(liquidityStatOfV3(recordedLiquiditySamplesV3(undefined, end, "c"), end, 9n), 9n, "no feed: the build's own reading");
+  assert.throws(() => recordedLiquiditySamplesV3([{ hour: endH - 1, micro: "5" }, { hour: endH - 1, micro: "6" }], end, "c"), /strictly ascending/);
+  assert.throws(() => recordedLiquiditySamplesV3([{ hour: endH + 1, micro: "5" }], end, "c"), /after the window end/);
+  assert.throws(() => recordedLiquiditySamplesV3([{ hour: endH - 1, micro: "-5" }], end, "c"), /canonical unsigned integer/);
+  assert.throws(() => recordedLiquiditySamplesV3([{ hour: endH - 1, micro: "5", extra: 1 }], end, "c"), /exactly the members/);
+  assert.throws(() => recordedLiquiditySamplesV3({}, end, "c"), /not an array/);
+});
+
+test("r6-review 3: the build's statistic is taken over the FULL stat days only; a thin last day (the feed stopped) cannot halve the next L", () => {
+  const end = 1_800_000_000 - (1_800_000_000 % HOUR);
+  const endH = end / HOUR;
+  // 6 full days at $2k (days 1..6, 24 samples each), and the feed stopped in the last 24 h: day 0 has no recorded sample
+  const sixFull = Array.from({ length: 6 * 24 }, (_, i) => S(endH - 7 * 24 + 1 + i, 2_000n * USD)).filter((s) => Math.floor((end - s.hour * HOUR) / DAY) >= 1);
+  // an LP pulls the pool at the known build time: the build reads $0
+  assert.strictEqual(liquidityStatOfV3(sixFull, end, 0n), 2_000n * USD, "the build's $0 reading is not a sample: day 0 is empty");
+  // the feed came back for 3 hours of day 0 (a thin day) and they read $10: still not counted, the full days decide
+  const thin0 = [...sixFull, S(endH - 2, 10n * USD), S(endH - 1, 10n * USD), S(endH, 10n * USD)];
+  assert.strictEqual(liquidityStatOfV3(thin0, end, 0n), 2_000n * USD, "a thin day never sets the statistic while a full day exists");
+  assert.strictEqual(liquidityStatV3(thin0, end), 10n * USD, "(the plain minimum over every day would have taken it)");
+  // the same 4 readings on day 0 make it full: then it counts like any other day
+  const full0 = [...thin0, S(endH - 3, 10n * USD)];
+  assert.strictEqual(liquidityStatOfV3(full0, end, 0n), 10n * USD);
+  // only thin days (a carried chain): their medians, never the build reading
+  assert.strictEqual(liquidityStatOfV3([S(endH - 30, 300n * USD), S(endH - 1, 700n * USD)], end, 0n), 300n * USD);
+  // samples older than 7 days do not count; none left: the build's own reading
+  assert.strictEqual(liquidityStatOfV3([S(endH - 24 * 8, 1n)], end, 42n), 42n);
+  // the clamp around the L in force: with the full days at $2k, the next L of a $2k chain stays $2k
+  assert.strictEqual(nextLiquidityV3(liquidityStatOfV3(sixFull, end, 0n), 2_000n * USD), 2_000n * USD);
+});
+
+test("r6-review 2: the switch L is the median of the last (up to) 4 v2 liquidity readings (zeros = no reading)", () => {
+  assert.strictEqual(switchLiquidityV3([1_000n * USD]), 1_000n * USD);
+  assert.strictEqual(switchLiquidityV3([900n * USD, 2_000n * USD, 2_100n * USD]), 2_000n * USD, "one moved reading cannot set it");
+  assert.strictEqual(switchLiquidityV3([50_000n * USD, 2_000n * USD, 2_100n * USD, 1_900n * USD]), 2_050n * USD, "a JIT-inflated build reading: the median of 4");
+  assert.strictEqual(switchLiquidityV3([1n, 2_000n * USD, 2_100n * USD, 1_900n * USD]), 1_950n * USD, "a pulled build reading: the median of 4");
+  assert.strictEqual(switchLiquidityV3([0n, 2_000n * USD]), 2_000n * USD, "0 = no reading");
+  assert.strictEqual(switchLiquidityV3([0n, 0n]), null);
+  const stat = 9_000n * USD;
+  const cap = 1_000n * USD;
+  assert.deepStrictEqual(liquidityRuleV3({ L: 50_000n * USD, next: undefined, v2: true, switchL: 2_050n * USD }, true, stat, cap), { used: 2_050n * USD, rule: "switch", cap: null });
+  // the switch epoch: the next L is clamped when at least 2 stat days are full, carried otherwise
+  const end = 1_800_000_000 - (1_800_000_000 % HOUR);
+  const endH = end / HOUR;
+  const days = (n: number) => Array.from({ length: n * 24 }, (_, i) => S(endH - n * 24 + 1 + i, 2_000n * USD));
+  assert.strictEqual(L_SWITCH_MIN_FULL_DAYS, 2);
+  assert.deepStrictEqual(liquidityCarriedV3(days(2), end, false, true), { carried: false, samples: 48, thinDays: 5 }, "2 full days at the switch: clamped");
+  assert.deepStrictEqual(liquidityCarriedV3(days(2), end, false, false), { carried: true, samples: 48, thinDays: 5 }, "(any other epoch: carried)");
+  assert.deepStrictEqual(liquidityCarriedV3(days(1), end, false, true), { carried: true, samples: 24, thinDays: 6 }, "1 full day at the switch: carried");
+  assert.deepStrictEqual(liquidityCarriedV3([], end, false, true), { carried: true, samples: 0, thinDays: 7 });
+  assert.deepStrictEqual(liquidityCarriedV3([], end, true, true).carried, false, "the orphan exemption holds at the switch too");
 });
 
 test("D-13: the next window's L stays within [50% × L, 110% × L + $50] of the L in force (the symmetric clamp and the step)", () => {

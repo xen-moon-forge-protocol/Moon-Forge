@@ -49,7 +49,7 @@ import {
   claimLeavesV3, connectV3, ExtraNotYetV3, freePoolV3, PDA_V3, publishEpochV3, publishExtraEpochV3, readEpochPublishedV3, readExtraPublishedV3, readUpgradeProbeV3, sweepReceiptsV3, upgradeVerdictV3,
   UPGRADED_ELF, verifyExtraInitV3,
 } from "./x1-v3";
-import { assembleWeekSoFarV3, engineSha256Of, feedGateV3, feedText, fetchFeedV1, knownReadingsOfFeedV1, samplesOfFeedV1 } from "./feed-v3";
+import { assembleWeekSoFarV3, engineSha256Of, feedGateV3, feedText, fetchFeedV1, knownReadingsOfFeedV1, prevFeedDecisionV1, PrevFeedStatusV1, samplesOfFeedV1 } from "./feed-v3";
 import { countersMissingV3, rulesInForceErrorV3 } from "./rules-v3";
 import { seatStatusCli, takeSeatCli, voidEpochCli } from "./seat-v3";
 import {
@@ -417,7 +417,7 @@ async function main() {
     return;
   }
   if (cmd === "keeper-arm") {
-    // S7 owner step (SPEC 9.3): the first arm_keeper of the house-keeper seat, with its bond, on a chain this key derives
+    // A later manual step (F1-b: not at S7; s7.mjs --arm-keeper): the first arm_keeper of the house-keeper seat, with its bond, on a chain this key derives
     // (keeper-v3.ts), so every keeper run holding the key can reveal it. Dry without --yes. Signed by KEEPER_PRIVATE_KEY
     // (else ORACLE_PRIVATE_KEY): the program's INITIAL_KEEPER for the first arm.
     const signer = loadKeypair(process.env.KEEPER_PRIVATE_KEY || undefined);
@@ -427,7 +427,7 @@ async function main() {
     return;
   }
   if (cmd === "keeper-take") {
-    // R-4 owner step: take_keeper by the named successor (after KEEPER_NOTICE) or anyone once the seat is dead, on a
+    // R-4 manual operator step (bond from a project wallet only): take_keeper by the named successor (after KEEPER_NOTICE) or anyone once the seat is dead, on a
     // chain this key derives, so the keeper runs holding this key can reveal it. Dry without --yes. KEEPER_PRIVATE_KEY.
     const signer = loadKeypair(process.env.KEEPER_PRIVATE_KEY || undefined);
     const v3 = connectV3(signer);
@@ -607,6 +607,10 @@ async function weekSoFarCli() {
     return gh("active", true);
   }
   const prevFeed = argValue("--prev-feed");
+  // r6-review 1 (b): keeper.yml says how its read of the served feed went (ok | absent | error); absent flag = not told
+  const statusArg = argValue("--prev-feed-status");
+  if (statusArg !== undefined && statusArg !== "ok" && statusArg !== "absent" && statusArg !== "error") throw new Error(`--prev-feed-status ${statusArg}: ok, absent or error`);
+  let prevStatus: PrevFeedStatusV1 | null = (statusArg as PrevFeedStatusV1 | undefined) ?? null;
   let known = null;
   let samples = null;
   if (prevFeed && fs.existsSync(prevFeed)) {
@@ -617,8 +621,10 @@ async function weekSoFarCli() {
       samples = samplesOfFeedV1(pf, { programId: PROGRAM_ID, epoch: n, prevDataHash: prev.dataHash });
     } catch {
       known = null;
+      // a served feed that was read but does not parse is as unreadable as one that could not be fetched
+      if (prevStatus === "ok") prevStatus = "error";
     }
-  }
+  } else if (prevStatus === "ok") prevStatus = "error";
   // D-17: the feed says when epoch n is held by the anomaly gate (FEED CONTRACT flags.anomalyHold)
   const held = readGate(n);
   const anomalyHold = !!held && !held.released;
@@ -627,6 +633,14 @@ async function weekSoFarCli() {
   const a = await assembleWeekSoFarV3(prev, liveSourcesV3(v3.connection, v3.program), CHAINS, files, (m) => console.log(m), { known, engineSha256: engineSha256Of(), samples, anomalyHold });
   for (const w of a.warnings) console.log(`  WARNING ${w}`);
   for (const k of a.skipped) console.log(`  ${k.name}: not valued this hour (${k.reason.slice(0, 200)})`);
+  const keep = prevFeedDecisionV1({ status: prevStatus, asOf: a.feed.asOf, startTs: a.feed.window.startTs });
+  if (!keep.write) {
+    // nothing is written, so keeper.yml neither builds nor deploys: the site keeps serving the feed it has
+    console.log(`::warning::${keep.reason}`);
+    gh("noprev", true);
+    return dormant(keep.reason);
+  }
+  if (keep.reason) console.log(`::warning::${keep.reason}`);
   fs.mkdirSync(path.dirname(path.resolve(out!)), { recursive: true });
   fs.writeFileSync(out!, feedText(a.feed));
   const f = a.feed;

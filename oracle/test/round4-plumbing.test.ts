@@ -165,7 +165,7 @@ async function main() {
   await test("D-17: the published thresholds, each on a built file (wallet share, leaf count, score jump, fallbacks, a chain's first epoch, the XNT source)", () => {
     assert.deepStrictEqual(anomalyGateV3(d3, d2, [d2, d1]).map((r) => r.code), [], "an ordinary week: nothing");
     assert.deepStrictEqual(anomalyGateV3(d2, d1, [d1]).map((r) => r.code), ["first-chain"], "chain 56's first epoch");
-    assert.deepStrictEqual(anomalyGateV3(p2, p1, [p1]).map((r) => r.code), ["wallet-share", "xnt-source"], "the capped week: one wallet takes more than 60% of C; USDC.X reads $1.05");
+    assert.deepStrictEqual(anomalyGateV3(p2, p1, [p1]).map((r) => r.code), ["wallet-share", "xnt-source", "liquidity-samples-missing"], "the capped week: one wallet takes more than 60% of C; USDC.X reads $1.05; no feed of the window (F5: its next L is carried)");
     // leaf count: 5× the median of the last 4 epochs
     const many = clone(d3);
     many.leaves = Array.from({ length: 11 }, () => many.leaves[0]);

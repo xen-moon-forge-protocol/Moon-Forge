@@ -1,5 +1,5 @@
 /**
- * X1 RPC endpoints of the oracle, the keeper, the heartbeat and the health check (owner sheet 9.2: repository variable
+ * X1 RPC endpoints of the oracle, the keeper, the heartbeat and the health check (OPERATORS.md: repository variable
  * X1_RPC_URLS).
  *
  * Order: the optional X1_RPC_URLS list (comma-separated), then the default endpoint X1_RPC (X1_RPC_URL, else the public

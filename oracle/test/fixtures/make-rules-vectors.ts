@@ -113,6 +113,23 @@ export function hourlySamples(fromHour: number, toHour: number, micro: bigint, p
   return out;
 }
 
+/**
+ * D-13, F5: `counts[d]` hourly samples of `micro` on stat day d (d = ⌊(endTs − hour start) / DAY⌋, 0 = the last 24 h; at
+ * most 23 a day, the end's own hour is left to the build's reading), strictly ascending. endTs must be on an hour.
+ */
+export function daySamples(endTs: number, micro: bigint, counts: number[]): { hour: number; micro: string }[] {
+  if (endTs % HOUR !== 0) throw new Error("daySamples: endTs is not on an hour");
+  const endH = endTs / HOUR;
+  const hours: number[] = [];
+  counts.forEach((n, d) => {
+    if (n > 23) throw new Error("daySamples: at most 23 samples a day");
+    for (let i = 0; i < n; i++) hours.push(endH - 24 * d - 1 - i);
+  });
+  return hours.sort((a, b) => a - b).map((hour) => ({ hour, micro: micro.toString() }));
+}
+/** a stat week with a sample every hour but the end's (23 on each of the 7 days) */
+const FULL = [23, 23, 23, 23, 23, 23, 23];
+
 const counters = (burns: BurnInputV3[], prevAt = 0n, prevBurned = 0n) => ({
   missionsAt: (prevAt + BigInt(burns.length)).toString(),
   burnedAt: burns.reduce((s, b) => s + BigInt(b.amountWei), prevBurned).toString(),
@@ -222,7 +239,8 @@ export function vectorWorlds(): VectorWorld[] {
   // $101k): the window is valued at the L frozen at epoch 1's build, and the JIT reading is one sample among 24 of its
   // day, so the next window's L does not move either. Chain 56 appears in epoch 2 (a pool 10 days old: the first-reading
   // cap is $500 + 10 × $50 = $1,000, against a reading of $50k). Epoch 3: chain 10's pool is pulled to $200 for a whole
-  // day: the window is still valued at the frozen $2,000 and the next window's L falls by the 50% clamp only
+  // day: the window is still valued at the frozen $2,000 and the next window's L falls by the 50% clamp only. Chain 56's
+  // feed samples it every hour at $50k (F5: a full feed, so its next L is clamped, not carried)
   {
     const F = 2_000n * XNT;
     const L0 = 2_000_000_000n;
@@ -247,7 +265,7 @@ export function vectorWorlds(): VectorWorld[] {
         epoch: 2, endTs: e2End, startTs: e2Start, F, open: openAfter(F, p!), prev: p,
         chains: [
           { chainId: 10, burns: a2, ...counters(a2, 2n, a1.reduce((s, b) => s + BigInt(b.amountWei), 0n)), L: 102_000_000_000n, onChain: 101_000_000_000n, samples: s2 },
-          { chainId: 56, burns: b2, ...counters(b2), L: 50_000_000_000n, onChain: null, poolCreatedAt: e2Start - 10 * DAY },
+          { chainId: 56, burns: b2, ...counters(b2), L: 50_000_000_000n, onChain: null, poolCreatedAt: e2Start - 10 * DAY, samples: daySamples(e2End, 50_000_000_000n, FULL) },
         ],
       }),
       (p) => inputs({
@@ -324,6 +342,100 @@ export function vectorWorlds(): VectorWorld[] {
       }));
     }
     worlds.push(chainOf("d22b-pool-switch", "D-22 (b): a candidate pool more than 2× the active one's median TVL for 2 builds is announced (next) and read from the next epoch on", steps));
+  }
+
+  world();
+  // D-13, F5 (the "carried" rule): epoch 1 (genesis) samples every chain every hour at $2,000, so every next L is $2,000
+  // (clamp), and chain 250 is read once. Epoch 2 values every chain at the frozen $2,000; this build reads $100k
+  // (a JIT deposit at its known time) on every chain but 10's on-chain depth, and the feeds differ:
+  //   10: a full feed at $2,000 (the JIT reading is one sample of its day): clamp, next $2,000;
+  //   56: a feed at $3,000 with exactly 2 thin days (day 3 none, day 6 three samples; day 5 has exactly 4, not thin):
+  //       clamp, next = 1.1 × $2,000 + $50 = $2,250;
+  //   137: a feed at $3,000 with 3 thin days (days 4 and 5 three samples, day 6 none): carried, next = used = $2,000;
+  //   8453: no feed at all (only the build's own $100k reading): carried, next $2,000 (the clamp would give $2,250);
+  //   42161: a feed that started 4 days before the build (days 0-3 full, 4-6 none, like a first v3 window that opened
+  //       before the upgrade): carried, next $2,000;
+  //   250: not read (skipped): carried as before.
+  // Epoch 3: chain 137 is valued at its carried $2,000 and, with a full feed at $3,000 now, moves by the clamp ($2,250).
+  {
+    const F = 2_000n * XNT;
+    const L0 = 2_000_000_000n;
+    const L3 = 3_000_000_000n;
+    const JIT = 100_000_000_000n;
+    const e1End = T0 + WEEK;
+    const e2Start = e1End + 60;
+    const e2End = T0 + 2 * WEEK;
+    const e3Start = e2End + 60;
+    const e3End = T0 + 3 * WEEK;
+    const ids = [10, 56, 137, 250, 8453, 42161];
+    const one = (id: number, ts: number, x1: string) => [burn(id, x1, ts, 1_000_000n)];
+    const b1 = new Map(ids.map((id, i) => [id, one(id, T0 + DAY + i * HOUR, W[i % 8])]));
+    const b2 = new Map([10, 56, 137, 8453, 42161].map((id, i) => [id, one(id, e2Start + 2 * DAY + i * HOUR, W[(i + 3) % 8])]));
+    const b3 = new Map([10, 137].map((id, i) => [id, one(id, e3Start + DAY + i * HOUR, W[(i + 5) % 8])]));
+    const sum = (bs: BurnInputV3[]) => bs.reduce((s, b) => s + BigInt(b.amountWei), 0n);
+    const at = (id: number, upTo: Map<number, BurnInputV3[]>[], now: BurnInputV3[]) => {
+      const before = upTo.flatMap((m) => m.get(id) ?? []);
+      return counters(now, BigInt(before.length), sum(before));
+    };
+    const e2Samples: Record<number, { hour: number; micro: string }[] | undefined> = {
+      10: daySamples(e2End, L0, FULL),
+      56: daySamples(e2End, L3, [23, 23, 23, 0, 23, 4, 3]),
+      137: daySamples(e2End, L3, [23, 23, 23, 23, 3, 3, 0]),
+      8453: undefined,
+      42161: daySamples(e2End, L3, [23, 23, 23, 23, 0, 0, 0]),
+    };
+    worlds.push(chainOf("d13-f5-carried", "D-13, F5: a valued chain with fewer than 4 recorded hourly samples on more than 2 of the 7 stat days, or no feed, carries its L (next = used, L.nextRule \"carried\"; the build's own reading never counts) and trips the gate (liquidity-samples-missing); exactly 2 thin days, or 4 samples in a day, is not thin", [
+      () => inputs({ epoch: 1, endTs: e1End, startTs: T0, F, open: null, prev: null, chains: ids.map((id) => ({ chainId: id, burns: b1.get(id)!, ...counters(b1.get(id)!), L: L0, onChain: L0, samples: daySamples(e1End, L0, FULL) })) }),
+      (p) => inputs({
+        epoch: 2, endTs: e2End, startTs: e2Start, F, open: openAfter(F, p!), prev: p,
+        chains: [10, 56, 137, 8453, 42161].map((id) => ({
+          chainId: id, burns: b2.get(id)!, ...at(id, [b1], b2.get(id)!), L: JIT, onChain: id === 10 ? L0 : JIT,
+          ...(e2Samples[id] !== undefined ? { samples: e2Samples[id] } : {}),
+        })),
+      }),
+      (p) => inputs({
+        epoch: 3, endTs: e3End, startTs: e3Start, F, open: openAfter(F, p!), prev: p,
+        chains: [10, 137].map((id) => ({ chainId: id, burns: b3.get(id)!, ...at(id, [b1, b2], b3.get(id)!), L: id === 10 ? L0 : L3, onChain: id === 10 ? L0 : L3, samples: daySamples(e3End, id === 10 ? L0 : L3, FULL) })),
+      }),
+    ]));
+  }
+
+  world();
+  // r6-review 3 (the AR-5 threat): the statistic is taken over the FULL stat days only (4 recorded samples or more), and the
+  // build's own reading is used only when nothing is recorded. Epoch 1: every chain at $2,000 with a full feed. Epoch 2,
+  // every build reading $0 (an LP pulls the pool at the known build time):
+  //   10: 6 full days at $2,000, day 0 empty (the feed stopped in the last 24 h): clamp, stat $2,000, next $2,000;
+  //   56: the same, plus 3 samples at $1 on day 0 (a thin day): clamp, stat $2,000 (the thin day does not decide);
+  //   137: 4 samples at $1 on day 0 (a full day): clamp, stat $1, next = 50% × $2,000 (the pull was real for a day);
+  //   8453: 3 thin days at $500 and 4 full at $2,000: carried; its stat ($2,000, the full days) is recorded only.
+  {
+    const F = 2_000n * XNT;
+    const L0 = 2_000_000_000n;
+    const e1End = T0 + WEEK;
+    const e2Start = e1End + 60;
+    const e2End = T0 + 2 * WEEK;
+    const ids = [10, 56, 137, 8453];
+    const one = (id: number, ts: number, x1: string) => [burn(id, x1, ts, 1_000_000n)];
+    const b1 = new Map(ids.map((id, i) => [id, one(id, T0 + DAY + i * HOUR, W[i % 8])]));
+    const b2 = new Map(ids.map((id, i) => [id, one(id, e2Start + 2 * DAY + i * HOUR, W[(i + 2) % 8])]));
+    const sum = (bs: BurnInputV3[]) => bs.reduce((s, b) => s + BigInt(b.amountWei), 0n);
+    const endH = e2End / HOUR;
+    const dust = (hours: number[]) => hours.map((h) => ({ hour: endH - h, micro: "1000000" }));
+    const merged = (a: { hour: number; micro: string }[], b: { hour: number; micro: string }[]) => [...a, ...b].sort((x, y) => x.hour - y.hour);
+    const sixFull = daySamples(e2End, L0, [0, 23, 23, 23, 23, 23, 23]);
+    const e2Samples: Record<number, { hour: number; micro: string }[]> = {
+      10: sixFull,
+      56: merged(sixFull, dust([3, 2, 1])),
+      137: merged(sixFull, dust([4, 3, 2, 1])),
+      8453: merged(daySamples(e2End, 500_000_000n, [3, 3, 3, 0, 0, 0, 0]), daySamples(e2End, L0, [0, 0, 0, 23, 23, 23, 23])),
+    };
+    worlds.push(chainOf("r6-full-day-stat", "D-13, r6-review 3: the statistic is the minimum of the daily medians of the FULL stat days (at least 4 recorded samples); a thin day and the build's own reading (0 here: a pull at the known build time) never decide it while a full day exists", [
+      () => inputs({ epoch: 1, endTs: e1End, startTs: T0, F, open: null, prev: null, chains: ids.map((id) => ({ chainId: id, burns: b1.get(id)!, ...counters(b1.get(id)!), L: L0, onChain: L0, samples: daySamples(e1End, L0, FULL) })) }),
+      (p) => inputs({
+        epoch: 2, endTs: e2End, startTs: e2Start, F, open: openAfter(F, p!), prev: p,
+        chains: ids.map((id) => ({ chainId: id, burns: b2.get(id)!, ...counters(b2.get(id)!, 1n, sum(b1.get(id)!)), L: 0n, onChain: 0n, samples: e2Samples[id] })),
+      }),
+    ]));
   }
   return worlds;
 }

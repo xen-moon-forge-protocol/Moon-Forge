@@ -268,7 +268,7 @@ export function rewardsVersionGatedV3(
  * r4 finding 2): the v2 rules close at this time. The last v2 epoch is the one published before it (the weekly epoch of
  * Sunday 2026-11-08). From then on the oracle builds and publishes NO v2 epoch, also when S6 slips and the live program
  * is still the v2 binary: every burn after the last v2 file waits for the first v3 epoch, keeping its time (it is paid
- * under the v3 rules), exactly as release-staging/boundary POLICY-CHANGES.md "Precondition" and the site say. Defined by
+ * under the v3 rules), exactly as POLICY-CHANGES.md "Precondition" (published with the boundary notice) and the site say. Defined by
  * a date, never by a future epoch number (POLICY-CHANGES rule 3: a week without burns publishes no v2 epoch).
  * V2_BOUNDARY_TS (seconds) overrides it for localnet rehearsals only; no workflow sets it.
  */

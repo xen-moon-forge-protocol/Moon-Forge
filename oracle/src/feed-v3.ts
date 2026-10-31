@@ -211,6 +211,15 @@ export function feedInputsV3(raw: WeekSoFarRawV1, prev: AnyEpochFile): EpochInpu
 }
 
 /**
+ * A chain not valued this hour: `{ chainId, name, portal, status: "skipped" }`, plus the window's liquidity samples so
+ * far when there are any (r6-review 1). The engine never reads a skipped chain's members; samplesOfFeedV1 does, so the
+ * next hour's feed and the weekly build keep every sample recorded before the skip.
+ */
+export function skippedChainV1(c: { chainId: number; name: string; portal: string }, samples: LiquiditySampleV3[] | null | undefined): FeedChainV1 {
+  return { chainId: c.chainId, name: c.name, portal: c.portal, status: "skipped", ...(samples && samples.length ? { liquiditySamples: samples.map((s) => ({ hour: s.hour, micro: s.micro })) } : {}) };
+}
+
+/**
  * windowStateV3 over the window so far, without the build limit; a chain with a burn that has no XEN price (no candles
  * and a build spot of 0) is marked skipped, as the build skips it (computeEpochV3SkippingUnpriced). Returns the raw part
  * as valued (those chains marked) and the engine state.
@@ -226,7 +235,9 @@ export function weekSoFarStateV3(raw: WeekSoFarRawV1, prev: AnyEpochFile): { raw
     } catch (e) {
       if (!(e instanceof NoXenPriceError) || unpriced.includes(e.chainId)) throw e;
       unpriced.push(e.chainId);
-      current = { ...current, chains: current.chains.map((c) => (c.chainId === e.chainId ? { chainId: c.chainId, name: c.name, portal: c.portal, status: "skipped" as const } : c)) };
+      // r6-review 1: a skipped chain keeps the window's liquidity samples (this hour's reading included), so one hour
+      // without a price never wipes the week's D-13 history
+      current = { ...current, chains: current.chains.map((c) => (c.chainId === e.chainId ? skippedChainV1(c, c.liquiditySamples) : c)) };
     }
   }
 }
@@ -325,7 +336,8 @@ export function knownReadingsOfFeedV1(prevFeed: unknown, id: { programId: string
  * D-13: the hourly liquidity samples a feed of the SAME window carries (program, epoch and epoch n−1 data hash), per chain:
  * the next hour's feed appends its own reading to them, and the weekly build records them (its statistic is the minimum
  * of their daily medians). Only canonical, strictly ascending samples are taken (the engine checks them again); a feed
- * of another window gives none.
+ * of another window gives none. A chain skipped that hour counts too: it carries the samples recorded before the skip
+ * (skippedChainV1, r6-review 1).
  */
 export function samplesOfFeedV1(feed: unknown, id: { programId: string; epoch: number; prevDataHash: string }): Map<number, LiquiditySampleV3[]> {
   const out = new Map<number, LiquiditySampleV3[]>();
@@ -347,18 +359,57 @@ export function samplesOfFeedV1(feed: unknown, id: { programId: string; epoch: n
 /** Where the site serves the feed (GitHub Pages, the same origin as the epoch files); FEED_URL overrides it. */
 export const FEED_URL_DEFAULT = `https://xen-moon-forge-protocol.github.io/Moon-Forge/${FEED_PATH}`;
 
+/** fetchFeedV1's attempts and the pause before each retry (r6-review 1 (d)) */
+export const FEED_FETCH_TRIES = 3;
+export const FEED_FETCH_RETRY_MS = 5_000;
+
 /**
  * The published feed (read-only GET, a short timeout), for the weekly build's D-13 samples: null when it cannot be read
- * or parsed (the build then records the samples it has: none, and its statistic is its own reading).
+ * or parsed (the build then records the samples it has: none, and every chain's next L is carried, F5). A network error,
+ * a non-404 HTTP error or a body that does not parse is tried again, FEED_FETCH_TRIES times in all (r6-review 1 (d): one
+ * failed GET must not cost a week of samples); a 404 means no feed is served, and is final.
  */
-export async function fetchFeedV1(url = process.env.FEED_URL || FEED_URL_DEFAULT, timeoutMs = 20_000, fetcher: typeof fetch = fetch): Promise<unknown | null> {
-  try {
-    const r = await fetcher(url, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(timeoutMs) });
-    if (!r.ok) return null;
-    return JSON.parse(await r.text());
-  } catch {
-    return null;
+export async function fetchFeedV1(
+  url = process.env.FEED_URL || FEED_URL_DEFAULT, timeoutMs = 20_000, fetcher: typeof fetch = fetch,
+  o: { tries?: number; retryMs?: number; sleep?: (ms: number) => Promise<void> } = {},
+): Promise<unknown | null> {
+  const tries = Math.max(1, o.tries ?? FEED_FETCH_TRIES);
+  const sleep = o.sleep ?? ((ms: number) => new Promise<void>((res) => setTimeout(res, ms)));
+  for (let i = 0; i < tries; i++) {
+    if (i > 0) await sleep((o.retryMs ?? FEED_FETCH_RETRY_MS) * i);
+    try {
+      const r = await fetcher(url, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(timeoutMs) });
+      if (r.status === 404) return null;
+      if (!r.ok) continue;
+      return JSON.parse(await r.text());
+    } catch {
+      // a timeout, a network error or a truncated body: try again
+    }
   }
+  return null;
+}
+
+/** keeper.yml's reading of the served feed: ok (read), absent (HTTP 404: none served) or error (unreadable after retries) */
+export type PrevFeedStatusV1 = "ok" | "absent" | "error";
+/** the window age after which an unreadable served feed stops the hour's feed (its samples would be lost), r6-review 1 (b) */
+export const FEED_NO_PREV_AFTER = 2 * HOUR;
+
+/**
+ * r6-review 1 (b): whether this hour's feed is written. When the served feed could not be read (status "error", after
+ * keeper.yml's retries) and the window is more than FEED_NO_PREV_AFTER old, the feed it serves holds samples this run
+ * cannot see: writing a new one would drop them, so nothing is written or deployed ("no-prev") and the served feed is
+ * kept for the next hour. A served feed that is absent (404) is a fresh start: before FEED_NO_PREV_AFTER it is the
+ * window's first hours; after it, the samples are already gone, and the feed restarts (with a warning).
+ */
+export function prevFeedDecisionV1(o: { status: PrevFeedStatusV1 | null; asOf: number; startTs: number }): { write: boolean; reason: string } {
+  const age = o.asOf - o.startTs;
+  if (o.status === "error" && age > FEED_NO_PREV_AFTER) {
+    return { write: false, reason: `no-prev: the served feed could not be read and the window is ${Math.floor(age / HOUR)} h old: this hour writes no feed, so the served one (and its liquidity samples) is kept` };
+  }
+  if (o.status === "absent" && age > FEED_NO_PREV_AFTER) {
+    return { write: true, reason: `warning: no feed is served although the window is ${Math.floor(age / HOUR)} h old: the feed restarts, and the samples recorded so far are lost (F5 carries each chain's L)` };
+  }
+  return { write: true, reason: "" };
 }
 
 /** The feed's samples of a chain with this hour's reading appended (replacing a sample already there for that hour). */
@@ -432,7 +483,8 @@ export async function assembleWeekSoFarV3(
   for (const c of [...chains].filter((x) => x.portal).sort((x, y) => x.chainId - y.chainId)) {
     const ci = a.inputs.chains.find((x) => x.chainId === c.chainId);
     if (!ci) {
-      out.push({ chainId: c.chainId, name: c.name, portal: c.portal, status: "skipped" });
+      // r6-review 1: a chain not read this hour keeps the samples the previous hour's feed carries (none read this hour)
+      out.push(skippedChainV1(c, opts.samples?.get(c.chainId)));
       continue;
     }
     const m = markets.get(c.chainId);

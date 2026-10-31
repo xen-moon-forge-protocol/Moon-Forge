@@ -1,6 +1,6 @@
 name: Announcements (weekly)
 
-# Original posts on the project's own channels (X, optional Telegram channel): a weekly state of the
+# Original posts on the project's own channel (X @MoonXenForge): a weekly state of the
 # forge read from chain. Never replies, mentions or DMs; no price predictions. Without the channel keys
 # (repository secrets) the text is only printed in the log. Enable with the repository variable
 # ANNOUNCE_ENABLED=true. The epoch receipt is posted by the oracle workflow right after publication.
@@ -50,8 +50,6 @@ jobs:
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
           X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           PORTAL_ETH: ${{ vars.PORTAL_ETH }}
           PORTAL_OP: ${{ vars.PORTAL_OP }}
           PORTAL_BSC: ${{ vars.PORTAL_BSC }}

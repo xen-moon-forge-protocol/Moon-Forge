@@ -925,7 +925,7 @@ test("X5 / X6: amounts at or above 2^64 are refused; before the upgrade a file c
 
 // ── OD-9: an Artifact forged before the upgrade never enters the extra pot ───────────────────────────
 test("OD-9: an Artifact forged before init_extra is excluded as pre-upgrade in every week, by default; the switch reverts it", () => {
-  assert.strictEqual(EXTRA_EXCLUDE_PRE_UPGRADE, true, "the owner sheet's default (OD-9 / D-28)");
+  assert.strictEqual(EXTRA_EXCLUDE_PRE_UPGRADE, true, "the decision sheet's default (OD-9 / D-28)");
   const [H, K] = [W(81), W(82)];
   const mark = { ts: T0 - 10 * DAY, tx: sig(64_000) };
   const mk = (forged: number[]) => forged.map((at, i) => rec(ASSET(40 + i), 3, i === 2 ? K : H, { forgedAt: at }));

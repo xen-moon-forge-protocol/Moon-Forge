@@ -527,4 +527,13 @@ t("health-verify: ok / failed / error from the verifier's exit and output; the n
   }
 });
 
+t("r7 audit F13: no Telegram channel, ever: no Telegram code, secret or channel wording in the announcer or the workflows", () => {
+  const fs = require("fs"), path = require("path");
+  const root = path.join(__dirname, "..", "..");
+  for (const rel of ["oracle/src/announce.ts", ".github/workflows/announce.yml", ".github/workflows/oracle.yml"]) {
+    const src = fs.readFileSync(path.join(root, rel), "utf8");
+    assert.ok(!/TELEGRAM_|api\.telegram\.org|postTelegram|optional Telegram/i.test(src), `${rel} still names Telegram`);
+  }
+});
+
 console.log(`health rules: ${n} tests passed`);

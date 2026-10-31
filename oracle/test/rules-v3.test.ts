@@ -14,7 +14,7 @@ import {
   EpochInputsV3, globalOrder, KEEPER_TIP_MIN_CLAIM, MAX_PUBLISH_LAG, operatorOfV3, publishAgeError, rankOrderV3, RULES_ID_V3, rulesBlockOf, RulesBlockV3, TIE_BREAK_V3,
   tieKeyV3, verifyEpochV3, VEST_MIN_ENT, windowStateV3, PRICE_RULES_V3,
 } from "../src/rewards";
-import { countersMissingV3, RULES_V3_VERSIONS, rulesForEpochV3, rulesInForceErrorV3, rulesRegistryErrorV3, RulesVersionV3 } from "../src/rules-v3";
+import { countersMissingV3, FIRST_RULES_ID_V3, RULES_V3_VERSIONS, rulesForEpochV3, rulesInForceErrorV3, rulesRegistryErrorV3, RulesVersionV3 } from "../src/rules-v3";
 import { vectorWorlds, wallet } from "./fixtures/make-rules-vectors";
 
 let passed = 0;
@@ -36,7 +36,7 @@ const world = (name: string) => doc.worlds.find((w) => w.name === name)!;
 
 // ── golden vectors ─────────────────────────────────────────────────────────────────────────────
 test("golden vectors: every recorded file is rebuilt byte for byte from its inputs and verifies; the generator gives the same vectors", () => {
-  assert.strictEqual(doc.worlds.length, 8);
+  assert.strictEqual(doc.worlds.length, 10, "9 worlds + r6-full-day-stat (r6-review 3)");
   for (const w of doc.worlds) {
     let prev: AnyEpochFile | null = null;
     for (const e of w.epochs) {
@@ -125,7 +125,7 @@ test("golden X-010 / T1-34: the counters continue the previous record (a skipped
 });
 
 // ── the rules block ────────────────────────────────────────────────────────────────────────────
-test("T2-RULES: the default block (rules 1) and every pinned member", () => {
+test("T2-RULES: the default block (rules 2) and every pinned member", () => {
   const r = rulesBlockOf(DEFAULT_RULES_V3);
   assert.deepStrictEqual(r, {
     programRules: 3, programHash: null, rulesId: RULES_ID_V3, tipMin: "200000000", autoClaimMin: "0", dustRule: { vestMinEnt: "20000000" },
@@ -137,6 +137,8 @@ test("T2-RULES: the default block (rules 1) and every pinned member", () => {
   bad({ programRules: 2 }, /only on the upgraded program/);
   bad({ programHash: "AB".repeat(32) }, /lowercase sha256 hex/);
   bad({ rulesId: 0 }, /version number/);
+  // F5: rulesId 1 (the round-4 block, without the D-13 "carried" rule) was replaced before any v3 epoch: never accepted
+  bad({ rulesId: 1 }, /rulesId 1 was replaced before any v3 epoch was built/);
   bad({ tipMin: "20000000" }, /not the upgraded program's keeper-tip minimum/);
   bad({ autoClaimMin: "1" }, /the only value is "0"/);
   bad({ dustRule: { vestMinEnt: "-1" } }, /canonical unsigned integer/);
@@ -186,13 +188,13 @@ test("D-18 / PROOF_BURN_RULE (c): operator wallets and dated, named exceptions a
 
 test("T2-RULES: a rules version never goes back from one epoch to the next", () => {
   const w = world("x010-counters-t134-supply");
-  const r2 = { ...DEFAULT_RULES_V3, rulesId: 2 };
-  const i1 = { ...clone(w.epochs[0].inputs), rulesBlock: r2 };
+  const r3 = { ...DEFAULT_RULES_V3, rulesId: 3 };
+  const i1 = { ...clone(w.epochs[0].inputs), rulesBlock: r3 };
   const f1 = buildEpochFileV3(i1, null)!;
-  assert.strictEqual(f1.rulesBlock.rulesId, 2);
+  assert.strictEqual(f1.rulesBlock.rulesId, 3);
   const i2 = clone(w.epochs[1].inputs);
-  assert.throws(() => computeEpochV3({ ...i2, rulesBlock: DEFAULT_RULES_V3 }, f1), /rulesId 1 is below the previous file's 2/);
-  assert(computeEpochV3({ ...i2, rulesBlock: r2 }, f1));
+  assert.throws(() => computeEpochV3({ ...i2, rulesBlock: DEFAULT_RULES_V3 }, f1), /rulesId 2 is below the previous file's 3/);
+  assert(computeEpochV3({ ...i2, rulesBlock: r3 }, f1));
   // a file written without the block is recomputed under the default and fails verification
   const { rulesBlock: _r, ...stripped } = clone(w.epochs[0].file) as EpochFileV3 & { rulesBlock?: unknown };
   const noBlock = { ...stripped, dataHash: "" } as unknown as EpochFileV3;
@@ -272,24 +274,29 @@ test("CF-22: publishAgeError refuses a publication more than MAX_PUBLISH_LAG aft
 
 test("rules-v3.ts: the registry is append-only, versioned, and says which block an epoch carries", () => {
   assert.strictEqual(rulesRegistryErrorV3(), null);
-  assert.strictEqual(RULES_V3_VERSIONS.length, 1, "rules 1 only today");
+  assert.strictEqual(RULES_V3_VERSIONS.length, 1, "one version only today: rulesId 2 (F5 replaced rulesId 1 before any v3 epoch)");
+  assert.strictEqual(FIRST_RULES_ID_V3, 2);
+  assert.strictEqual(RULES_V3_VERSIONS[0].rules.rulesId, 2);
+  assert.strictEqual(rulesForEpochV3(1, null).rulesId, 2, "the first v3 epoch is built under rulesId 2");
+  // a registry that starts at the retired rulesId 1 is refused
+  assert.match(String(rulesRegistryErrorV3([{ ...RULES_V3_VERSIONS[0], rules: { ...RULES_V3_VERSIONS[0].rules, rulesId: 1 } }])), /rules version 2: .*rulesId 1 was replaced/);
   assert.deepStrictEqual(rulesForEpochV3(17, null), rulesBlockOf(DEFAULT_RULES_V3));
   assert.strictEqual(rulesForEpochV3(17, "ab".repeat(32)).programHash, "ab".repeat(32), "the pinned binary's hash");
   assert.strictEqual(RULES_V3_VERSIONS[0].rules.operatorWallets.wallets.length, 0, "no operator wallet is listed until the operator publishes one");
-  const v2: RulesVersionV3 = { fromEpoch: 20, announced: "2027-02-01", rules: { ...RULES_V3_VERSIONS[0].rules, rulesId: 2, operatorWallets: { rule: "rank-last", wallets: [wallet(9)], exceptions: [] } } };
+  const v2: RulesVersionV3 = { fromEpoch: 20, announced: "2027-02-01", rules: { ...RULES_V3_VERSIONS[0].rules, rulesId: 3, operatorWallets: { rule: "rank-last", wallets: [wallet(9)], exceptions: [] } } };
   const reg = [...RULES_V3_VERSIONS, v2];
   assert.strictEqual(rulesRegistryErrorV3(reg), null);
-  assert.strictEqual(rulesForEpochV3(19, null, reg).rulesId, 1);
-  assert.strictEqual(rulesForEpochV3(20, null, reg).rulesId, 2);
-  assert.match(String(rulesRegistryErrorV3([...RULES_V3_VERSIONS, { ...v2, rules: { ...v2.rules, rulesId: 3 } }])), /has rulesId 3/);
+  assert.strictEqual(rulesForEpochV3(19, null, reg).rulesId, 2);
+  assert.strictEqual(rulesForEpochV3(20, null, reg).rulesId, 3);
+  assert.match(String(rulesRegistryErrorV3([...RULES_V3_VERSIONS, { ...v2, rules: { ...v2.rules, rulesId: 4 } }])), /has rulesId 4/);
   assert.match(String(rulesRegistryErrorV3([...RULES_V3_VERSIONS, { ...v2, announced: null }])), /YYYY-MM-DD/);
   assert.match(String(rulesRegistryErrorV3([{ ...RULES_V3_VERSIONS[0], fromEpoch: 3 }])), /from the first v3 epoch/);
-  assert.match(String(rulesRegistryErrorV3([...RULES_V3_VERSIONS, v2, { ...v2, rules: { ...v2.rules, rulesId: 3 } }])), /not after the previous version's/);
+  assert.match(String(rulesRegistryErrorV3([...RULES_V3_VERSIONS, v2, { ...v2, rules: { ...v2.rules, rulesId: 4 } }])), /not after the previous version's/);
   // a file carries exactly the version in force for its epoch
   const f = world("x010-counters-t134-supply").epochs[1].file;
   assert.strictEqual(rulesInForceErrorV3(f, null), null);
   assert.strictEqual(rulesInForceErrorV3(f, null, reg), null, "epoch 2 is before version 2's first epoch");
-  assert.match(String(rulesInForceErrorV3({ ...f, epoch: 20 }, null, reg)), /records rules 1, not the rules version in force for it \(2\)/);
+  assert.match(String(rulesInForceErrorV3({ ...f, epoch: 20 }, null, reg)), /records rules 2, not the rules version in force for it \(3\)/);
   assert.match(String(rulesInForceErrorV3(world("d18-operator-exception").epochs[0].file, null)), /not the rules version in force/, "a block that is not a published version");
   assert.match(String(rulesInForceErrorV3({ epoch: 3 }, null)), /has no rules block/);
 });

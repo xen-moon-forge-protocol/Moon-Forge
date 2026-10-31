@@ -23,7 +23,7 @@
  *        at or after the seat's slot, so a pending bet is never skipped by a stale read);
  *      - holder only: arm_keeper with deposit 0 (the bond already >= KEEPER_BOND_MIN) when nothing is pending and the
  *        chain is nearly used up, is not derivable by this key, or the seat was idle for KEEPALIVE_AFTER (the seat dies
- *        after 28 days without arm / reveal / settle). NEVER a deposit and NEVER take_keeper: both are owner steps (S7);
+ *        after 28 days without arm / reveal / settle). NEVER a deposit and NEVER take_keeper: both are manual steps (F1-b: the first arm comes later, not at S7);
  *      - draw_jackpot (with keeper_seat): by the holder when it can settle in time, by any other key HELPER_DRAW_GRACE
  *        after the end, at once when there is no seat (the program then refunds every entry, reason 3);
  *        legacy rounds drawn by the v2 binary settle through settle_jackpot; legacy bets through settle_bet.
@@ -262,13 +262,14 @@ export function seatOf(d: any): SeatV3 {
 export type RoleV3 = "no-seat" | "helper" | "holder" | "holder-unknown-chain";
 
 /**
- * What the holder does with its seat this pass (pure). Posting a bond and taking a seat are owner steps: a seat that
+ * What the holder does with its seat this pass (pure). Posting a bond and taking a seat are manual operator steps (a
+ * bond comes only from a project wallet, never from the loop): a seat that
  * does not exist or holds less than KEEPER_BOND_MIN is left alone, and arm_keeper is only ever sent with deposit 0.
  */
 export function armDecision(seat: SeatV3 | null, me: PublicKey, chainKnown: boolean, now: number): { arm: boolean; reason: string } {
-  if (!seat) return { arm: false, reason: "no keeper seat yet: the first arm_keeper (with the 20-XNT bond) is an owner step (S7)" };
+  if (!seat) return { arm: false, reason: "no keeper seat (F1-b: armed only later, once a keeper runs continuously; the first arm_keeper with its 20-XNT bond is not an S7 step)" };
   if (!seat.keeper.equals(me)) return { arm: false, reason: `helper: the seat is held by ${seat.keeper.toBase58()}` };
-  if (seat.bond < KEEPER_BOND_MIN) return { arm: false, reason: `idle: the bond ${seat.bond} is below KEEPER_BOND_MIN ${KEEPER_BOND_MIN}; posting a bond is an owner step` };
+  if (seat.bond < KEEPER_BOND_MIN) return { arm: false, reason: `idle: the bond ${seat.bond} is below KEEPER_BOND_MIN ${KEEPER_BOND_MIN}; posting a bond is a manual operator step (from a project wallet only)` };
   if (seat.pendingBets > 0) return { arm: false, reason: `busy: ${seat.pendingBets} pending` };
   if (!chainKnown) return { arm: true, reason: "the seat's chain is not derivable by this key: re-arming with nothing pending" };
   if (seat.length - seat.nextIndex < REARM_BELOW) return { arm: true, reason: `${seat.length - seat.nextIndex} positions left (< ${REARM_BELOW})` };
@@ -1477,11 +1478,12 @@ export async function nextDeadlineV3(connection: Connection, program: anchor.Pro
   return { at: Math.max(now, due[0].at), reasons: due.slice(0, 5).map((d) => d.why) };
 }
 
-// ── S7 owner step: the first arm (with the bond) ────────────────────────────────────────────────────────────────────
+// ── later manual step (F1-b, not S7): the first arm ─────────────────────────────────────────────────────────────────
 /**
  * `keeper-arm --deposit <XNT> [--yes]`: arms the seat with a chain this key derives (so every keeper run holding the key
  * can reveal it), adding `deposit` to the bond. The first arm creates the seat, whose keeper is the program's
- * INITIAL_KEEPER. An owner step (it moves the bond); without --yes it only prints the plan. Never called by the loop.
+ * INITIAL_KEEPER. A manual step (it moves the bond), run only later, once a keeper runs continuously (F1-b: not at S7;
+ * s7.mjs --arm-keeper), with a bond from project wallets; without --yes it only prints the plan. Never called by the loop.
  */
 export async function armKeeperCli(connection: Connection, program: anchor.Program, signer: Keypair, depositXnt: number, yes: boolean, log = console.log): Promise<string | null> {
   if (!isV3Program(program)) throw new Error("keeper-arm needs the v3 client");
@@ -1490,7 +1492,7 @@ export async function armKeeperCli(connection: Connection, program: anchor.Progr
   if (verdict.status !== "upgraded") throw new Error(`refusing to arm: the live program is not the upgraded binary (${verdict.status}: ${verdict.reasons.join("; ")}) (W2-4)`);
   const raw = await fetchAs(connection, program, "HouseKeeper", PDA_V3.houseKeeper());
   const seat = raw ? seatOf(raw) : null;
-  if (seat && !seat.keeper.equals(signer.publicKey)) throw new Error(`the seat is held by ${seat.keeper.toBase58()}, not this key ${signer.publicKey.toBase58()} (take_keeper is a separate owner step)`);
+  if (seat && !seat.keeper.equals(signer.publicKey)) throw new Error(`the seat is held by ${seat.keeper.toBase58()}, not this key ${signer.publicKey.toBase58()} (take_keeper is a separate manual operator step)`);
   if (seat && seat.pendingBets > 0) throw new Error(`the seat has ${seat.pendingBets} pending bets / drawing rounds: arm_keeper would fail (KeeperBusy)`);
   const deposit = BigInt(Math.round(depositXnt * 1e9));
   const bondAfter = (seat ? seat.bond : 0n) + deposit;
@@ -1532,7 +1534,8 @@ export async function assertChainDerivableV3(connection: Connection, program: an
 /**
  * `keeper-take --deposit <XNT> [--yes]` (R-4): take_keeper by the named successor after KEEPER_NOTICE, or by anyone once
  * the seat is dead (28 days without arm / reveal / settle), on a chain this key derives. The old bond goes back to the
- * old keeper in full; `deposit` is the new bond (at least KEEPER_BOND_MIN). An owner step; without --yes it only prints
+ * old keeper in full; `deposit` is the new bond (at least KEEPER_BOND_MIN), from a project wallet only. A manual operator
+ * step; without --yes it only prints
  * the plan. After landing, the seat's chain is checked to be derivable by this key.
  */
 export async function takeKeeperCli(connection: Connection, program: anchor.Program, signer: Keypair, depositXnt: number, yes: boolean, log = console.log): Promise<string | null> {

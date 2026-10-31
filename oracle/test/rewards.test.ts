@@ -12,9 +12,9 @@ import {
   allocateBurns, allocItem, AnyEpochFile, buildLimit, BurnInputV3, EPOCH_ACCOUNT_SIZE, EPOCH_RENT, ORACLE_ALLOWANCE_BOUND_BPS, ORACLE_ALLOWANCE_MAX, oracleAllowanceMax, ORACLE_TOPUP_MAX, ORACLE_TOPUP_TARGET, buildEpochFileV3, clampL, CLOCK_SKEW_MAX, computeEpochV3, computeEpochV3SkippingUnpriced, curve, curvePot,
   dataHashV3, dayOf, decay, decayFactor, DECAY_Q, encodeLeaves, EpochFileV3, EpochInputsV3, globalOrder, tieKeyV3,
   fitClaim, isoSeconds, lamportsOf, limitGate, medianE18, MIN_WINDOW, NoXenPriceError, ORIGIN_DROP, ORIGIN_FORGED, ORIGIN_GENESIS, pinnedSwitchError, plannedOutflow,
-  priceReadings, programClaims, protoPath, PublishedEpochV3, rebuildReason, retiredBaseTerms, runCurve, SnapshotRecord, snapshotWindowEnd, spotMicro, SwitchRefV3,
+  priceReadings, programClaims, protoPath, PublishedEpochV3, rebuildReason, retiredBaseTerms, runCurve, SnapshotRecord, snapshotWindowEnd, spotMicro, SwitchRefV3, switchLiquidityV3,
   switchRefsFromV2, TargetV3, verifyAny, verifyChainLinkV3, verifyChainSetV3, verifyEpochV3, verifyPublishedV3,
-  verifySnapshotTimeV3, verifySnapshotV3, xenPrice, xntPrice, xntReference,
+  verifySnapshotTimeV3, verifySnapshotV3, xenPrice, xntPrice, xntReference, anomalyGateV3, nextLiquidityV3, liquidityCarriedV3, recordedLiquiditySamplesV3,
 } from "../src/rewards";
 
 let passed = 0;
@@ -131,7 +131,7 @@ function mk(b: Build, prev: AnyEpochFile | null): EpochInputsV3 {
     chains, snapshot: { slot: 100 + b.epoch, records: b.records ?? [] },
     freePool: { lamports: b.F.toString(), slot: 99 + b.epoch, open: prev ? (b.open ?? b.F).toString() : null },
     xnt: { twapE18: (b.twap ?? x).toString(), apiE18: x.toString(), source: "test" },
-    switchRefs: b.switchRefs !== undefined ? b.switchRefs : prev?.version === 2 ? prev.chains.map((c) => ({ chainId: c.chainId, readings: [c.xenUsdE18] })) : null,
+    switchRefs: b.switchRefs !== undefined ? b.switchRefs : prev?.version === 2 ? prev.chains.map((c) => ({ chainId: c.chainId, readings: [c.xenUsdE18], liquidity: [BigInt(c.liquidityUsdMicro || "0").toString()] })) : null,
   };
 }
 
@@ -334,11 +334,17 @@ test("L growth clamp with an additive step; recovery from a zero reading is boun
   }
   const H = W(1);
   const f1 = build({ epoch: 1, endTs: T0 + WEEK, F: 1_000n * XNT, chains: { 10: { L: 1_000_000_000n } }, burns: [burn(H, T0 + HOUR, 1_000n)] }, null);
-  // D-13 (a): a genesis build (no previous file) takes the statistic of its window (here the build's one reading) and
-  // freezes the next window's L from it; the next build's reading of $1M moves only the L frozen for the window after
-  assert.deepStrictEqual(f1.chains[0].L, { now: "1000000000", onChain: null, prev: null, used: "1000000000", rule: "genesis", stat: "1000000000", next: "1000000000", cap: null });
+  // D-13 (a): a genesis build (no previous file) takes the statistic of its window (here the build's one reading); with no
+  // feed of the window (no recorded hourly sample) the next window's L is carried (F5): the build's reading never moves it
+  assert.deepStrictEqual(f1.chains[0].L, { now: "1000000000", onChain: null, prev: null, used: "1000000000", rule: "genesis", stat: "1000000000", next: "1000000000", nextRule: "carried", cap: null });
   const f2 = build({ epoch: 2, endTs: T0 + 2 * WEEK, F: 1_000n * XNT, chains: { 10: { L: 10n ** 12n } }, burns: [burn(H, T0 + WEEK + HOUR, 1_000n)] }, f1);
-  assert.deepStrictEqual(f2.chains[0].L, { now: "1000000000000", onChain: null, prev: "1000000000", used: "1000000000", rule: "frozen", stat: "1000000000000", next: "1150000000", cap: null });
+  assert.deepStrictEqual(f2.chains[0].L, { now: "1000000000000", onChain: null, prev: "1000000000", used: "1000000000", rule: "frozen", stat: "1000000000000", next: "1000000000", nextRule: "carried", cap: null });
+  // with a feed of the window at $1M every hour, the statistic moves the L frozen for the window after by the growth clamp only
+  const i2 = mk({ epoch: 2, endTs: T0 + 2 * WEEK, F: 1_000n * XNT, chains: { 10: { L: 10n ** 12n } }, burns: [burn(H, T0 + WEEK + HOUR, 1_000n)] }, f1);
+  const endH = Math.floor(i2.window.endTs / HOUR);
+  i2.chains[0].liquiditySamples = Array.from({ length: 160 }, (_, k) => ({ hour: endH - 160 + k, micro: (10n ** 12n).toString() }));
+  const g2 = buildEpochFileV3(i2, f1)!;
+  assert.deepStrictEqual([g2.chains[0].L.used, g2.chains[0].L.nextRule, g2.chains[0].L.next], ["1000000000", "clamp", "1150000000"]);
 });
 
 test("XNT per burn (A1, A3.2, A5): max(median, last close, 0.6 × previous x), no upper cap; fallback = max(twap, api)", () => {
@@ -725,13 +731,14 @@ const s2 = build({ epoch: 2, endTs: T0 + WEEK, F: F10K, x: X1 / 2n, chains: { 10
 test("v2 → v3: the switch epoch maps L, x, the curve and the snapshot from the v2 file (TR-3); the v2 holders change nothing in the base (A13.1)", () => {
   assert.deepStrictEqual(verifyAny(v2, null), [], "v2 files keep verifying with the v2 rules");
   const c = s2.chains.find((x) => x.chainId === 10)!;
-  // D-13 (a): the switch window is valued at the v2 file's reading (known from its first hour); the build freezes the next one
-  assert.deepStrictEqual(c.L, { now: "5950000000", onChain: null, prev: V2_L.toString(), used: V2_L.toString(), rule: "switch", stat: "5950000000", next: clampL(5_950_000_000n, V2_L).toString(), cap: null });
+  // D-13 (a): the switch window is valued at the v2 file's reading (known from its first hour); the build freezes the next
+  // one: with no feed of the window (F5) it carries that reading (with a full feed it would be clampL(5_950_000_000n, V2_L))
+  assert.deepStrictEqual(c.L, { now: "5950000000", onChain: null, prev: V2_L.toString(), used: V2_L.toString(), rule: "switch", stat: "5950000000", next: V2_L.toString(), nextRule: "carried", cap: null });
   assert.deepStrictEqual(c.curveBefore, { S: "63000", hour: Math.floor((T0 - DAY) / HOUR) });
   assert.strictEqual(s2.xnt.prevE18, "153000000000000000");
   assert.strictEqual(s2.xnt.floorE18, ((153_000_000_000_000_000n * 6_000n) / 10_000n).toString(), "the floor comes from the v2 price (A1)");
   assert.strictEqual(s2.xnt.usdE18, X1.toString(), "the burns' own XNT prices, not the build price");
-  assert.deepStrictEqual(s2.switchRefs, [{ chainId: 10, readings: [P6.toString()] }]);
+  assert.deepStrictEqual(s2.switchRefs, [{ chainId: 10, readings: [P6.toString()], liquidity: [V2_L.toString()] }]);
   assert.strictEqual(s2.v3FirstEpoch, 2);
   assert.strictEqual(s2.prevDataHash, v2.dataHash);
   const bare = build({ epoch: 2, endTs: T0 + WEEK, F: F10K, x: X1 / 2n, chains: { 10: { L: 5_950_000_000n } }, burns: s2burns, records: [] }, v2);
@@ -865,9 +872,10 @@ test("a skipped chain keeps its cursor, L and curve; its burns are read when it 
   assert(!f2.burns.some((b) => b.chainId === 56));
   const f3 = build({ epoch: 3, endTs: T0 + 3 * WEEK, F: 100n * XNT, chains: { 56: { L: 10n ** 13n } }, burns: [late, burn(W(2), T0 + 2 * WEEK + DAY, 1_000_000n)] }, f2);
   const c3 = f3.chains.find((c) => c.chainId === 56)!;
-  // D-13 (a): the skipped week carried the frozen L; the comeback week is valued at it, and freezes the next one
-  assert.deepStrictEqual([c2.L.rule, c2.L.next], ["carried", c1.L.next]);
-  assert.deepStrictEqual([c3.L.prev, c3.L.used, c3.L.rule, c3.L.next], [c1.L.used, c1.L.next, "frozen", clampL(10n ** 13n, BigInt(c1.L.next!)).toString()]);
+  // D-13 (a): the skipped week carried the frozen L; the comeback week is valued at it, and freezes the next one (F5: with
+  // no feed of the comeback window, the build's own reading moves nothing: the L is carried once more)
+  assert.deepStrictEqual([c2.L.rule, c2.L.nextRule, c2.L.next], ["carried", "carried", c1.L.next]);
+  assert.deepStrictEqual([c3.L.prev, c3.L.used, c3.L.rule, c3.L.nextRule, c3.L.next], [c1.L.used, c1.L.next, "frozen", "carried", c1.L.next]);
   assert.deepStrictEqual(c3.curveBefore, c1.curveAfter);
   assert.deepStrictEqual(c3.refInputs, ["0", c1.xenUsdE18]);
   const lateBurn = f3.burns.find((b) => b.txHash === late.txHash)!;
@@ -1084,7 +1092,8 @@ test("SC-9: a candle price of 0 is refused; missing candles must be recorded as 
 test("SC-10: the switch epoch's reference is the median of the last 4 v2 readings, recorded and checked", () => {
   const hi = (P6 * 3n) / 2n;
   const v2hi = v2File(4, T0, [v2burn], [{ ...v2chain, xenUsd: 1.5e-6, xenUsdE18: hi.toString() }], [], 153_000_000_000_000_000n);
-  const refs = [{ chainId: 10, readings: [hi.toString(), P6.toString(), P6.toString(), P6.toString()] }];
+  const L4 = [V2_L.toString(), V2_L.toString(), V2_L.toString(), V2_L.toString()];
+  const refs = [{ chainId: 10, readings: [hi.toString(), P6.toString(), P6.toString(), P6.toString()], liquidity: L4 }];
   const inp = (switchRefs: SwitchRefV3[] | null) => mk({ epoch: 5, endTs: T0 + WEEK, F: F10K, burns: weekBurns(1, [H]), switchRefs }, v2hi);
   const sw = build({ epoch: 5, endTs: T0 + WEEK, F: F10K, burns: weekBurns(1, [H]), switchRefs: refs }, v2hi);
   const c = sw.chains.find((x) => x.chainId === 10)!;
@@ -1092,11 +1101,74 @@ test("SC-10: the switch epoch's reference is the median of the last 4 v2 reading
   assert.deepStrictEqual(sw.switchRefs, refs);
   assert.deepStrictEqual(verifyAny(sw, v2hi), []);
   assert.throws(() => computeEpochV3(inp(null), v2hi), /needs switchRefs/);
-  assert.throws(() => computeEpochV3(inp([{ chainId: 10, readings: [P6.toString()] }]), v2hi), /first reading/);
-  assert.throws(() => computeEpochV3(inp([...refs, { chainId: 56, readings: ["1"] }]), v2hi), /not in the v2 file/);
-  assert.throws(() => computeEpochV3(inp([{ chainId: 10, readings: [hi.toString(), "1", "1", "1", "1"] }]), v2hi), /1 to 4 readings/);
+  assert.throws(() => computeEpochV3(inp([{ chainId: 10, readings: [P6.toString()], liquidity: [V2_L.toString()] }]), v2hi), /first reading/);
+  assert.throws(() => computeEpochV3(inp([...refs, { chainId: 56, readings: ["1"], liquidity: ["1"] }]), v2hi), /not in the v2 file/);
+  assert.throws(() => computeEpochV3(inp([{ chainId: 10, readings: [hi.toString(), "1", "1", "1", "1"], liquidity: [...L4, "1"] }]), v2hi), /1 to 4 readings/);
   assert.throws(() => computeEpochV3(mk({ epoch: 3, endTs: T0 + 2 * WEEK, F: F10K, burns: weekBurns(2, [H]), switchRefs: refs }, s2), s2), /only at the v2 → v3 switch/);
-  assert.deepStrictEqual(switchRefsFromV2([v2hi, v2]), [{ chainId: 10, readings: [hi.toString(), P6.toString()] }]);
+  assert.deepStrictEqual(switchRefsFromV2([v2hi, v2]), [{ chainId: 10, readings: [hi.toString(), P6.toString()], liquidity: [V2_L.toString(), V2_L.toString()] }]);
+});
+
+test("r6-review 2: the switch window's L is the median of the last (up to) 4 v2 liquidity readings, recorded and checked", () => {
+  const hi = (P6 * 3n) / 2n;
+  const v2hi = v2File(4, T0, [v2burn], [{ ...v2chain, xenUsd: 1.5e-6, xenUsdE18: hi.toString() }], [], 153_000_000_000_000_000n);
+  const readings = [hi.toString(), P6.toString(), P6.toString(), P6.toString()];
+  // the last v2 build read the pool inflated 40× (a JIT deposit at a forced v2 epoch); the 3 v2 files before read $1,000-$1,200
+  const liquidity = [V2_L.toString(), "1000000000", "1200000000", "1100000000"];
+  const refs = [{ chainId: 10, readings, liquidity }];
+  const sw = build({ epoch: 5, endTs: T0 + WEEK, F: F10K, burns: weekBurns(1, [H]), switchRefs: refs }, v2hi);
+  const c = sw.chains.find((x) => x.chainId === 10)!;
+  const median = switchLiquidityV3(liquidity.map(BigInt))!;
+  assert.strictEqual(median, 1_150_000_000n, "the floor of the mean of the middle two of 1,000 / 1,100 / 1,200 / 1,340.77");
+  assert.deepStrictEqual([c.L.rule, c.L.prev, c.L.used], ["switch", V2_L.toString(), median.toString()], "used = the median, not the last v2 reading alone");
+  assert.notStrictEqual(c.L.used, V2_L.toString());
+  assert.deepStrictEqual(sw.switchRefs, refs, "recorded in the file (hashed)");
+  assert.deepStrictEqual(verifyAny(sw, v2hi), []);
+  // the same burns valued at a single reading would differ: the median is what values the window
+  const one = build({ epoch: 5, endTs: T0 + WEEK, F: F10K, burns: weekBurns(1, [H]), switchRefs: [{ chainId: 10, readings: [hi.toString()], liquidity: [V2_L.toString()] }] }, v2hi);
+  assert.strictEqual(one.chains.find((x) => x.chainId === 10)!.L.used, V2_L.toString());
+  // checked: one liquidity reading per reading, the first = the v2 file's own, canonical integers
+  const inp = (r: unknown) => mk({ epoch: 5, endTs: T0 + WEEK, F: F10K, burns: weekBurns(1, [H]), switchRefs: r as SwitchRefV3[] }, v2hi);
+  assert.throws(() => computeEpochV3(inp([{ chainId: 10, readings }]), v2hi), /one liquidity reading per reading/);
+  assert.throws(() => computeEpochV3(inp([{ chainId: 10, readings, liquidity: liquidity.slice(0, 3) }]), v2hi), /one liquidity reading per reading/);
+  assert.throws(() => computeEpochV3(inp([{ chainId: 10, readings, liquidity: ["5", ...liquidity.slice(1)] }]), v2hi), /first liquidity reading must be epoch 4's liquidityUsdMicro/);
+  assert.throws(() => computeEpochV3(inp([{ chainId: 10, readings, liquidity: [liquidity[0], "-1", "1", "1"] }]), v2hi), /canonical unsigned integer/);
+  // a file whose recorded liquidity history was edited no longer verifies
+  const g = JSON.parse(JSON.stringify(sw)) as EpochFileV3;
+  g.switchRefs![0].liquidity[1] = "9000000000";
+  assert(verifyAny(g, v2hi).length > 0);
+  // a v2 chain skipped at the switch (no market) freezes the switch L for the next window, not the single v2 reading
+  const two = v2File(4, T0, [v2burn], [{ ...v2chain, xenUsd: 1.5e-6, xenUsdE18: hi.toString() }, { ...v2chain, chainId: 56, name: "BSC" }], [], 153_000_000_000_000_000n);
+  const refs2 = [...refs, { chainId: 56, readings: [P6.toString()], liquidity: [V2_L.toString()] }].map((r) => (r.chainId === 56 ? { ...r, readings: [P6.toString(), P6.toString()], liquidity: [V2_L.toString(), "3000000000"] } : r));
+  const sk = build({ epoch: 5, endTs: T0 + WEEK, F: F10K, burns: weekBurns(1, [H]), skip: [56], switchRefs: refs2 }, two);
+  const k = sk.chains.find((x) => x.chainId === 56)!;
+  assert.deepStrictEqual([k.skipped, k.L.rule, k.L.used, k.L.next], [true, "carried", V2_L.toString(), ((V2_L + 3_000_000_000n) / 2n).toString()]);
+  assert.deepStrictEqual(verifyAny(sk, two), []);
+});
+
+test("r6-review 2: the switch epoch is not carried when the feed has at least 2 full stat days: the next L follows the feed, not the v2 reading", () => {
+  const hi = (P6 * 3n) / 2n;
+  const v2hi = v2File(4, T0, [v2burn], [{ ...v2chain, xenUsd: 1.5e-6, xenUsdE18: hi.toString() }], [], 153_000_000_000_000_000n);
+  const refs = [{ chainId: 10, readings: [hi.toString()], liquidity: [V2_L.toString()] }];
+  const endTs = T0 + WEEK;
+  const endH = endTs / HOUR;
+  // the feed ran for the last `days` days (the upgrade happened inside the window), every hour at $3,000
+  const withFeed = (days: number) => {
+    const i = mk({ epoch: 5, endTs, F: F10K, burns: weekBurns(1, [H]), switchRefs: refs }, v2hi);
+    i.chains.find((c) => c.chainId === 10)!.liquiditySamples = Array.from({ length: days * 24 }, (_, k) => ({ hour: endH - days * 24 + 1 + k, micro: "3000000000" }));
+    return buildEpochFileV3(i, v2hi)!;
+  };
+  const L10 = (f: EpochFileV3) => f.chains.find((c) => c.chainId === 10)!.L;
+  const two = L10(withFeed(2));
+  assert.deepStrictEqual([two.rule, two.used, two.stat, two.nextRule], ["switch", V2_L.toString(), "3000000000", "clamp"], "2 full days at the switch: clamped");
+  assert.strictEqual(two.next, nextLiquidityV3(3_000_000_000n, V2_L).toString(), "the v2 reading values this window only; the feed moves the next L (+10% + $50 at most)");
+  const one = L10(withFeed(1));
+  assert.deepStrictEqual([one.nextRule, one.next], ["carried", V2_L.toString()], "1 full day: carried (and the gate holds the epoch)");
+  // the same 2-day feed after a v3 file is carried: the exception is the switch epoch's alone
+  assert.strictEqual(liquidityCarriedV3(recordedLiquiditySamplesV3(withFeed(2).chains.find((c) => c.chainId === 10)!.liquiditySamples, endTs, "c"), endTs, false).carried, true);
+  assert.deepStrictEqual(verifyAny(withFeed(2), v2hi), []);
+  // the gate: a carried chain at the switch names the switch rule; a clamped one trips no F5 reason
+  assert(anomalyGateV3(withFeed(1), v2hi, [v2hi]).some((r) => r.code === "liquidity-samples-missing" && /fewer than 2 full days at the switch epoch/.test(r.text)));
+  assert(!anomalyGateV3(withFeed(2), v2hi, [v2hi]).some((r) => r.code === "liquidity-samples-missing"));
 });
 
 test("F2: the window start is pinned below by the previous window end and exactly by the on-chain publication; the end is the snapshot block time (A8, A12)", () => {

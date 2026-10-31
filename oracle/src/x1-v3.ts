@@ -464,7 +464,7 @@ export function markWritable(ix: TransactionInstruction, key: PublicKey): void {
 
 // ── D-47: publication keeps priority over the automatic claims ───────────────────────────────────────────────────
 /**
- * D-47 (owner sheet): each publication refunds the Epoch rent and tops the oracle wallet up towards 0.25 XNT with at
+ * D-47 (decision sheet): each publication refunds the Epoch rent and tops the oracle wallet up towards 0.25 XNT with at
  * most 0.05 XNT (publishEpochV3, forge.rs oracle_allowance), but nothing else pays the oracle, so a week of many
  * automatic claims can still spend more than one top-up brings. The order is fixed: the AUTOMATIC CLAIMS it pays for (a
  * fee plus the ClaimReceipt / Mission rents each) stop first, and the publications go on with what is left (each one

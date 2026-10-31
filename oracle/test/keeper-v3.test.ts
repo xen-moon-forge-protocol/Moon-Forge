@@ -477,11 +477,11 @@ async function main() {
       keeper: me, pendingKeeper: PublicKey.default, tip: Buffer.alloc(32, 1), length: 20_000n, nextIndex: 10n, revealed: 10n, bond: KEEPER_BOND_MIN, pendingBets: 0,
       lastActiveTs: NOW - 60, armedSlot: 1n, jackpotReserved: 0n, withdrawTs: 0,
     };
-    assert.match(armDecision(null, me, false, NOW).reason, /owner step/);
+    assert.match(armDecision(null, me, false, NOW).reason, /F1-b: armed only later, once a keeper runs continuously/);
     assert.strictEqual(armDecision(null, me, false, NOW).arm, false);
     assert.match(armDecision({ ...base, keeper: Keypair.generate().publicKey }, me, true, NOW).reason, /helper/);
     assert.deepStrictEqual(armDecision({ ...base, bond: KEEPER_BOND_MIN - 1n }, me, false, NOW).arm, false);
-    assert.match(armDecision({ ...base, bond: KEEPER_BOND_MIN - 1n }, me, false, NOW).reason, /owner step/);
+    assert.match(armDecision({ ...base, bond: KEEPER_BOND_MIN - 1n }, me, false, NOW).reason, /manual operator step \(from a project wallet only\)/);
     assert.strictEqual(armDecision({ ...base, pendingBets: 1 }, me, false, NOW).arm, false, "never with something pending");
     assert.strictEqual(armDecision(base, me, false, NOW).arm, true, "a chain this key cannot derive");
     assert.strictEqual(armDecision({ ...base, nextIndex: base.length - REARM_BELOW + 1n }, me, true, NOW).arm, true);
@@ -518,7 +518,7 @@ async function main() {
     putJackpot(w, 5, { endTs: BN(NOW - 10), state: 0 }, [{ player: a, amount: XNT }, { player: b, amount: XNT }]);
     const r1 = await keeperPassV3(w.c.connection(), w.p, w.keeper, () => undefined, opts());
     assert.strictEqual(r1.role, "no-seat");
-    assert(r1.notes.some((n) => /owner step/.test(n)), "says the first arm is an owner step");
+    assert(r1.notes.some((n) => /F1-b: armed only later/.test(n)), "says the first arm comes later (F1-b), not at S7");
     assert.strictEqual(r1.sent, 1);
     assert.deepStrictEqual(w.c.names(), ["drawJackpot"]);
     assert.deepStrictEqual(w.c.sent[0].keys.map((k) => k.pubkey.toBase58()), [PDA.config(), PDA.jackpot(5), PDA.player(a), PDA_V3.houseKeeper()].map((k) => k.toBase58()));
@@ -724,7 +724,7 @@ async function main() {
     assert.deepStrictEqual((await run({})).names, [], "armed, active: nothing to do");
     const low = await run({ nextIndex: len, revealed: len, bond: KEEPER_BOND_MIN - 1n });
     assert.deepStrictEqual(low.names, []);
-    assert(low.notes.some((n) => /owner step/.test(n)));
+    assert(low.notes.some((n) => /manual operator step/.test(n)));
     assert.deepStrictEqual((await run({ nextIndex: len, revealed: len - 1, pending: 1 })).names, [], "busy: no arm");
   });
 

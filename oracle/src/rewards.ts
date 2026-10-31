@@ -13,11 +13,18 @@
  *    L        = D-13 with the feed's option (a): the L of the window is FROZEN at epoch n−1's build (its `L.next`), so
  *               it is known from the window's first hour and the site's quote is exact. Each build computes the next
  *               window's L from this window's hourly readings: stat = the minimum over the last 7 days (counted back
- *               from the window end) of each day's median reading, a reading being min(GeckoTerminal, on-chain); then
+ *               from the window end) of each day's median reading, a reading being min(GeckoTerminal, on-chain),
+ *               over the full days only (at least 4 recorded samples) when there is one, and the build's own reading
+ *               only when no sample is recorded at all (liquidityStatOfV3, r6-review 3); then
  *               next = max(50% × L, min(stat, 1.1 × L + $50)) (the symmetric 50% clamp below, the +10% + $50 step
  *               above). A chain with no L yet takes min(stat, $500 + $50 per day of its price pool's age, at most 90
- *               days) (the first-reading clamp); the v2 → v3 switch freezes the v2 file's reading (liquidityNowMicro
- *               rules below: liquidityRuleV3)
+ *               days) (the first-reading clamp); the v2 → v3 switch window is valued at the median of the chain's
+ *               last (up to) 4 v2 liquidity readings (switchRefs, switchLiquidityV3, r6-review 2), and its next L is
+ *               clamped when at least 2 stat days are full, carried otherwise (liquidityRuleV3, liquidityCarriedV3). F5 (the "carried" rule): a valued chain whose window feed is missing or
+ *               thin (fewer than 4 recorded hourly samples on more than 2 of the 7 days, the build's own reading not
+ *               counted, or no recorded sample at all) carries its L instead, next = L, so a reading taken at the build's
+ *               known time can never move the next window's L; the anomaly gate then holds the epoch
+ *               ("liquidity-samples-missing"). An orphaned chain (D-21) is never carried: its frozen L keeps halving
  *  Entitlement, at the burn's own XNT price (A1): x_i = max(XNT median, XNT last close, 0.6 × previous x)
  *    (A3.2, A5), every XNT reading of the pool in USDC.X raised to the pool-safe price when USDC.X reads more than 3%
  *    above $1 (D-22 c, xntPegV3); base = value in lamports at x_i; lp = 1.25 × base (Launchpad); band = (multiplier − 1) × lp.
@@ -96,6 +103,19 @@ export const L_STEP_MICRO = 50_000_000n;
 export const L_DROP_BPS = 5_000n;
 /** D-13: the statistic looks back this many day buckets from the window end (the minimum of the daily medians) */
 export const L_STAT_DAYS = 7;
+/**
+ * D-13, F5 (the "carried" rule, owner approval 2026-10-25): a stat day with fewer than this many RECORDED hourly samples
+ * (the week-so-far feed's; the build's own reading is not one of them) is a thin day
+ */
+export const L_MIN_SAMPLES_PER_DAY = 4;
+/** D-13, F5: a valued chain with more than this many thin days of the L_STAT_DAYS (or no recorded sample) carries its L */
+export const L_MAX_THIN_DAYS = 2;
+/**
+ * D-13, r6-review 2: the switch epoch (epoch n−1 is a v2 file) is the first window the feed runs in, and it starts at the
+ * upgrade, so its first days are always empty. Its next L is clamped by the statistic (not carried) when at least this
+ * many of the L_STAT_DAYS stat days are full (L_MIN_SAMPLES_PER_DAY recorded samples or more); otherwise carried.
+ */
+export const L_SWITCH_MIN_FULL_DAYS = 2;
 /** D-13 first-reading clamp: a chain with no L yet takes at most $500 plus $50 per whole day of its price pool's age */
 export const L_FIRST_BASE_MICRO = 500_000_000n;
 export const L_FIRST_PER_DAY_MICRO = 50_000_000n;
@@ -222,8 +242,14 @@ export const TIE_BREAK_V3 = "keccak256(txHash,logIndex)" as const;
 export const BACKLOG_RULE_V3 = "after-current-senior,first-leftover" as const;
 /** D-18: operator wallets rank after every other burn of the week, in both passes */
 export const OPERATOR_RULE_V3 = "rank-last" as const;
-/** the version of the rules this engine writes by default (rules-v3.ts holds the versions in force, by epoch) */
-export const RULES_ID_V3 = 1;
+/**
+ * the version of the rules this engine writes by default (rules-v3.ts holds the versions in force, by epoch). 2 since F5:
+ * rulesId 1 was the round-4 block, without the D-13 "carried" rule (priceRules.liquidity had no minSamplesPerDay /
+ * maxThinDays); it was replaced before any v3 epoch was built and never applies to any epoch (RULES_ID_RETIRED_V3)
+ */
+export const RULES_ID_V3 = 2;
+/** F5: the rulesId that was replaced before the first v3 epoch: a block that claims it (or a lower one) is refused */
+export const RULES_ID_RETIRED_V3 = 1;
 /** CF-26 / A11: the oracle (and the keeper) claim every leaf for its burner, dust included: no minimum */
 export const AUTO_CLAIM_MIN_V3 = 0n;
 /** an exception's name: one line, at most this many characters */
@@ -260,7 +286,8 @@ export interface PriceRulesV3 {
   /** D-13 + the feed's option (a) */
   liquidity: {
     reading: "min(geckoterminal,on-chain)";
-    stat: "min-of-daily-medians";
+    /** r6-review 3: the minimum of the daily medians of the full stat days (liquidityStatOfV3) */
+    stat: "min-of-full-day-medians";
     statDays: number;
     freeze: "previous-build";
     growthBps: number;
@@ -269,6 +296,14 @@ export interface PriceRulesV3 {
     firstBaseMicro: string;
     firstPerDayMicro: string;
     firstMaxDays: number;
+    /** F5: a stat day with fewer recorded hourly samples than this is thin */
+    minSamplesPerDay: number;
+    /** F5: more thin days than this (or no recorded sample) carries the L: next = L */
+    maxThinDays: number;
+    /** r6-review 2: the switch window's L is the median of the chain's last (up to) 4 v2 liquidity readings (switchLiquidityV3) */
+    switchL: "median-of-v2-readings";
+    /** r6-review 2: at the switch epoch the next L is clamped (not carried) when at least this many stat days are full */
+    switchMinFullDays: number;
   };
   /** D-22 (a): the daily tranche at most maxReserveBps of the XDEX XNT reserve read at the week start */
   xntTranche: { maxReserveBps: number };
@@ -303,7 +338,7 @@ export const GATE_HOLD_SECONDS = DAY;
 export const PRICE_RULES_V3: PriceRulesV3 = Object.freeze({
   liquidity: {
     reading: "min(geckoterminal,on-chain)" as const,
-    stat: "min-of-daily-medians" as const,
+    stat: "min-of-full-day-medians" as const,
     statDays: L_STAT_DAYS,
     freeze: "previous-build" as const,
     growthBps: Number(L_GROWTH_BPS),
@@ -312,6 +347,10 @@ export const PRICE_RULES_V3: PriceRulesV3 = Object.freeze({
     firstBaseMicro: L_FIRST_BASE_MICRO.toString(),
     firstPerDayMicro: L_FIRST_PER_DAY_MICRO.toString(),
     firstMaxDays: L_FIRST_MAX_DAYS,
+    minSamplesPerDay: L_MIN_SAMPLES_PER_DAY,
+    maxThinDays: L_MAX_THIN_DAYS,
+    switchL: "median-of-v2-readings" as const,
+    switchMinFullDays: L_SWITCH_MIN_FULL_DAYS,
   },
   xntTranche: { maxReserveBps: Number(XDEX_TRANCHE_BPS) },
   xntPeg: { guardBps: Number(PEG_GUARD_BPS) },
@@ -338,7 +377,7 @@ export interface RulesBlockV3 {
   programRules: 3;
   /** sha256 (hex) of that binary's ELF as pinned after S2 (x1-v3.ts UPGRADED_ELF, R-7); null while nothing is pinned */
   programHash: string | null;
-  /** the rules version: 1 for the rules of the first v3 epoch */
+  /** the rules version: 2 for the rules of the first v3 epoch (1, the round-4 block, was replaced before it: F5) */
   rulesId: number;
   /** lamports: a claim pays the keeper tip only from this amount (the program's KEEPER_TIP_MIN_CLAIM, 0.2 XNT) */
   tipMin: string;
@@ -392,6 +431,7 @@ export function rulesBlockOf(v: unknown): RulesBlockV3 {
   if (o.programRules !== 3) throw new Error(`rulesBlock.programRules ${JSON.stringify(o.programRules)}: a v3 file is published only on the upgraded program (3)`);
   if (o.programHash !== null && (typeof o.programHash !== "string" || !/^[0-9a-f]{64}$/.test(o.programHash))) throw new Error(`rulesBlock.programHash ${JSON.stringify(o.programHash)} is not null or a lowercase sha256 hex`);
   if (typeof o.rulesId !== "number" || !Number.isSafeInteger(o.rulesId) || o.rulesId < 1) throw new Error(`rulesBlock.rulesId ${JSON.stringify(o.rulesId)} is not a version number (1, 2, …)`);
+  if (o.rulesId <= RULES_ID_RETIRED_V3) throw new Error(`rulesBlock.rulesId ${o.rulesId} was replaced before any v3 epoch was built (F5, the D-13 "carried" rule, is rulesId ${RULES_ID_V3}): it never applies to any epoch`);
   if (uint(o.tipMin, "rulesBlock.tipMin", U64) !== KEEPER_TIP_MIN_CLAIM) throw new Error(`rulesBlock.tipMin ${String(o.tipMin)} is not the upgraded program's keeper-tip minimum ${KEEPER_TIP_MIN_CLAIM}`);
   if (uint(o.autoClaimMin, "rulesBlock.autoClaimMin", U64) !== AUTO_CLAIM_MIN_V3) throw new Error(`rulesBlock.autoClaimMin ${String(o.autoClaimMin)}: the oracle claims every leaf (A11), so the only value is "0"`);
   const dust = exactKeys(o.dustRule, ["vestMinEnt"], "rulesBlock.dustRule");
@@ -595,12 +635,20 @@ export interface LiquiditySampleV3 {
 }
 
 /**
- * D-13: how the window's L was set. frozen: epoch n−1's L.next (option a); switch: the v2 file's reading at the v2 → v3
- * switch; legacy: a previous v3 record written before D-13 (no `next`): min(stat, 1.1 × L + $50); first: a chain with no
+ * D-13: how the window's L was set. frozen: epoch n−1's L.next (option a); switch: at the v2 → v3 switch, the median of
+ * the chain's last (up to) 4 v2 liquidity readings (switchRefs; the v2 file's own reading when none is above 0); legacy: a previous v3 record written before D-13 (no `next`): min(stat, 1.1 × L + $50); first: a chain with no
  * L in the previous file: min(stat, first-reading cap); genesis: no previous file at all (a fresh deployment only): stat;
  * carried: a skipped chain (nothing valued, the frozen value kept).
  */
 export type LiquidityRuleV3 = "frozen" | "switch" | "legacy" | "first" | "genesis" | "carried";
+
+/**
+ * D-13, F5: how the NEXT window's L (`L.next`) was set. clamp: the statistic within [50% × L, 1.1 × L + $50]
+ * (nextLiquidityV3); carried: kept, not moved by anything this build read: for a valued chain whose window feed was
+ * missing or thin (liquidityCarriedV3: its statistic would rest on the build's own reading, taken at a known time),
+ * next = used (the L in force); for a skipped chain (nothing read), next = the previous record's next (as before F5).
+ */
+export type LiquidityNextRuleV3 = "clamp" | "carried";
 
 /** D-22 (a) / D-23: the XDEX WXNT/USDC.X pool read at the build (Raydium-CPMM vaults less the fees owed) */
 export interface XdexReadingV3 {
@@ -616,6 +664,11 @@ export interface XdexReadingV3 {
 export interface SwitchRefV3 {
   chainId: number;
   readings: string[];
+  /**
+   * r6-review 2: the chain's liquidityUsdMicro in the same v2 files, in the same order ("0" = none): the switch window's
+   * L is their median (switchLiquidityV3). Required at the switch, one per reading.
+   */
+  liquidity: string[];
 }
 
 export interface EpochInputsV3 {
@@ -693,9 +746,13 @@ export interface ChainRecordV3 {
   /**
    * now: GeckoTerminal's reading at the build; onChain: the on-chain one (null: not read); prev: epoch n−1's L; used: the L
    * of this window; rule: how it was set; stat: the D-13 statistic of this window's readings; next: the L frozen for the
-   * next window; cap: the first-reading cap (rule "first" only, else null)
+   * next window; nextRule: how next was set (F5: "clamp" = nextLiquidityV3; "carried" = kept: used for a valued chain,
+   * the previous next for a skipped one); cap: the first-reading cap (rule "first" only, else null)
    */
-  L: { now: string | null; onChain: string | null; prev: string | null; used: string | null; rule: LiquidityRuleV3 | null; stat: string | null; next: string | null; cap: string | null };
+  L: {
+    now: string | null; onChain: string | null; prev: string | null; used: string | null; rule: LiquidityRuleV3 | null; stat: string | null; next: string | null;
+    nextRule: LiquidityNextRuleV3; cap: string | null;
+  };
   /** D-13: the window's hourly readings as recorded ([] for none, and for a skipped chain) */
   liquiditySamples: LiquiditySampleV3[];
   /** D-13: the price pool's creation time used for the first-reading cap (null: unknown) */
@@ -1069,11 +1126,10 @@ function medianWithZeros(xs: bigint[]): bigint {
 }
 
 /**
- * D-13: the samples of a window as the engine uses them (checked): strictly ascending unix hours, each at or before the
- * window end (liquidityStatV3 counts only the last L_STAT_DAYS days), plus the build's own reading as the sample of the
- * end's hour when none is recorded for it. Throws on a sample after the end or out of order.
+ * D-13: the samples RECORDED for a window (the week-so-far feed's), checked: strictly ascending unix hours, each at or
+ * before the window end. Throws on a sample after the end or out of order. The build's own reading is not one of them.
  */
-export function liquiditySamplesV3(recorded: unknown, endTs: number, buildReading: bigint, what: string): { hour: number; micro: bigint }[] {
+export function recordedLiquiditySamplesV3(recorded: unknown, endTs: number, what: string): { hour: number; micro: bigint }[] {
   const list = recorded === undefined || recorded === null ? [] : recorded;
   if (!Array.isArray(list)) throw new Error(`${what} liquiditySamples is not an array`);
   const out: { hour: number; micro: bigint }[] = [];
@@ -1086,8 +1142,56 @@ export function liquiditySamplesV3(recorded: unknown, endTs: number, buildReadin
     // a sample more than L_STAT_DAYS days before the end (a window longer than a week) is recorded and not counted
     out.push({ hour, micro });
   }
-  const endHour = Math.floor(endTs / HOUR);
-  if (!out.some((s) => s.hour === endHour)) out.push({ hour: endHour, micro: buildReading });
+  return out;
+}
+
+/**
+ * D-13: the samples by stat day, day d = ⌊(endTs − hour start) / DAY⌋ (0 = the last 24 h), only d < L_STAT_DAYS. The
+ * statistic (liquidityStatV3) and the F5 coverage (liquidityCarriedV3) bucket by this one function.
+ */
+export function liquidityDaysV3(samples: { hour: number; micro: bigint }[], endTs: number): Map<number, bigint[]> {
+  const days = new Map<number, bigint[]>();
+  for (const s of samples) {
+    const d = Math.floor((endTs - s.hour * HOUR) / DAY);
+    if (d < 0 || d >= L_STAT_DAYS) continue;
+    days.set(d, [...(days.get(d) ?? []), s.micro]);
+  }
+  return days;
+}
+
+/**
+ * D-13, F5: whether a VALUED chain's next L is carried (next = L) instead of clamped (nextLiquidityV3). `recorded` = the
+ * window's samples as recorded (recordedLiquiditySamplesV3: the feed's hourly readings; the build's own reading is NOT
+ * one of them, it is the one reading taken at a known time). A stat day with fewer than L_MIN_SAMPLES_PER_DAY recorded
+ * samples is thin; the next L is carried when more than L_MAX_THIN_DAYS of the L_STAT_DAYS days are thin, or when no
+ * sample is recorded in them at all (no feed). An orphaned chain (D-21, `orphan`) is never carried: it has no market and
+ * its reading is 0 by rule (no LP can move it), so its frozen L keeps halving each week, as D-21 says.
+ *
+ * `switchEpoch` (r6-review 2: epoch n−1 is a v2 file): the feed starts at the upgrade, inside this window, so its first
+ * days are empty by construction. The next L is then clamped when at least L_SWITCH_MIN_FULL_DAYS stat days are full,
+ * and carried otherwise: a v2 build-time reading never sets the L of a second window when the feed has run.
+ */
+export function liquidityCarriedV3(recorded: { hour: number; micro: bigint }[], endTs: number, orphan: boolean, switchEpoch = false): { carried: boolean; samples: number; thinDays: number } {
+  const days = liquidityDaysV3(recorded, endTs);
+  let samples = 0;
+  let thinDays = 0;
+  for (let d = 0; d < L_STAT_DAYS; d++) {
+    const n = days.get(d)?.length ?? 0;
+    samples += n;
+    if (n < L_MIN_SAMPLES_PER_DAY) thinDays++;
+  }
+  const thin = switchEpoch ? L_STAT_DAYS - thinDays < L_SWITCH_MIN_FULL_DAYS : thinDays > L_MAX_THIN_DAYS;
+  return { carried: !orphan && (samples === 0 || thin), samples, thinDays };
+}
+
+/** The minimum of the daily medians (zeros included) of a set of stat days; throws when there is none. */
+function minOfDayMedians(days: Iterable<bigint[]>): bigint {
+  let out: bigint | null = null;
+  for (const v of days) {
+    const m = medianWithZeros(v);
+    if (out === null || m < out) out = m;
+  }
+  if (out === null) throw new Error("the liquidity statistic has no sample");
   return out;
 }
 
@@ -1095,22 +1199,40 @@ export function liquiditySamplesV3(recorded: unknown, endTs: number, buildReadin
  * D-13: the minimum over the last L_STAT_DAYS days (day d = ⌊(endTs − hour start) / DAY⌋, 0 = the last 24 h) of each
  * day's median reading, zeros included: raising it takes a deeper pool for more than half of EVERY day of the week; one
  * build-time reading (a JIT deposit, or a pull for some minutes) moves one sample of one day. Days without a sample do
- * not count; at least the build's own reading is always there.
+ * not count. The build takes it over the samples liquidityStatOfV3 selects.
  */
 export function liquidityStatV3(samples: { hour: number; micro: bigint }[], endTs: number): bigint {
-  const days = new Map<number, bigint[]>();
-  for (const s of samples) {
-    const d = Math.floor((endTs - s.hour * HOUR) / DAY);
-    if (d < 0 || d >= L_STAT_DAYS) continue;
-    days.set(d, [...(days.get(d) ?? []), s.micro]);
-  }
-  let out: bigint | null = null;
-  for (const v of days.values()) {
-    const m = medianWithZeros(v);
-    if (out === null || m < out) out = m;
-  }
-  if (out === null) throw new Error("the liquidity statistic has no sample");
-  return out;
+  const days = liquidityDaysV3(samples, endTs);
+  return minOfDayMedians(days.values());
+}
+
+/**
+ * D-13, r6-review 3: the statistic the build records (L.stat). `recorded` = the window's RECORDED samples
+ * (recordedLiquiditySamplesV3); `buildReading` = the build's own reading (min of GeckoTerminal and on-chain).
+ *  - over the FULL stat days only (at least L_MIN_SAMPLES_PER_DAY recorded samples) when there is one: a thin day (say the
+ *    last 24 h when the feed stopped) can no longer be decided by one or two readings, the build's own included;
+ *  - else over every stat day with a recorded sample (all thin: the chain is carried, the statistic only informs, or
+ *    caps a first L);
+ *  - the build's own reading only when no sample is recorded in the 7 days at all (no feed). It is never added to
+ *    recorded samples: it is the one reading taken at a known time.
+ */
+export function liquidityStatOfV3(recorded: { hour: number; micro: bigint }[], endTs: number, buildReading: bigint): bigint {
+  const days = liquidityDaysV3(recorded, endTs);
+  const full = [...days.values()].filter((v) => v.length >= L_MIN_SAMPLES_PER_DAY);
+  if (full.length) return minOfDayMedians(full);
+  if (days.size) return minOfDayMedians(days.values());
+  return buildReading;
+}
+
+/**
+ * D-13, r6-review 2: the L that values the switch window (epoch n−1 is a v2 file): the median (zeros excluded: a v2 "0"
+ * is no reading) of the chain's last (up to) 4 v2 liquidity readings (switchRefs[].liquidity); null when none is above 0.
+ * One v2 build-time reading (a dust burn can force a v2 epoch, and a thin pool can be moved for the minutes of a build) no
+ * longer sets the first v3 window's L alone.
+ */
+export function switchLiquidityV3(readings: bigint[]): bigint | null {
+  const v = readings.filter((x) => x > 0n);
+  return v.length ? medianWithZeros(v) : null;
 }
 
 /** D-13 first-reading cap: $500 + $50 per whole day of the price pool's age at the window start (at most 90 days; unknown = 0). */
@@ -1126,15 +1248,16 @@ export function nextLiquidityV3(stat: bigint, used: bigint): bigint {
 
 /**
  * D-13 with option (a): the L that values window n, and why. `prev` = the chain's record in epoch n−1's file: its
- * frozen `next` (a v3 record written by this engine), the v2 reading (the switch), or the L of a v3 record written before
- * D-13 (no `next` member: the old build-time rule, min(stat, 1.1 × L + $50)); a chain with no L there takes the
+ * frozen `next` (a v3 record written by this engine), the v2 readings (the switch: `switchL`, the median of the last (up
+ * to) 4 v2 readings, switchLiquidityV3; the v2 file's own reading when it is not given), or the L of a v3 record written
+ * before D-13 (no `next` member: the old build-time rule, min(stat, 1.1 × L + $50)); a chain with no L there takes the
  * first-reading cap, and only a build with no previous file at all (a fresh deployment) takes the statistic as it is.
  */
 export function liquidityRuleV3(
-  prev: { L: bigint | null; next: bigint | null | undefined; v2: boolean } | null, hasPrevFile: boolean, stat: bigint, cap: bigint,
+  prev: { L: bigint | null; next: bigint | null | undefined; v2: boolean; switchL?: bigint | null } | null, hasPrevFile: boolean, stat: bigint, cap: bigint,
 ): { used: bigint; rule: Exclude<LiquidityRuleV3, "carried">; cap: bigint | null } {
   if (prev && prev.next !== undefined && prev.next !== null) return { used: prev.next, rule: "frozen", cap: null };
-  if (prev && prev.v2 && prev.L !== null) return { used: prev.L, rule: "switch", cap: null };
+  if (prev && prev.v2 && prev.L !== null) return { used: prev.switchL ?? prev.L, rule: "switch", cap: null };
   if (prev && prev.next === undefined && !prev.v2 && prev.L !== null) return { used: clampL(stat, prev.L), rule: "legacy", cap: null };
   if (!hasPrevFile) return { used: stat, rule: "genesis", cap: null };
   return { used: min(stat, cap), rule: "first", cap };
@@ -1514,6 +1637,8 @@ interface PrevChain {
   refInputs: bigint[];
   /** v2 only: the chain's xenUsdE18 in the v2 file (the first switch reading) */
   v2Reading: bigint | null;
+  /** v2 only, set by applySwitchRefs (r6-review 2): the switch window's L, the median of the last (up to) 4 v2 liquidity readings */
+  switchL?: bigint | null;
   /** D-12: the previous file carried this chain without reading it (a v2 file never skips a chain) */
   skipped: boolean;
   /** X-010: the previous record's portal counters (null: none recorded) */
@@ -1637,25 +1762,39 @@ function applySwitchRefs(p: PrevState, refs: SwitchRefV3[] | null | undefined): 
   }
   if (!Array.isArray(refs)) throw new Error("the v2 → v3 switch needs switchRefs: the last (up to) 4 v2 readings of every chain");
   const out: SwitchRefV3[] = [];
-  for (const r of refs.map((x) => ({ chainId: nat(x.chainId, "switchRefs chain id"), readings: x.readings })).sort((a, b) => a.chainId - b.chainId)) {
+  for (const r of refs.map((x) => ({ chainId: nat(x.chainId, "switchRefs chain id"), readings: x.readings, liquidity: (x as { liquidity?: unknown }).liquidity })).sort((a, b) => a.chainId - b.chainId)) {
     const pc = p.chains.get(r.chainId);
     if (!pc) throw new Error(`switchRefs: chain ${r.chainId} is not in the v2 file`);
     if (out.length && out[out.length - 1].chainId === r.chainId) throw new Error(`switchRefs: chain ${r.chainId} twice`);
     if (!Array.isArray(r.readings) || r.readings.length < 1 || r.readings.length > 4) throw new Error(`switchRefs ${r.chainId}: 1 to 4 readings`);
     const readings = r.readings.map((x, i) => uint(x, `switchRefs ${r.chainId}[${i}]`));
     if (readings[0] !== pc.v2Reading) throw new Error(`switchRefs ${r.chainId}: the first reading must be epoch ${p.epoch}'s xenUsdE18`);
+    // r6-review 2: the v2 liquidity readings of the same files; the switch window's L is their median
+    if (!Array.isArray(r.liquidity) || r.liquidity.length !== readings.length) throw new Error(`switchRefs ${r.chainId}: one liquidity reading per reading (the v2 files' liquidityUsdMicro)`);
+    const liquidity = r.liquidity.map((x, i) => uint(x, `switchRefs ${r.chainId} liquidity[${i}]`));
+    if (liquidity[0] !== (pc.L ?? 0n)) throw new Error(`switchRefs ${r.chainId}: the first liquidity reading must be epoch ${p.epoch}'s liquidityUsdMicro`);
     pc.refInputs = readings;
-    out.push({ chainId: r.chainId, readings: readings.map(String) });
+    pc.switchL = switchLiquidityV3(liquidity);
+    out.push({ chainId: r.chainId, readings: readings.map(String), liquidity: liquidity.map(String) });
   }
   if (out.length !== p.chains.size) throw new Error("switchRefs must list every chain of the v2 file");
   return out;
 }
 
-/** --full helper: the switchRefs of the first v3 epoch from the v2 files, most recent first (v2's own 4-epoch rule). */
+/**
+ * --full helper: the switchRefs of the first v3 epoch from the v2 files, most recent first (v2's own 4-epoch rule): each
+ * chain's xenUsdE18 and (r6-review 2) its liquidityUsdMicro in each of them ("0" where a file does not list it).
+ */
 export function switchRefsFromV2(files: EpochFile[]): SwitchRefV3[] {
   if (!files.length) return [];
+  const last4 = files.slice(0, 4);
+  const of = (f: EpochFile, id: number) => f.chains.find((x) => x.chainId === id);
   return files[0].chains
-    .map((c) => ({ chainId: c.chainId, readings: files.slice(0, 4).map((f) => f.chains.find((x) => x.chainId === c.chainId)?.xenUsdE18 || "0") }))
+    .map((c) => ({
+      chainId: c.chainId,
+      readings: last4.map((f) => of(f, c.chainId)?.xenUsdE18 || "0"),
+      liquidity: last4.map((f) => BigInt(of(f, c.chainId)?.liquidityUsdMicro || "0").toString()),
+    }))
     .sort((a, b) => a.chainId - b.chainId);
 }
 
@@ -2223,7 +2362,7 @@ export function windowStateV3(inputs: EpochInputsV3, prev?: AnyEpochFile | null,
     // D-13: the build's reading (min of GeckoTerminal and on-chain), the window's hourly samples and the pool's age
     const Lchain = optUint(c.liquidityOnChainMicro, `${c.name} liquidityOnChainMicro`);
     const poolCreatedAt = c.poolCreatedAt === undefined || c.poolCreatedAt === null ? null : nat(c.poolCreatedAt, `${c.name} poolCreatedAt`);
-    const samples = liquiditySamplesV3(c.liquiditySamples, endTs, liquidityReadingV3(Lnow, Lchain), c.name);
+    const recorded = recordedLiquiditySamplesV3(c.liquiditySamples, endTs, c.name);
     // T1-34: a failed totalSupply read is recorded as null with its reason, never as "0"
     const supply = totalSupplyOf(c.totalSupply, c.totalSupplyError, c.name);
     const burns = c.burns.map((b) => checkBurn(b, c.chainId, endTs)).sort(globalOrder);
@@ -2260,11 +2399,15 @@ export function windowStateV3(inputs: EpochInputsV3, prev?: AnyEpochFile | null,
       };
     });
     const prevL = pc?.L ?? null;
-    // D-13 + option (a): this window's L was frozen at epoch n−1's build; this build freezes the next window's
-    const stat = liquidityStatV3(samples, endTs);
-    const lr = liquidityRuleV3(pc ? { L: pc.L, next: pc.next, v2: pc.v2 } : null, pv !== null, stat, firstLiquidityCapV3(poolCreatedAt, startTs));
+    // D-13 + option (a): this window's L was frozen at epoch n−1's build; this build freezes the next window's.
+    // r6-review 3: the statistic is taken over the full stat days (the build's own reading only when nothing is recorded)
+    const stat = liquidityStatOfV3(recorded, endTs, liquidityReadingV3(Lnow, Lchain));
+    const lr = liquidityRuleV3(pc ? { L: pc.L, next: pc.next, v2: pc.v2, switchL: pc.switchL } : null, pv !== null, stat, firstLiquidityCapV3(poolCreatedAt, startTs));
     const L = lr.used;
-    const next = nextLiquidityV3(stat, L);
+    // F5: a window whose feed was missing or thin carries its L (the build's own reading alone never moves the next L);
+    // r6-review 2: at the switch epoch, a feed with at least L_SWITCH_MIN_FULL_DAYS full days clamps it instead
+    const coverage = liquidityCarriedV3(recorded, endTs, orphan !== null, p.version === 2);
+    const next = coverage.carried ? L : nextLiquidityV3(stat, L);
     const start = pc?.curve ?? { S: 0n, hour: cw.length ? cw[0].hour : 0 };
     const run = runCurve(cw, L, start);
     cw.forEach((w, i) => (w.value = run.values[i]));
@@ -2274,7 +2417,7 @@ export function windowStateV3(inputs: EpochInputsV3, prev?: AnyEpochFile | null,
       market: c.market, ...supply, missionsAt: missionsAt === null ? null : missionsAt.toString(), burnedAt: burnedAt === null ? null : burnedAt.toString(),
       L: {
         now: Lnow.toString(), onChain: Lchain === null ? null : Lchain.toString(), prev: prevL === null ? null : prevL.toString(), used: L.toString(), rule: lr.rule,
-        stat: stat.toString(), next: next.toString(), cap: lr.cap === null ? null : lr.cap.toString(),
+        stat: stat.toString(), next: next.toString(), nextRule: coverage.carried ? "carried" : "clamp", cap: lr.cap === null ? null : lr.cap.toString(),
       },
       liquiditySamples: (Array.isArray(c.liquiditySamples) ? c.liquiditySamples : []).map((s) => ({ hour: s.hour, micro: s.micro })), poolCreatedAt,
       // D-21: valued on a market again: the run of skips ends and the orphaning is lifted; valued as orphaned: both carried
@@ -2298,10 +2441,11 @@ export function windowStateV3(inputs: EpochInputsV3, prev?: AnyEpochFile | null,
       chainId: pc.chainId, name: pc.name, portal: pc.portal, fromBlockExclusive: pc.toBlock, toBlock: pc.toBlock, skipped: true,
       market: null, totalSupply: pc.totalSupply, ...(pc.totalSupplyError !== undefined ? { totalSupplyError: pc.totalSupplyError } : {}),
       missionsAt: pc.missionsAt === null ? null : pc.missionsAt.toString(), burnedAt: pc.burnedAt === null ? null : pc.burnedAt.toString(),
-      // D-13: nothing is valued, so the frozen L is kept for the next window (a record without one freezes its L)
+      // D-13: nothing is valued, so the frozen L is kept for the next window (a record without one freezes its L; a v2
+      // record at the switch freezes the switch L, the median of its v2 readings, r6-review 2)
       L: {
         now: null, onChain: null, prev: pc.L === null ? null : pc.L.toString(), used: pc.L === null ? null : pc.L.toString(), rule: "carried", stat: null,
-        next: pc.next !== undefined && pc.next !== null ? pc.next.toString() : pc.L === null ? null : pc.L.toString(), cap: null,
+        next: pc.next !== undefined && pc.next !== null ? pc.next.toString() : (pc.v2 ? pc.switchL ?? pc.L : pc.L)?.toString() ?? null, nextRule: "carried", cap: null,
       },
       liquiditySamples: [], poolCreatedAt: null,
       noMarketRun: run ? { skips: run.skips, refE18: run.refE18.toString() } : null, orphan: orph ? { refE18: orph.refE18.toString(), from: orph.from } : null,
@@ -2639,7 +2783,7 @@ export function verifyEpochV3(f: EpochFileV3, prev?: AnyEpochFile | null): strin
 // ── D-17: the anomaly gate (published thresholds: rulesBlock.priceRules.gate) ─────────────────────────────
 /** One reason the gate holds an epoch: a stable code and the numbers behind it. */
 export interface GateReasonV3 {
-  code: "wallet-share" | "leaf-count" | "score-jump" | "fallback-share" | "first-chain" | "xnt-source";
+  code: "wallet-share" | "leaf-count" | "score-jump" | "fallback-share" | "first-chain" | "xnt-source" | "liquidity-samples-missing";
   text: string;
 }
 
@@ -2652,7 +2796,9 @@ export interface GateReasonV3 {
  *  - score-jump: a total score above 3× the median of the last (up to) 4 v3 files (lamports: v2 scores are not comparable);
  *  - fallback-share: more than 50% of the burns priced at the cap or the build spot (XEN), or at the floor or the build price (XNT);
  *  - first-chain: a burn on a chain the previous file does not list (a chain's first epoch);
- *  - xnt-source: the XNT price source differs from the previous v3 file's (its first source), or the USDC.X guard reads a depeg.
+ *  - xnt-source: the XNT price source differs from the previous v3 file's (its first source), or the USDC.X guard reads a depeg;
+ *  - liquidity-samples-missing (D-13, F5): a valued chain whose next L is carried (L.nextRule "carried": its window feed
+ *    was missing or thin, liquidityCarriedV3), one reason per such chain. A skipped chain (nothing read) is not one.
  * `history` = the previous published files, most recent first (only the last GATE_HISTORY_EPOCHS are read).
  */
 export function anomalyGateV3(f: EpochBodyV3, prev: AnyEpochFile | null, history: AnyEpochFile[]): GateReasonV3[] {
@@ -2689,6 +2835,17 @@ export function anomalyGateV3(f: EpochBodyV3, prev: AnyEpochFile | null, history
   if (f.xnt.peg.guard === "high" || f.xnt.peg.guard === "low") out.push({ code: "xnt-source", text: `the USDC.X guard reads ${f.xnt.peg.usdcxUsdE18} USD per USDC.X (${f.xnt.peg.guard}, D-22 c)` });
   const prevPool = prev && prev.version === 3 ? (prev as { xntPool?: XntPoolV3 }).xntPool : undefined;
   if (prevPool && prevPool.active !== f.xntPool.active) out.push({ code: "xnt-source", text: `the XNT price pool switched: ${prevPool.active} → ${f.xntPool.active} (D-22 b)` });
+  // D-13, F5: a valued chain that carried its L (the build's own reading never moved it): its window feed was missing or thin
+  for (const c of [...f.chains].sort((a, b) => a.chainId - b.chainId)) {
+    if (c.skipped || c.L.nextRule !== "carried") continue;
+    const atSwitch = f.switchRefs !== null && f.switchRefs !== undefined;
+    const cov = liquidityCarriedV3(recordedLiquiditySamplesV3(c.liquiditySamples, f.window.endTs, c.name), f.window.endTs, false, atSwitch);
+    const rule = atSwitch ? `fewer than ${L_SWITCH_MIN_FULL_DAYS} full days at the switch epoch` : `more than ${L_MAX_THIN_DAYS}`;
+    out.push({
+      code: "liquidity-samples-missing",
+      text: `chain ${c.chainId}: ${cov.samples} recorded hourly liquidity samples in the last ${L_STAT_DAYS} days, ${cov.thinDays} of the ${L_STAT_DAYS} days with fewer than ${L_MIN_SAMPLES_PER_DAY} (${rule}, or none): its next L is carried, not moved by the build's own reading (D-13, F5)`,
+    });
+  }
   return out;
 }
 

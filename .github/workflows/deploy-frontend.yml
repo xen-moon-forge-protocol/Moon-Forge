@@ -53,6 +53,31 @@ jobs:
         env:
           NODE_ENV: production
 
+      # Rewards v3 (r6-review 1 (c)): a Pages deployment replaces the whole site, so the week-so-far feed the site
+      # serves (keeper.yml writes it hourly; it carries the window's liquidity samples, D-13) is copied into this build.
+      # HTTP 404 = no feed is served (always the case before the switch): nothing is added. A feed that is served but
+      # cannot be read 3 times stops the deploy, so a site deploy never drops a week of samples (re-run it later).
+      - name: Keep the served week-so-far feed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          url=$(gh api "repos/$GITHUB_REPOSITORY/pages" --jq '.html_url' 2>/dev/null || true)
+          [ -n "$url" ] || url="https://${GITHUB_REPOSITORY_OWNER,,}.github.io/${GITHUB_REPOSITORY#*/}/"
+          for try in 1 2 3; do
+            code=$(curl -sS --max-time 20 -w '%{http_code}' -o "$RUNNER_TEMP/served-feed.json" "${url%/}/feed/week-so-far.json") || code=000
+            if [ "$code" = "200" ]; then
+              mkdir -p frontend/dist/feed
+              cp "$RUNNER_TEMP/served-feed.json" frontend/dist/feed/week-so-far.json
+              echo "the served week-so-far feed is kept in this deployment"
+              exit 0
+            fi
+            if [ "$code" = "404" ]; then echo "no week-so-far feed is served: nothing to keep"; exit 0; fi
+            echo "the served feed answered HTTP $code (try $try of 3)"
+            [ "$try" = 3 ] || sleep $((try * 10))
+          done
+          echo "::error::the served week-so-far feed could not be read: not deploying, so its liquidity samples are not lost (re-run this workflow)"
+          exit 1
+
       - name: Upload artifact
         uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3.0.1
         with:

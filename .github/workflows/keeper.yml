@@ -277,18 +277,28 @@ jobs:
           cache-dependency-path: oracle/package-lock.json
       - working-directory: oracle
         run: npm ci --ignore-scripts
-      - name: The feed the site serves now (its closed-candle readings are not read again)
+      # The served feed carries the window's hourly liquidity samples (D-13): it is read 3 times before it counts as
+      # unreadable. status = ok | absent (HTTP 404: none served) | error. With "error" on a window more than 2 h old,
+      # `npm run feed` writes nothing ("no-prev"), so nothing is deployed and the served feed keeps its samples.
+      - name: The feed the site serves now (its closed-candle readings and its liquidity samples are carried on)
+        id: prevfeed
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           url=$(gh api "repos/$GITHUB_REPOSITORY/pages" --jq '.html_url' 2>/dev/null || true)
-          if [ -n "$url" ] && curl -fsS --max-time 20 "${url%/}/feed/week-so-far.json" -o "$RUNNER_TEMP/prev-feed.json"; then
-            echo "previous feed read from ${url%/}/feed/week-so-far.json"
-          else
-            rm -f "$RUNNER_TEMP/prev-feed.json"
-            echo "no previous feed"
-          fi
+          [ -n "$url" ] || url="https://${GITHUB_REPOSITORY_OWNER,,}.github.io/${GITHUB_REPOSITORY#*/}/"
+          status=error
+          for try in 1 2 3; do
+            code=$(curl -sS --max-time 20 -w '%{http_code}' -o "$RUNNER_TEMP/prev-feed.json" "${url%/}/feed/week-so-far.json") || code=000
+            if [ "$code" = "200" ]; then status=ok; break; fi
+            if [ "$code" = "404" ]; then status=absent; break; fi
+            echo "the served feed answered HTTP $code (try $try of 3)"
+            [ "$try" = 3 ] || sleep $((try * 10))
+          done
+          [ "$status" = "ok" ] || rm -f "$RUNNER_TEMP/prev-feed.json"
+          echo "previous feed: $status (${url%/}/feed/week-so-far.json)"
+          echo "status=$status" >> "$GITHUB_OUTPUT"
       - name: Write the feed (nothing while dormant)
         id: feed
         working-directory: oracle
@@ -313,7 +323,9 @@ jobs:
           START_PULSE: ${{ vars.START_PULSE }}
           PORTAL_MOONBEAM: ${{ vars.PORTAL_MOONBEAM }}
           START_MOONBEAM: ${{ vars.START_MOONBEAM }}
-        run: npm run --silent feed -- --out "$RUNNER_TEMP/feed/week-so-far.json" --prev-feed "$RUNNER_TEMP/prev-feed.json"
+          # an empty status (the read step itself failed) is "error"
+          PREV_FEED_STATUS: ${{ steps.prevfeed.outputs.status || 'error' }}
+        run: npm run --silent feed -- --out "$RUNNER_TEMP/feed/week-so-far.json" --prev-feed "$RUNNER_TEMP/prev-feed.json" --prev-feed-status "$PREV_FEED_STATUS"
       - name: Set up Node for the site
         if: ${{ steps.feed.outputs.active == 'true' }}
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0

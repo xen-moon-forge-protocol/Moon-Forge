@@ -19,10 +19,17 @@
  * Option (a) is the same version with the proof wallets in `wallets` and no exception. The registry below holds no
  * wallet today: none is listed until the operator publishes one (and the epoch-1 burn is never attributed to anyone).
  */
-import { DEFAULT_RULES_V3, rulesBlockOf, RulesBlockV3 } from "./rewards";
+import { DEFAULT_RULES_V3, rulesBlockOf, RulesBlockV3, RULES_ID_RETIRED_V3 } from "./rewards";
+
+/**
+ * The rulesId of the first version, the rules of the first v3 epoch: 2. F5 (the D-13 "carried" rule, owner approval
+ * 2026-10-25) replaced the round-4 block (rulesId 1) before any v3 epoch was built, so rulesId 1 never applies to any
+ * epoch and rulesBlockOf refuses it; the registry starts at 2 and every later version is the one before it + 1.
+ */
+export const FIRST_RULES_ID_V3 = RULES_ID_RETIRED_V3 + 1;
 
 export interface RulesVersionV3 {
-  /** the first epoch the version applies to; null = from the first v3 epoch (rulesId 1 only) */
+  /** the first epoch the version applies to; null = from the first v3 epoch (the first version, rulesId 2, only) */
   fromEpoch: number | null;
   /** YYYY-MM-DD (UTC) of the public announcement; null for the rules of the first v3 epoch */
   announced: string | null;
@@ -32,27 +39,31 @@ export interface RulesVersionV3 {
 
 const { programHash: _ph, ...RULES_1 } = DEFAULT_RULES_V3;
 
-/** Append-only. rulesId 1: the rules of the first v3 epoch (tip minimum 0.2 XNT final, every leaf claimed, no operator wallet yet). */
+/**
+ * Append-only. rulesId 2: the rules of the first v3 epoch (tip minimum 0.2 XNT final, every leaf claimed, no operator
+ * wallet yet, the D-13 "carried" rule of F5).
+ */
 export const RULES_V3_VERSIONS: readonly RulesVersionV3[] = Object.freeze([{ fromEpoch: null, announced: null, rules: RULES_1 }]);
 
-/** Why a registry is not usable (null when it is): versions 1, 2, … in order, each a valid block, epochs increasing. */
+/** Why a registry is not usable (null when it is): rulesIds 2, 3, … in order, each a valid block, epochs increasing. */
 export function rulesRegistryErrorV3(versions: readonly RulesVersionV3[] = RULES_V3_VERSIONS): string | null {
   if (!versions.length) return "no rules version";
   let lastFrom = 0;
   for (const [i, v] of versions.entries()) {
+    const id = FIRST_RULES_ID_V3 + i;
     try {
       rulesBlockOf({ ...v.rules, programHash: null });
     } catch (e) {
-      return `rules version ${i + 1}: ${(e as Error).message}`;
+      return `rules version ${id}: ${(e as Error).message}`;
     }
-    if (v.rules.rulesId !== i + 1) return `rules version ${i + 1} has rulesId ${v.rules.rulesId}`;
+    if (v.rules.rulesId !== id) return `rules version ${id} has rulesId ${v.rules.rulesId}`;
     if (i === 0) {
-      if (v.fromEpoch !== null || v.announced !== null) return "rules version 1 applies from the first v3 epoch (fromEpoch and announced null)";
+      if (v.fromEpoch !== null || v.announced !== null) return `rules version ${id} applies from the first v3 epoch (fromEpoch and announced null)`;
       continue;
     }
-    if (!Number.isSafeInteger(v.fromEpoch) || (v.fromEpoch as number) <= lastFrom) return `rules version ${i + 1}: fromEpoch ${String(v.fromEpoch)} is not after the previous version's`;
+    if (!Number.isSafeInteger(v.fromEpoch) || (v.fromEpoch as number) <= lastFrom) return `rules version ${id}: fromEpoch ${String(v.fromEpoch)} is not after the previous version's`;
     if (typeof v.announced !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(v.announced) || new Date(`${v.announced}T00:00:00.000Z`).toISOString().slice(0, 10) !== v.announced) {
-      return `rules version ${i + 1}: announced ${JSON.stringify(v.announced)} is not a YYYY-MM-DD date`;
+      return `rules version ${id}: announced ${JSON.stringify(v.announced)} is not a YYYY-MM-DD date`;
     }
     lastFrom = v.fromEpoch as number;
   }

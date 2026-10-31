@@ -1,5 +1,5 @@
 /**
- * Automatic announcements for the project's own channels (X @MoonXenForge, an optional Telegram channel).
+ * Automatic announcements for the project's own channel (X @MoonXenForge). Moon Forge has no Telegram channel, group or bot.
  *
  *   npm run announce -- weekly [--dry]     state of the forge: pool, this epoch's budget, fair burn capacity
  *   npm run announce -- epoch [--dry]      receipt of the epoch just published (burns, wallets, drops, how to verify)
@@ -8,7 +8,6 @@
  * price sources, no price predictions, no promises of returns. Posting needs the account's own keys as
  * environment variables; without them the text is only printed, so the job never fails for lack of keys.
  *   X:        X_API_KEY, X_API_SECRET, X_ACCESS_TOKEN, X_ACCESS_SECRET  (OAuth 1.0a user context, read+write app)
- *   Telegram: TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID                         (bot added as admin of the channel)
  */
 import * as crypto from "crypto";
 import * as fs from "fs";
@@ -164,22 +163,6 @@ async function postX(text: string): Promise<string> {
   return `X: posted ${JSON.parse(body)?.data?.id ?? ""}`;
 }
 
-async function postTelegram(text: string): Promise<string> {
-  const { TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID } = process.env;
-  if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) return "Telegram: no keys, skipped";
-  // the token is part of the URL: a network error must not carry it into the log, so it is rethrown without the cause
-  let r: Response;
-  try {
-    r = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chat_id: TELEGRAM_CHAT_ID, text }),
-    });
-  } catch (e) {
-    throw new Error(`Telegram: request failed (${(e as any)?.cause?.code ?? (e as any)?.name ?? "network error"})`);
-  }
-  if (!r.ok) throw new Error(`Telegram: HTTP ${r.status} ${(await r.text()).slice(0, 200)}`);
-  return "Telegram: posted";
-}
-
 /** X counts every link as 23 characters. */
 const xLength = (t: string) => t.replace(/https?:\/\/\S+/g, "x".repeat(23)).length;
 
@@ -192,7 +175,7 @@ async function main() {
   console.log(`--- ${kind} (${xLength(text)}/280) ---\n${text}\n---`);
   if (xLength(text) > 280) throw new Error("post longer than 280 characters");
   if (dry) return;
-  for (const send of [postX, postTelegram]) {
+  for (const send of [postX]) {
     try { console.log(await send(text)); } catch (e) { console.error(String(e)); process.exitCode = 1; }
   }
 }

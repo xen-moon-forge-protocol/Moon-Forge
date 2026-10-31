@@ -337,7 +337,7 @@ function inputsFor(w: World, arts: ArtSpec[], e: number, prev: AnyEpochFile | nu
     programId: PROGRAM, epoch: (prev?.epoch ?? 0) + 1, createdAt: iso(endTs + w.skew[e]), window: { startTs: prev ? publishedAt(prev) : endTs - WEEK, endTs },
     chains, snapshot: { slot: 5_000 + e, records }, freePool: { lamports: pool.toString(), slot: 4_999 + e, open: open === null ? null : open.toString() },
     xnt: { twapE18: w.xnt[e].twap.toString(), apiE18: w.xnt[e].api.toString(), source: "test" },
-    switchRefs: prev?.version === 2 ? prev.chains.map((c) => ({ chainId: c.chainId, readings: [c.xenUsdE18] })) : null,
+    switchRefs: prev?.version === 2 ? prev.chains.map((c) => ({ chainId: c.chainId, readings: [c.xenUsdE18], liquidity: [BigInt(c.liquidityUsdMicro || "0").toString()] })) : null,
     ...(w.rules ? { rulesBlock: w.rules } : {}),
   };
 }

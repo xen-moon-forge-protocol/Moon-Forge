@@ -9,8 +9,8 @@ npm run verify -- ../frontend/public/epochs/epoch-1.json --full   # anyone
 npm run epoch -- --dry                     # build without publishing
 npm run epoch                              # oracle key only
 npm run keeper                             # any funded key
-npm run keeper-arm -- --deposit 20         # upgraded program only: the first arm of the house-keeper seat (S7 owner step; dry without --yes)
-npm run keeper-take -- --deposit 20        # upgraded program only: take the seat (named successor after the notice, or a dead seat) on a chain this key derives (owner step; dry without --yes)
+npm run keeper-arm -- --deposit 20         # upgraded program only: the first arm of the house-keeper seat (a manual operator step, not at S7 (F1-b); the bond from a project wallet only; dry without --yes)
+npm run keeper-take -- --deposit 20        # upgraded program only: take the seat (named successor after the notice, or a dead seat) on a chain this key derives (manual operator step; the bond from a project wallet only; dry without --yes)
 npm run publish-extra -- [<n>]             # upgraded program only: publish extra-<n>.json once it is pushed (oracle key)
 npm run rebuild-extra -- <n>               # rebuild a lost extra-<n>.json byte for byte (read-only)
 npm run init                               # one-time v2 setup after the program upgrade
@@ -47,7 +47,7 @@ ExtraState / OracleSeat accounts only the upgraded program creates). With the ke
 also reveals the seat's hash chain in order; every other key anchors bets, refunds stalled ones and runs every other
 permissionless upkeep. The chain is derived from the key (domain-separated HMAC, chain id read back from the seat), so a
 restarted runner continues it and no preimage is ever stored; the security argument is in the header of `keeper-v3.ts`.
-The loop never posts a bond and never takes a seat (keeper-arm / keeper-take are the owner's commands; both check
+The loop never posts a bond and never takes a seat (keeper-arm / keeper-take are manual operator commands, funded only from a project wallet; both check
 after landing that the seat holds a chain this key derives, and every pass of a holder that cannot derive its chain
 raises an ALERT, R-4). A v3 Jackpot round drawn by anyone is settled at once: the holder checks the round after every
 step and every 10 sends of a pass and every 5 s between passes, and walks up to it on its own budget, up to four
@@ -152,9 +152,23 @@ refuse a file whose block is not the one in force for its epoch on the pinned bi
   froze at its build (`L.next`), so it is known from the window's first hour and the site's quote is exact. Each build
   freezes the next window's: `stat` = the minimum over the last 7 days (counted back from the window end) of each day's
   median hourly reading, a reading being min(GeckoTerminal, the pools' XEN balances read on-chain × the spot); the hourly
-  readings come from the week-so-far feed (`liquiditySamples`, recorded in the file) plus the build's own; then
-  `next` = max(50% × L, min(stat, 1.1 × L + $50)). The switch window takes the v2 file's reading; a chain with no L in
-  the previous file takes min(stat, $500 + $50 per day of its price pool's age, at most 90 days).
+  readings come from the week-so-far feed (`liquiditySamples`, recorded in the file); `stat` is taken over the full days
+  only (at least 4 recorded samples) when there is one, and the build's own reading is used only when no sample is
+  recorded in the 7 days (`liquidityStatOfV3`); then `next` = max(50% × L, min(stat, 1.1 × L + $50)). The switch window
+  takes the median of the chain's last (up to) 4 v2 liquidity readings (`switchRefs[].liquidity`, `switchLiquidityV3`),
+  not one v2 build-time reading; a chain with no L in the previous file takes min(stat, $500 + $50 per day of its price
+  pool's age, at most 90 days).
+- **D-13 carried L (F5, rules block `rulesId` 2).** A chain read this epoch whose recorded hourly samples (the feed's;
+  the build's own reading does not count) number fewer than 4 (`priceRules.liquidity.minSamplesPerDay`) on more than 2
+  (`maxThinDays`) of the 7 stat days, or that has no recorded sample at all (no feed), keeps its L: `next` = `used`,
+  recorded as `L.nextRule` "carried" ("clamp" otherwise; a skipped chain is "carried" too: it keeps its previous
+  `next`). So a reading taken at the build's known time can never move the next window's L. The anomaly gate then holds
+  the epoch ("liquidity-samples-missing", one reason per such chain). An orphaned chain (D-21) is never carried: its
+  reading is 0 by rule and its L keeps halving. `rulesId` 1 (the round-4 block without this rule) was replaced before
+  any v3 epoch was built: it never applies to any epoch, and the engine refuses it. The feed only records samples once
+  the upgraded program is detected, so the switch epoch (the first v3 window) uses its own rule: its next L is clamped
+  from the feed when at least 2 of the 7 stat days are full (`priceRules.liquidity.switchMinFullDays`), and carried, with
+  the gate reason, otherwise (S6 late in the week, or a feed that failed for days).
 - **D-22 (a) tranche cap.** C = min(8% of F_ref, 7 × 2% of the XDEX pool's WXNT reserve read at epoch n−1's build).
   Every v3 file records `xdex.atBuild` (the pool's vaults less the fees owed, `src/xdex-v3.ts`) and `xdex.capReserve`.
 - **D-22 (b) XNT price pool.** Every build records the TVL of each candidate XNT/USDC.X pool (`xdex-v3.ts`
@@ -173,9 +187,10 @@ refuse a file whose block is not the one in force for its epoch on the pinned bi
   checks), hashed into the file (`sidecar`); `verify` re-derives every burn's readings from it offline.
 - **D-17 anomaly gate.** Before a publication: one wallet above 60% of C, more than 5× the median leaf count of the last 4
   files, a total score above 3× the median of the last 4 v3 files, more than 50% of the burns at a clamp or a fallback,
-  a chain's first epoch, a change of the XNT source or a USDC.X depeg. A hit writes the public hold record
-  `gate/epoch-<n>.json` and publishes nothing; the first run 24 h later publishes a fresh rebuild, unless the repository
-  variable `GATE_BLOCK` is "true". `due` says "not due" while it holds; the feed says `flags.anomalyHold`.
+  a chain's first epoch, a change of the XNT source or a USDC.X depeg, a chain whose next L is carried (F5). A hit writes
+  the public hold record `gate/epoch-<n>.json` and publishes nothing; the first run 24 h later publishes a fresh rebuild, unless the repository
+  variable `GATE_BLOCK` is "true" (unset by default; only the operator sets it, through the API, for one held epoch,
+  and deletes it after). `due` says "not due" while it holds; the feed says `flags.anomalyHold`.
 - **Feed.** Each chain carries its `liquiditySamples`, `liquidityOnChainMicro`, `poolCreatedAt` and `route` (the price
   pool's reserves, the bridge fee and minimum); the feed carries `xdex` and `flags`; an orphaned chain is "sunset".
 

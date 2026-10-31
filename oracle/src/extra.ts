@@ -71,7 +71,7 @@ export const EMPTY_ROOT = "00".repeat(32);
  */
 export const EXTRA_FIRST_EPOCH: number | null = null;
 /**
- * OD-9 / D-28 (owner sheet, the default): an Artifact forged BEFORE the program upgrade never enters the extra pot. Its
+ * OD-9 / D-28 (decision sheet, the default): an Artifact forged BEFORE the program upgrade never enters the extra pot. Its
  * forge put nothing into the extra pot (the 25% extra split exists only on the upgraded binary) and its backing is not
  * in the program's bound (ExtraState.live_forged_backing counts only the forges after init_extra), so a rebate for it
  * would be paid by the 25% of everyone else's forges. Such an Artifact is excluded with the reason "pre-upgrade" in

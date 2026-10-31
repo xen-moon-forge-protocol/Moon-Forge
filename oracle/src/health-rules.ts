@@ -419,7 +419,7 @@ export function detectionVerdict(detection: Detection, deploySlot: number | null
   return { check: "program version", state: "warn", detail: `unknown: ${reasons.join("; ").slice(0, 300) || "probe unreadable"}` };
 }
 
-// ── X1 RPC endpoints (owner sheet 9.2: X1_RPC_URLS) ──────────────────────────────────────────────────────────────────
+// ── X1 RPC endpoints (OPERATORS.md: X1_RPC_URLS) ────────────────────────────────────────────────────────────────────────
 
 export interface X1RpcProbe { host: string; ok: boolean; genesisOk?: boolean; error?: string }
 
@@ -676,7 +676,7 @@ export function keeperBondVerdict(detection: Detection, seat: { bond: bigint; ja
   const check = "keeper bond cover";
   const na = naUntilUpgrade(check, detection);
   if (na) return na;
-  if (!seat) return { check, state: bankrollReserved > 0n ? "fail" : "ok", detail: bankrollReserved > 0n ? `no keeper seat, but ${xnt(Number(bankrollReserved))} of house payouts are reserved` : "no keeper seat yet (the first arm_keeper with its bond is an owner step)" };
+  if (!seat) return { check, state: bankrollReserved > 0n ? "fail" : "ok", detail: bankrollReserved > 0n ? `no keeper seat, but ${xnt(Number(bankrollReserved))} of house payouts are reserved` : "no keeper seat (F1-b: armed only later, once a keeper runs continuously)" };
   const need = bankrollReserved + seat.jackpotReserved;
   const detail = `bond ${xnt(Number(seat.bond))} vs reserved ${xnt(Number(bankrollReserved))} + jackpot_reserved ${xnt(Number(seat.jackpotReserved))}`;
   return { check, state: seat.bond >= need ? "ok" : "fail", detail: seat.bond >= need ? detail : `${detail}: the bond does not cover them (K-3)` };
@@ -690,7 +690,7 @@ export function keeperSeatVerdict(detection: Detection, seat: { keeper: string; 
   const check = "keeper seat";
   const na = naUntilUpgrade(check, detection);
   if (na) return na;
-  if (!seat) return { check, state: "ok", detail: "no keeper seat yet (the first arm_keeper with its bond is an owner step)" };
+  if (!seat) return { check, state: "ok", detail: "no keeper seat (F1-b: armed only later, once a keeper runs continuously)" };
   const deadAt = seat.lastActiveTs + KEEPER_DEAD_DELAY_S;
   const who = `held by ${seat.keeper.slice(0, 8)}…, last active ${new Date(seat.lastActiveTs * 1000).toISOString().slice(0, 16)}Z`;
   if (seat.pendingKeeper !== defaultKey) return { check, state: "fail", detail: `${who}; hand-over pending to ${seat.pendingKeeper}` };
@@ -932,7 +932,7 @@ export function streakVerdict(runs: { day: string; ok: boolean }[] | null, today
   return { check, state: "ok", detail };
 }
 
-// ── The external-cron token (owner sheet 9.2 step 7) ─────────────────────────────────────────────────────────────────
+// ── The external-cron token (row O-15, dropped on 2026-10-26: DISPATCH_EXPIRES stays unset) ─────────────────────────────
 
 /** DISPATCH_EXPIRES, like PAT_EXPIRES: information only (the external cron is a backup of the schedules), it never fails. */
 export function dispatchVerdict(exp: string | undefined, now: number): Row | null {
