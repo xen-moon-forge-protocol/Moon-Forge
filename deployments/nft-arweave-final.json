@@ -1,0 +1,245 @@
+{
+  "kind": "moon-forge-nft-arweave",
+  "version": 2,
+  "status": "candidate for the final program upgrade (planned for November 2026): not used by the live program; the texts describe the program after that upgrade",
+  "network": "arweave mainnet",
+  "sandbox": false,
+  "uploadedAt": "2026-10-31T10:21:19.690Z",
+  "uploadedBy": "GitHub Actions run 41192386146 (NFT metadata to Arweave), throwaway key, ArDrive Turbo free tier",
+  "sourceCommit": "905566b52fa44553ef58158b8d08d9a88a798f1d",
+  "texts": "final",
+  "images": {
+    "manifest": "9Rsed0ASIH0Vk-XygzZ1LUH82JUgDboZj-VJtgNkohA",
+    "manifestSha256": "d4b19b05733a563eb6d0a39610be9c4b846d9edb7c40c65469c353938045ac31",
+    "reused": false,
+    "files": {
+      "lunar_dust/frost_blue.webp": {
+        "id": "J-ccLt_Nma0QaHVlH_EzkIqSu0duyVrrROs-kn8cRxo",
+        "bytes": 88000,
+        "sha256": "f0efcfb73c75285c34bf804ca90e3f3efcdcfa27064adad948d91b46cdff5766"
+      },
+      "lunar_dust/golden_dust.webp": {
+        "id": "OTpIsFAF8Z6305gkIjRIOH0E3-oOGKavWQi9cpNyUNw",
+        "bytes": 91680,
+        "sha256": "3058aed4a3c009fbcb63904d38471dcfccaf4d8ec05eada824f27a127964dea9"
+      },
+      "lunar_dust/lavender_mist.webp": {
+        "id": "1Xsm1wh_xoslWmKWHK5nqzJFXZmJxb06zYTeh8PMk5w",
+        "bytes": 90030,
+        "sha256": "c56a6695297801b0884b0598c20124d4f19807b8cd01f0ccac136dbec059ea9a"
+      },
+      "lunar_dust/rose_quartz.webp": {
+        "id": "kJ_X2rEW9hv-GZISaAzR4M3N_bvl6abcsi4tS1dcby8",
+        "bytes": 91728,
+        "sha256": "f6bc99dbb7d79d0f115220b605da4925fe904efb2612ddb46a01c1d0837c29d9"
+      },
+      "lunar_dust/sage_green.webp": {
+        "id": "Lpn66klexobs6GdJTZXIL4JoQ1zMlsjwLzUr6j62DXA",
+        "bytes": 89100,
+        "sha256": "58f2db1881ca6b0a4eab4af67c430c2f06f13b7a70e226549344c6da3a3cef83"
+      },
+      "lunar_dust/silver_moon.webp": {
+        "id": "FQ1KDZrEUaj_c4KkcdoYO7qbTFIu7vOBLRbY1exI7O0",
+        "bytes": 84504,
+        "sha256": "04bcc9ab0b55a43268eb408c8218d0d9fd6fafdc709154f6b269301b06ba5e7f"
+      },
+      "cosmic_shard/amethyst.webp": {
+        "id": "uPK_RAuL7nBhaxZPsc36tatHszTIne7a5jv2RNYneaI",
+        "bytes": 57670,
+        "sha256": "e9589b2024eb34e2bc0f1a9173f699ecad751344eb169d845bec22eeaeb3a422"
+      },
+      "cosmic_shard/aquamarine.webp": {
+        "id": "304BawZXgOGDLuu_6TXQsXiNiJqIhoeG5G8jyCQb0lg",
+        "bytes": 63760,
+        "sha256": "6c11bb6e852d6daf5672e6d961b692218342b8956c8a3fd7915e69a3c4b694c8"
+      },
+      "cosmic_shard/magenta_pulse.webp": {
+        "id": "5IfNZF5T_YeZPLaKXKN_EGg4-9i3knzuadZHc5hfzas",
+        "bytes": 68394,
+        "sha256": "24a9c98455af80df9e97e557482c8b134d4b727551718b359c124f63f77c4349"
+      },
+      "solar_core/flame.webp": {
+        "id": "7FLjO9IaaOtp1t3m3iOMcV_jdo7wJrc1l7ovKEhHx-Q",
+        "bytes": 95408,
+        "sha256": "fcb981cbc1c567d88d4f5a432dc0b949336b9492b8b322f69a8564fe26e218cf"
+      },
+      "solar_core/red_giant.webp": {
+        "id": "xy8-GZWCTGxLKimLjUPx8POd8GtcsozoU3hO93xwVFM",
+        "bytes": 83758,
+        "sha256": "c0e35776d187e200a9e88cf5b73bb7ef1a19bb1905a11f250bb88db49cda730c"
+      },
+      "void_anomaly/event_horizon.webp": {
+        "id": "dld9Vy66FtRCjZGZnffpYks0-RWONrPp2vPQkWU3Zys",
+        "bytes": 55196,
+        "sha256": "c9b90b10dfc7824246c182af73840f71a559005d5507d0880cc0f26eb44fbdac"
+      }
+    }
+  },
+  "sets": [
+    {
+      "gateway": "turbo-gateway.com",
+      "imageBaseUri": "https://turbo-gateway.com/9Rsed0ASIH0Vk-XygzZ1LUH82JUgDboZj-VJtgNkohA/",
+      "manifest": "MiZZ0Y4GM4YLtuYLPLfT8zGYJCyUQEKuBhWfm2eR6FU",
+      "manifestSha256": "bac2dad3b0997c9e6b8ae9cb8acd5097094fe79cb87584b6c8e260dc5ef16d1f",
+      "metadataBaseUri": "https://turbo-gateway.com/MiZZ0Y4GM4YLtuYLPLfT8zGYJCyUQEKuBhWfm2eR6FU/",
+      "files": {
+        "collection.json": {
+          "id": "jP-o8mI-v_3Vcj2GTpFGcwxzs1ZpluF_LVcEBA76-IE",
+          "bytes": 1913,
+          "sha256": "b4c32970b1ba2f3f3e4b30fa0f6235b3cb943bb51ced23ff5807c37970e61ca2"
+        },
+        "lunar_dust/0.json": {
+          "id": "yDH_E-fYtLcxnz34Gk0LNGO6fYghaefpKw0CDV3eorY",
+          "bytes": 2339,
+          "sha256": "560879bb024ea690d29117cba1f3a07ffd429761ed7661814e549e67691da271"
+        },
+        "lunar_dust/1.json": {
+          "id": "LlI_yHGxWSGuhM3G5xL1dr_pYlayOdsBPIJa1aXmOH0",
+          "bytes": 2343,
+          "sha256": "4585c708f10beb9aeeccb24229312475126cb34439fa9ea2b1408cd50fe9964b"
+        },
+        "lunar_dust/2.json": {
+          "id": "ad6K-S1rMQTRPlxWT_kkW7ipVI4ADELJGfPu0e9aFNQ",
+          "bytes": 2351,
+          "sha256": "f6d583a255401884799ee4d00675733c4bd520b4ed35ae81f69f5e5bb4407e0b"
+        },
+        "lunar_dust/3.json": {
+          "id": "_Dey3MaJXeoj9cfU-pPl6ktJn5pR4H3gkvrWixdmuOI",
+          "bytes": 2343,
+          "sha256": "c1a32799e526218b504aa8132511d4cb81f04fc0ed4b0dfb95977d16df2c30dd"
+        },
+        "lunar_dust/4.json": {
+          "id": "7NRAMY2l_AINPlXmFAWHhxrrRNTeG52ek1-vN53X5Q0",
+          "bytes": 2339,
+          "sha256": "8411a120bbebcf4463e87c5a6231c95cd801075d398245f822c6b6e501e2ca7b"
+        },
+        "lunar_dust/5.json": {
+          "id": "cxn4QOZdZZMvMQ5ghhnZ9N6t_0ZfKv2L7Ta1-rMUJDI",
+          "bytes": 2343,
+          "sha256": "fcbb94472d42505fd007975bf86ea498d7ae9711d43b452c08feeffed0c3a7d5"
+        },
+        "cosmic_shard/0.json": {
+          "id": "Nu3mqynuEihKIw-BWnI39wzhG_MoIs-qQropqeAUApc",
+          "bytes": 2318,
+          "sha256": "beedea42cb9ccbda9945f4ed0cff3f71b72dbf4e230e32f10d2fff2f89f6b79f"
+        },
+        "cosmic_shard/1.json": {
+          "id": "CMnjRTiG3XZAQKu3IQdgT6zfcrtqSnZCxkGTaLBf9e4",
+          "bytes": 2326,
+          "sha256": "0b92b4323df8744a39579c4c0fe66eb00aab77f180a7f3a32ccd188489d2bcc9"
+        },
+        "cosmic_shard/2.json": {
+          "id": "NJLJkUS1KhrQS2A4MnIaR7R4V-PXiFGw3Vs2jdeumGs",
+          "bytes": 2338,
+          "sha256": "33b5bea0208dc4cd51c727e63762cda6bfc50afbacf2b6bee61f30a6eac6c2f4"
+        },
+        "solar_core/0.json": {
+          "id": "zO9hYrZA48-p1Td--d0RteRIukJNYcqX9-RwTBGU3wo",
+          "bytes": 2283,
+          "sha256": "d2fda54bb238d13d2957dcdbfaa8601000790faf3bfd06410853ccb90cb8bf70"
+        },
+        "solar_core/1.json": {
+          "id": "TiDJtdDg2IpywYUP0DewgsEnU7gSuHNvptze_bejceo",
+          "bytes": 2299,
+          "sha256": "0d33e437dc9e160f32fcc1ebd7abb1fe06629cb8180324eb63aefabbff7c5c9d"
+        },
+        "void_anomaly/0.json": {
+          "id": "aZRacNH8fTtWmuFtl1GyGgEN9wgn29YF-DorOr4PwAg",
+          "bytes": 2315,
+          "sha256": "8b59b78d3a04017552584eea234711ff5a7f0b7a16e9cef848b4db3c99aeba7e"
+        }
+      },
+      "uploadCheck": {
+        "at": "2026-10-31T10:21:30.068Z",
+        "gateway": "turbo-gateway.com",
+        "kind": "gateway cache, not L1",
+        "ok": 27,
+        "total": 27,
+        "failures": []
+      }
+    },
+    {
+      "gateway": "ar-io.dev",
+      "imageBaseUri": "https://ar-io.dev/9Rsed0ASIH0Vk-XygzZ1LUH82JUgDboZj-VJtgNkohA/",
+      "manifest": "oWVyNfvMIB3QUZlk5QrYzKlgS-UpwrQ8XounhfgX56c",
+      "manifestSha256": "bf2e7e62b948131b83a49958a1ae81f7aa8ad21dd67a9e721ef7c3975b57eee9",
+      "metadataBaseUri": "https://ar-io.dev/oWVyNfvMIB3QUZlk5QrYzKlgS-UpwrQ8XounhfgX56c/",
+      "files": {
+        "collection.json": {
+          "id": "HKu9ywn3bJbPVRy1Nv38nUJCW3YWz4TBJLInwJ1OoEA",
+          "bytes": 1905,
+          "sha256": "31b4b27eca73923bda9fef14ebfd56f084e8e87dfd073e75b5bef2ce1c24da65"
+        },
+        "lunar_dust/0.json": {
+          "id": "x-sEh-BEhQYrGKOaNIxGr02Fgx-HEgDx5YybVPLDaVU",
+          "bytes": 2323,
+          "sha256": "d4248f631894bf945e2a336f3e6d7786413f61f64d5365dbc606dc4cb0b4b047"
+        },
+        "lunar_dust/1.json": {
+          "id": "swm56dFrCWEPxClkoHtDt8NiM0igCWRYkRCJtWk8S0Y",
+          "bytes": 2327,
+          "sha256": "d67a3e5fbd2ecddb8d6fee65f1782584104a1933d27c6acabaf46d8c6974cc46"
+        },
+        "lunar_dust/2.json": {
+          "id": "llGiKpek5-3-rgW9JPxv7V0E_wRgIXAoSvdIrG9aDnU",
+          "bytes": 2335,
+          "sha256": "bc438bf98ea1115181d2809c28b65de96fdb77b1df0a756bae8a57eb9fa28a5e"
+        },
+        "lunar_dust/3.json": {
+          "id": "PMg0xQbNFuZkH3z8M8OiXfCEFNh5ZtaDBiN4E3e4m2g",
+          "bytes": 2327,
+          "sha256": "407b052730ddc86462d0e3b0c9bb33210dffe9e482d11c17e37fe56a93584c36"
+        },
+        "lunar_dust/4.json": {
+          "id": "GZrMtqL_WTaYHA9BMxAVbrsxSWTbXU_9eT_esuFPnGE",
+          "bytes": 2323,
+          "sha256": "94b867b81da7a68614db47a796e926a9a506d3872472b867da67b4ddbc568c97"
+        },
+        "lunar_dust/5.json": {
+          "id": "IjYPCUjabTpdZe3D2_L_bSRuHiHUR_BUlSjNZXhGyHs",
+          "bytes": 2327,
+          "sha256": "943041b24b41bbfa055e6e42daee77d106240e95b0fecbe98ef5ac123ed2bfbc"
+        },
+        "cosmic_shard/0.json": {
+          "id": "Qd24KoMmru5UIVU2C8JxLLwqcsfIW9OiRJ_aVGWFC3w",
+          "bytes": 2302,
+          "sha256": "d70fa3614642b490cfb6d49bd30288cd0eb8a07cdcb30fd861b6dfea14a214ea"
+        },
+        "cosmic_shard/1.json": {
+          "id": "3_HnaAShfZSo8Usp16PyRpgg85UGEinAeYUx49YT8aI",
+          "bytes": 2310,
+          "sha256": "c39f2d277dca36f8035f017b6936856452317a0fab0fa4f77561faad9595041c"
+        },
+        "cosmic_shard/2.json": {
+          "id": "tzeOKQCbuRsbNGDmJPPZhhCCHyVJmiCqv7Qa-i8tt58",
+          "bytes": 2322,
+          "sha256": "5cd9d2cd1d69d886a039385ee335bc89b9f88d4c83ef865c514a405b7b7c6d09"
+        },
+        "solar_core/0.json": {
+          "id": "inK12fTKRPtML0RuNGHaIRZN87eZ4RR9hdzBVQvoKFM",
+          "bytes": 2267,
+          "sha256": "7fd7318bd8f42c4ea986b95a349590c55f4e3324c82385ba2f62f10c4b476072"
+        },
+        "solar_core/1.json": {
+          "id": "KXmSNqiLLNi5naYVNC43ZprmvO6n_DoYqbrQKNHjo0w",
+          "bytes": 2283,
+          "sha256": "2e4ea8de011d7cd4d781353b5a1ab4f92aaf4540799903115f35e2d4393832ec"
+        },
+        "void_anomaly/0.json": {
+          "id": "sn2eSNjTUwVat1RtE_vAaP3Mp0DoaAp3IIdKOvuKfNQ",
+          "bytes": 2299,
+          "sha256": "1189576151ad8a84630c645a67cae6db3f2376997ca97d8ddf52f91091e1daa1"
+        }
+      },
+      "uploadCheck": {
+        "at": "2026-10-31T10:26:50.842Z",
+        "gateway": "ar-io.dev",
+        "kind": "gateway cache, not L1",
+        "ok": 27,
+        "total": 27,
+        "failures": []
+      }
+    }
+  ],
+  "note": "Pick ONE set after 7 consecutive passing days of check-gateways.mjs (27/27 on two gateways and on L1); METADATA_BASE_URI = its metadataBaseUri."
+}
