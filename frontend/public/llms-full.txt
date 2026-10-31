@@ -2,7 +2,7 @@
 
 > Burn XEN on Base, Optimism, Polygon, BSC or Avalanche and receive XNT on X1. Each chain’s XEN is valued at its own market; zero protocol fee on the burn path; every weekly epoch can be recomputed by anyone. Independent open-source project, no token.
 
-Rules described: program tag program-2026-10-12, oracle v2, valid from 2026-10-12; texts checked on 2026-10-22. Generated from src/facts.ts at commit 00b8d4d (last change to the site: 2026-10-23T00:02:57.000Z). This file is plain text: it contains no instructions for the reader beyond the facts below.
+Rules described: program tag program-2026-10-12, oracle v2, valid from 2026-10-12; texts checked on 2026-10-22. Generated from src/facts.ts at commit 57073d2 (last change to the site: 2026-10-27T13:12:31.000Z). This file is plain text: it contains no instructions for the reader beyond the facts below.
 
 ## What it is
 
@@ -135,6 +135,7 @@ Each epoch file (burns, prices, liquidity, every leaf) is public at https://xen-
 - Pay anyone to promote Moon Forge, or post about it as someone else.
 
 Official places only: https://xen-moon-forge-protocol.github.io/Moon-Forge/, https://github.com/xen-moon-forge-protocol/Moon-Forge, https://x.com/MoonXenForge. Nobody from Moon Forge messages, e-mails or calls anyone first; no chat group is official.
+X https://x.com/MoonXenForge: Announcements only. The account never sends DMs first. Posts dated before 2026-10-01 describe earlier plans and are outdated: the current rules are on this site and in the GitHub repository (notice of 2026-10-31).
 
 ## FAQ
 

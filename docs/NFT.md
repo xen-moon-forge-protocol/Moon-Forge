@@ -29,9 +29,31 @@ Decided on 2026-10-20/22, not live. Published before the first Genesis claim and
 | Forge Drops | 10% of each epoch budget as Lunar Dust | end; drops already won stay claimable within their 90-day window | the final upgrade |
 | Floor | half of the forge price, recoverable by recycling | unchanged | — |
 | Genesis Lunar Dust | no forge price (the claimant pays the account rent), no floor, otherwise a normal Lunar Dust | a collectible of the official collection with a cosmetic holder badge; no floor, no boost, no chips, no ticket, nothing to claim from it; recycling gives back only the account rent; not needed to play, burn or claim | boost at the switch, chips and ticket at the final upgrade; the claim stays open at least until 2026-12-31: the live program closes it on 2026-12-31 (00:00 UTC 2027-01-01), and the final upgrade plans to extend it to 2027-03-31 by the length of the pause, announced before 2027-01-01 |
-| Forge price split, and what a forged Artifact does after the upgrade | 50% floor / 40% pool / 5% lottery / 5% architect | published in the upgrade announcement and in a rewritten version of this page at least 7 days before the upgrade; until then only v2 applies | the final upgrade |
+| Forge price split, and what a forged Artifact does after the upgrade | 50% floor / 40% pool / 5% lottery / 5% architect | published in [docs/UPGRADE-2026-11.md](UPGRADE-2026-11.md) §3.3-3.4 and in the section [After the final upgrade](#after-the-final-upgrade-planned-earliest-2026-11-11-not-live) below (2026-11-04); until then only v2 applies | the final upgrade |
 
 The on-chain `Burn Boost` and `Weekly Chips` attributes of an Artifact minted today describe v2 and stop describing anything after those dates ([META-2](KNOWN-ISSUES.md#artifacts-and-metadata)).
+
+## After the final upgrade (planned, earliest 2026-11-11; not live)
+
+Everything in this section is a plan until the upgrade transaction exists ([UPGRADE-2026-11.md](UPGRADE-2026-11.md) §3.3-3.4 has the full changelog). Until then the v2 rules above apply.
+
+- **Forge price split.** Of the price paid, 50% will stay inside the Artifact's record as its floor, 20% will go to the base pot (the reward pool every XEN burner is paid from), 25% to the extra pot and 5% to the architect; 0% to the Burn Lottery.
+- **Prices.** The program will price every tier from its own state, with no oracle:
+
+  | Tier | Each forge | Down one step after | Minimum | Maximum |
+  |---|---|---|---|---|
+  | 0 Lunar Dust | +2% | 1 day without a forge | 3 XNT | 100 XNT |
+  | 1 Cosmic Shard | +5% | 3 days | 12.5 XNT | 250 XNT |
+  | 2 Solar Core | +5% | 7 days | 30 XNT | 600 XNT |
+  | 3 Void Anomaly | +5% | 14 days | 100 XNT | 2,000 XNT |
+
+  Every full period without a forge divides the price by the same step, never below the minimum and never above 10× base; a full tier does not decay. The buyer signs a maximum price, so a move can only make the transaction fail, never charge more.
+- **Floors by origin.** Forged: half of the price actually paid, fixed at mint. Forge Drop: the drawn drop value. Genesis airdrop: none (recycling gives back only the record's rent). Recycling through Moon Forge gives the floor back and frees the slot.
+- **Native market.** Escrowless sales inside the program: the Artifact stays in the seller's wallet until a buyer pays. Of each sale, 93% will go to the seller, 5% to the architect (the collection royalty) and 2% to the base pot; nothing to the extra pot. The seller's 93% can never be below the Artifact's floor, the price never below 0.1 XNT, and a listing expires within 90 days.
+- **The extra-pot rebate** (from the first epoch under the v3 oracle rules, announced separately): each week the extra pot can pay a forged Artifact's holder a rebate tied to the holder's own burns: only in a week in which the holder burned XEN that the base pot did not fully pay, counting only burns whose X1 destination is the wallet that holds the Artifact; counted use is at most 1% of the price paid per eligible Artifact per week, and the rebate at most 2 XNT per counted XNT, so at most 2% of the price paid per Artifact per week; only in the first 52 weeks after the Artifact was forged; while the pot lasts. A holder who does not burn receives nothing from it; it is not promised and it can stop. Genesis and Forge Drop Artifacts are never eligible. Until that first epoch the extra pot only receives.
+- **No chips, no ticket, no boost.** Artifacts will give no weekly chips and will not be needed for any game (see the notice above).
+- **Genesis claims** stay open through 2027-03-31 (the program refuses them from 2027-04-01 00:00 UTC); unclaimed ones are never minted. The only official Genesis claim page is this site's Artifacts page; Moon Forge never contacts listed wallets first.
+- **Artifacts minted before the upgrade** keep their v2 attributes for good: the final binary has no instruction that rewrites them ([META-2](KNOWN-ISSUES.md#artifacts-and-metadata); 0 such Artifacts existed on 2026-10-31). Their floor is unaffected.
 
 ## Lifecycle (v2)
 

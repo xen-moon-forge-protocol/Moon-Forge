@@ -92,9 +92,8 @@ Exceptions: put `wording:allow` in a comment on the line (or on the line above i
 ** :: WORDING\.md :: a line that cites this standard may quote the banned words
 ** :: xen-moon-forge-protocol@tutamail\.com :: the project's own mailbox (security contact), not a person :: email
 docs/WORDING.md :: . :: the standard itself lists the words it forbids :: earn,yield,profit,investment,guarantee,passive-income,return-noun,risk-free,bigger-share,audited,apr-apy,roi,immutable,trustless
-docs/CLAIMS.md :: . :: the register quotes the live texts it tracks, including the ones being fixed :: earn,yield,profit,investment,guarantee,passive-income,return-noun,risk-free,bigger-share,audited,apr-apy,roi,immutable,trustless
+docs/CLAIMS.md :: . :: the register quotes the live texts it tracks, including the ones being fixed :: earn,yield,profit,investment,guarantee,passive-income,return-noun,risk-free,bigger-share,audited,apr-apy,roi,immutable,trustless,rebate-own-contribution
 docs/REVIEW-2026-10.md :: audited" :: the review record quotes the old false claim, in quotation marks, to say it was wrong :: audited
-programs/moon-forge/Cargo.toml :: ^description = "Moon Forge Protocol v2 - burn XEN on any EVM chain, earn XNT on X1 :: the live v2 crate description, also in the deployed program's IDL; the source of the final upgrade replaces it with the section 4 sentence, and this line goes with it :: earn
 ```
 
 Run it locally before opening a pull request that touches copy: `node scripts/wording-check.mjs` (add `--json` for a machine-readable report, `--warn-only` to see hits without failing, `--list-files` to print the scope).
