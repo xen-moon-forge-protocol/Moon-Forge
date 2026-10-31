@@ -4,10 +4,13 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { errorMessage, programErrorName, programErrorNumber, PROGRAM_ERRORS } from '../../errors.mjs';
+import { errorMessage, programErrorName, programErrorNumber, PROGRAM_ERRORS, PROGRAM_ERRORS_V3, retiredError } from '../../errors.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const idlPath = [path.resolve(here, '../../../../target/idl/moon_forge.json'), path.resolve(here, '../../../../frontend/src/idl/moon_forge.json')].find((p) => fs.existsSync(p));
+// The live (v2, 64 errors) IDL only: target/idl/moon_forge.json is whatever the source last built (the v3 IDL, 101 errors,
+// since the final-upgrade source), so it is never read here; the v3 codes are checked against moon_forge.v3.json below.
+const livePath = path.resolve(here, '../../../../frontend/src/idl/moon_forge.json');
+const idlPath = fs.existsSync(livePath) ? livePath : undefined;
 
 test('every IDL error code is in the map with the same name and text', { skip: !idlPath && 'no IDL file in this checkout' }, () => {
   const idl = JSON.parse(fs.readFileSync(idlPath, 'utf8'));
@@ -19,6 +22,28 @@ test('every IDL error code is in the map with the same name and text', { skip: !
     assert.ok(PROGRAM_ERRORS[e.code].next.length > 10, `${e.name} has no next step`);
   }
   assert.equal(Object.keys(PROGRAM_ERRORS).length, idl.errors.length, 'no code outside the IDL');
+});
+
+const v3IdlPath = path.resolve(here, '../../../../frontend/src/idl/moon_forge.v3.json');
+test('the final upgrade\'s codes (6064-6100) and its two reworded live codes match the upgraded IDL', { skip: !fs.existsSync(v3IdlPath) && 'no v3 IDL in this checkout' }, () => {
+  const idl = JSON.parse(fs.readFileSync(v3IdlPath, 'utf8'));
+  for (const e of idl.errors) {
+    if (e.code < 6064 && e.msg === PROGRAM_ERRORS[e.code].text) continue;
+    assert.ok(PROGRAM_ERRORS_V3[e.code], `code ${e.code} (${e.name}) missing from PROGRAM_ERRORS_V3`);
+    assert.equal(PROGRAM_ERRORS_V3[e.code].name, e.name);
+    assert.equal(PROGRAM_ERRORS_V3[e.code].text, e.msg);
+    assert.ok(PROGRAM_ERRORS_V3[e.code].next.length > 10);
+  }
+  assert.deepEqual(Object.keys(PROGRAM_ERRORS_V3).map(Number).filter((c) => c >= 6064), Array.from({ length: 37 }, (_, i) => 6064 + i));
+  assert.match(errorMessage({ logs: ['custom program error: 0x17a6'] }, { rules: 3 }), /3% today/, 'rules 3 reads the reworded DailyLossLimit');
+  assert.doesNotMatch(errorMessage({ logs: ['custom program error: 0x17d2'] }), /earn/, 'ChipsRetired is shown without the frozen wording');
+});
+
+test('retiredError: a kit refusal that reads like the program\'s code', () => {
+  const e = retiredError('KeeperRequired', 'placeBet');
+  assert.equal(programErrorNumber(e), 6088);
+  assert.equal(programErrorName(e), 'KeeperRequired');
+  assert.match(errorMessage(e), /Nothing was sent/);
 });
 
 test('codes are contiguous 6000..6063 (frozen; an upgrade may only append)', () => {
@@ -51,7 +76,8 @@ test('getSignatureStatuses err shape', () => {
 });
 
 test('unknown program codes and framework codes', () => {
-  assert.match(errorMessage({ logs: ['custom program error: 0x17b0'] }), /newer program than the kit/); // 0x17b0 = 6064: first code after the frozen range
+  assert.match(errorMessage({ logs: ['custom program error: 0x17d5'] }), /newer program than the kit/); // 0x17d5 = 6101: first code after the final upgrade's range
+  assert.match(errorMessage({ logs: ['custom program error: 0x17b0'] }), /WithdrawExpired, 6064/); // the final upgrade's first appended code
   assert.match(errorMessage({ error: { errorCode: { code: 'ConstraintSeeds', number: 2006 }, errorMessage: 'A seeds constraint was violated' } }), /Anchor framework error 2006/);
 });
 

@@ -8,6 +8,9 @@
 //   the 2% rake. The creator moves first. 2 minutes per turn: a crash or a slow RPC loses the match and the stake.
 // - Your opponent may be another automated agent. Only stake what you can afford to lose.
 // - MAX_STAKE is a cap: the bot never stakes more. Below the 0.1 XNT minimum stake it does nothing.
+// - After the final upgrade (planned, earliest 2026-11-11; the kit detects it) matches start sealed and need no Artifact,
+//   the first mover is drawn from both players' secrets and a chess clock replaces the 2-minute turn; the kit keeps the
+//   match secret on disk (~/.moonforge/secrets) before it commits to it: back that directory up with the key.
 import { connect, loadKeypair, WAR, XNT, errorMessage } from '../moonforge.mjs';
 
 const log = (s) => console.log(new Date().toISOString().slice(11, 19), s);
@@ -16,7 +19,10 @@ const maxStake = Number(process.env.MAX_STAKE ?? WAR.minStakeXnt);
 async function run() {
   // the key is loaded inside the try: errorMessage() prints a fixed line, never a stack with key material
   const mf = await connect({ rpc: process.env.RPC, keypair: loadKeypair(process.env.AGENT_KEY), idl: process.env.IDL });
-  if (!(await mf.ticket())) {
+  // after the final upgrade (the kit detects it) matches start sealed and need no Artifact; secrets go to the kit's store
+  const sealed = mf.rules === 3;
+  if (sealed) log('final upgrade detected: sealed matches (no ticket needed); the match secret is written to the secrets store before each commit');
+  if (!sealed && !(await mf.ticket())) {
     // spending 10 XNT (5 back on recycle) is never automatic: the operator has to ask for it
     if (process.env.FORGE_TICKET !== '1') { log('no Artifact in this wallet: set FORGE_TICKET=1 to forge a Lunar Dust ticket (10 XNT, 5 back on recycle), or transfer one in. Exiting.'); return; }
     log('no Artifact yet: forging a Lunar Dust (the arena ticket under the current rules; 10 XNT, 5 back on recycle)'); await mf.forgeLunarDust();
@@ -28,9 +34,9 @@ async function run() {
   if (open.length) {
     war = open[0].publicKey;
     log(`joining ${war.toBase58()} for ${Number(open[0].account.stake) / XNT} XNT`);
-    await mf.joinWar(war);
+    if (sealed) await mf.joinWarSealed(war); else await mf.joinWar(war);
   } else {
-    war = await mf.createWar(maxStake);
+    war = sealed ? (await mf.createWarSealed(maxStake)).war : await mf.createWar(maxStake);
     log(`no open match: created ${war.toBase58()}, waiting for an opponent (cancel with mf.cancelWar to get the stake back)`);
     for (;;) {
       const w = await mf.war(war);

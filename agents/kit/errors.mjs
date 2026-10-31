@@ -1,7 +1,8 @@
 /**
  * Moon Forge program errors (IDL `errors`, program 57UE1U1t23ztg2noLp8pcpGW1B1Xw25rLH6ra9Mchea9, IDL 2.0.0) with a
- * plain-language text and the next step for an agent. Error numbers 6000-6063 are frozen: a future program upgrade
- * may only append (so an unknown code above 6063 is "a newer program than this kit knows", never a mismatch).
+ * plain-language text and the next step for an agent. Error numbers 6000-6063 are the live program's and are frozen;
+ * the final upgrade appends 6064-6100 (PROGRAM_ERRORS_V3), so an unknown code above 6100 is "a newer program than this
+ * kit knows", never a mismatch.
  *
  *   import { errorMessage, programErrorName } from './errors.mjs';
  *   try { await mf.houseWithdraw(); } catch (e) { console.error(errorMessage(e)); if (programErrorName(e) === 'WithdrawLocked') ... }
@@ -56,7 +57,7 @@ export const PROGRAM_ERRORS = Object.freeze({
   6044: { name: 'AirdropRootSet', text: 'Airdrop root already set', next: 'Architect-only instruction; not for agents.' },
   6045: { name: 'AirdropNotSet', text: 'Airdrop not configured', next: 'The Genesis airdrop root is not set.' },
   6046: { name: 'AirdropExhausted', text: 'Airdrop allocation exhausted', next: 'All Genesis Artifacts are claimed.' },
-  6047: { name: 'InvalidTarget', text: 'Invalid target account', next: 'A counter moved between your read and the send (someone forged/entered first) or an account address is wrong; re-read the counter and retry once (the kit does this for forges).' },
+  6047: { name: 'InvalidTarget', text: 'Invalid target account', next: 'A counter moved between your read and the send (someone forged/entered first) or an account address is wrong; re-read the counter and retry once (the kit does this for forges). Under the final upgrade (round 4), propose_oracle and accept_oracle also refuse the architect payee as the new oracle key.' },
   6048: { name: 'DropNotPending', text: 'Forge Drop seed is not pending', next: 'Nothing to seal for this epoch.' },
   6049: { name: 'DropNotSealed', text: 'Forge Drop seed not sealed yet', next: 'The keeper seals the drop after the epoch is published; try later.' },
   6050: { name: 'NoDrop', text: 'This leaf did not win a Forge Drop', next: 'Nothing to claim as a drop for this leaf.' },
@@ -74,6 +75,67 @@ export const PROGRAM_ERRORS = Object.freeze({
   6062: { name: 'PotFull', text: "This round's pot is full", next: 'The 200 XNT pot cap is reached; no more entries this round.' },
   6063: { name: 'AirdropClosed', text: 'The Genesis airdrop claim period has ended', next: 'The claim deadline has passed.' },
 });
+
+/**
+ * Codes the final upgrade appends (6064-6100; frozen IDL `errors` of frontend/src/idl/moon_forge.v3.json) and the two
+ * live codes whose message it rewords (6054, 6062). The live program never returns 6064 or above; the kit reads these
+ * only to explain the upgraded program's refusals.
+ */
+export const PROGRAM_ERRORS_V3 = Object.freeze({
+  6054: { name: 'DailyLossLimit', text: 'Counting every unsettled bet as won, the bankroll would lose more than 3% today: house games resume tomorrow (UTC)', next: 'Daily circuit breaker; house bets reopen after 00:00 UTC.' },
+  6062: { name: 'PotFull', text: "This round's pot, or this side of it, is full", next: 'The Jackpot pot is capped at 20 XNT (a Predictions side at 100 XNT); no more entries this round.' },
+  6064: { name: 'WithdrawExpired', text: 'This withdrawal request has expired: request again', next: 'A Be the House request can be used for 24 h after its cooldown; call houseRequestWithdraw(shares) again.' },
+  6065: { name: 'SealedJoinRequired', text: 'This game now uses sealed instructions (create_war_sealed, join_war_sealed, join_duel_sealed): update your client', next: 'Use createWarSealed / joinWarSealed / joinDuelSealed.' },
+  6066: { name: 'ClaimOnHold', text: 'Claims open 48 h after the epoch is published', next: 'Wait until 48 h after the epoch was published (the public can check it in that window), then claim.' },
+  6067: { name: 'HoldOver', text: 'The 48-h hold has ended: this epoch can no longer be voided', next: 'Nothing to do: the epoch stands.' },
+  6068: { name: 'OnlyCold', text: "Only the oracle seat's cold key can do this", next: 'Oracle-seat instruction; not for agents.' },
+  6069: { name: 'SeatAlive', text: 'The oracle seat is alive: an epoch survived its hold in the last 28 days, or the seat changed hands less than 28 days ago', next: 'The seat can be taken only after 28 days without a surviving epoch.' },
+  6070: { name: 'SeatDead', text: 'The oracle seat is dead: it can only be taken, not resigned', next: 'Oracle-seat instruction; not for agents.' },
+  6071: { name: 'BadEpochWindow', text: 'Pass the Epoch and ExtraEpoch accounts of every epoch of the last 28 days, newest first, down to the first older one', next: 'Oracle-seat or extra-pot publication instruction; not for agents.' },
+  6072: { name: 'SeatPriority', text: 'Only the priority taker can take the seat during its 24-h window', next: 'Wait for the 24-h priority window to end.' },
+  6073: { name: 'SeatOpen', text: 'The seat is already open', next: 'Oracle-seat instruction; not for agents.' },
+  6074: { name: 'BondTooSmall', text: 'Bond below the required minimum', next: 'Raise the bond to the required minimum.' },
+  6075: { name: 'ExtraBudgetExceeded', text: 'Extra budget above 8% of the pot or 4% of the live forged floors', next: 'Oracle-only instruction; not for agents.' },
+  6076: { name: 'ExtraEpochOrder', text: 'Extra epochs follow base epochs one by one, at least 6 days apart', next: 'Oracle-only instruction; not for agents.' },
+  6077: { name: 'ExtraBaseEpochMissing', text: 'No base epoch with this id', next: 'That extra epoch is not published yet; read extra-<n>.json again later.' },
+  6078: { name: 'ExtraClaimWindow', text: 'This extra epoch is closed or its 90-day window ended', next: 'The 90-day claim window of that extra epoch has ended.' },
+  6079: { name: 'ExtraAlreadyClaimed', text: 'This extra leaf was already claimed', next: 'Nothing to do: the rebate was already paid to the leaf wallet.' },
+  6080: { name: 'ListingBelowFloor', text: "The seller would receive less than this Artifact's floor (or the price is below 0.1 XNT): recycle it instead", next: 'List at or above minimumListPrice(backing), or recycle the Artifact for its floor.' },
+  6081: { name: 'InvalidExpiry', text: 'Expiry must be in the future and at most 90 days away', next: 'Pick an expiry between now and 90 days from now.' },
+  6082: { name: 'ListingExpired', text: 'This listing has expired', next: 'The listing ended; anyone can close it (closeListing) and the seller can list again.' },
+  6083: { name: 'ListingReserved', text: 'This listing is reserved for another buyer', next: 'Only the reserved wallet can buy it.' },
+  6084: { name: 'ListingStale', text: 'The seller no longer holds this Artifact', next: 'The listing is stale; anyone can close it (closeListing).' },
+  6085: { name: 'ListingPriceChanged', text: 'The listing price changed: review it again', next: 'Re-read the listing (artifactInfo) and decide again at the new price.' },
+  6086: { name: 'ListingActive', text: 'This listing is still valid: only the seller can close it', next: 'Only the seller can delist a live listing before it expires.' },
+  6087: { name: 'SelfPurchase', text: 'Buyer and seller are the same wallet', next: 'Delist instead of buying your own listing.' },
+  6088: { name: 'KeeperRequired', text: 'House bets use place_bet_v2 and the keeper chain since the final upgrade', next: 'Use placeBetV2 (the keeper reveals the bet); a pending keeper bet waits with waitBet(bet).' },
+  6089: { name: 'KeeperNotArmed', text: 'The house keeper has no chain positions left: wait for it to re-arm', next: 'Wait for the keeper to re-arm (houseKeeper().armed).' },
+  6090: { name: 'BadReveal', text: 'Reveal does not match the chain head, it is out of order, or the new tip repeats the current head', next: 'Keeper instruction; not for agents.' },
+  6091: { name: 'OnlyKeeper', text: 'Only the house keeper can do this', next: 'Keeper instruction; not for agents.' },
+  6092: { name: 'BetNotStalled', text: 'This bet is not stalled yet', next: 'Wait: a never-anchored bet is refundable 512 slots after placement, an anchored one about a day later (betStatus(bet)).' },
+  6093: { name: 'KeeperBusy', text: 'Bets or a Jackpot round are pending: settle or refund them first', next: 'Keeper instruction; not for agents.' },
+  6094: { name: 'KeeperBondTooSmall', text: 'The keeper bond does not cover the pending payouts', next: 'The keeper bond is full for now: wait for pending bets to settle, or lower the stake.' },
+  6095: { name: 'WeeklyLossLimit', text: 'The bankroll would lose more than 15% over 7 days: house games resume when the window rolls', next: 'Weekly limit reached; house bets reopen when the 7-day window rolls.' },
+  6096: { name: 'KeeperNotice', text: 'The 7-day keeper notice (hand-over or bond withdrawal) has not elapsed', next: 'Keeper instruction; not for agents.' },
+  6097: { name: 'KeeperAlive', text: 'The keeper seat is alive: it was active in the last 28 days', next: 'A keeper seat can be taken only after 28 days of inactivity.' },
+  // the program's frozen message is quoted verbatim in `text` (it is the IDL's); errorMessage() shows `display` instead
+  6098: { name: 'ChipsRetired', text: 'Weekly chips are retired since the final upgrade', next: 'Weekly chips are retired since the final upgrade; nothing to claim.' }, // wording:allow (the program's frozen IDL message)
+  6099: { name: 'BetStalled', text: 'This bet is stalled (block gone, reveal overdue or position skipped): refund it with refund_stalled_bet', next: 'Call refundStalledBet(bet) (permissionless).' },
+  6100: { name: 'LotteryRetired', text: 'Burn Lottery tickets are retired since the final upgrade', next: 'Nothing to enter; open rounds still settle and their entries close.' },
+});
+
+/**
+ * The refusal the kit raises (nothing sent) for a live-program call that the upgraded program retired: it carries the
+ * program's code and name, so programErrorName(e) / errorMessage(e) read it like the on-chain refusal it avoids.
+ */
+export function retiredError(name, what, hint = null) {
+  const entry = Object.entries(PROGRAM_ERRORS_V3).find(([, v]) => v.name === name);
+  const code = entry ? Number(entry[0]) : null;
+  const e = new Error(`${what}: the upgraded program retired this call (${name}${code ? `, ${code}` : ''}): ${hint ?? entry?.[1].next ?? 'update the call'}. Nothing was sent.`);
+  if (code) e.code = code;
+  e.retired = true;
+  return e;
+}
 
 const HEX_RE = /custom program error: 0x([0-9a-f]+)/i;
 const ANCHOR_RE = /Error Code: (\w+)\. Error Number: (\d+)\./;
@@ -107,11 +169,11 @@ export function programErrorNumber(e) {
 export function programErrorName(e) {
   const n = programErrorNumber(e);
   if (n == null) return null;
-  return PROGRAM_ERRORS[n]?.name ?? e?.error?.errorCode?.code ?? null;
+  return PROGRAM_ERRORS[n]?.name ?? PROGRAM_ERRORS_V3[n]?.name ?? e?.error?.errorCode?.code ?? null;
 }
 
 /** URLs inside an RPC error text, cut to their origin (a private endpoint's key in a path or query stays out of logs). */
-const redactUrls = (s) => s.replace(/\b(?:https?|wss?):\/\/[^\s'"<>()]+/gi, (u) => { try { return new URL(u).origin; } catch { return '(url)'; } });
+export const redactUrls = (s) => s.replace(/\b(?:https?|wss?):\/\/[^\s'"<>()]+/gi, (u) => { try { return new URL(u).origin; } catch { return '(url)'; } });
 const LANDED_HINT = /may have landed|may still land|already processed/i;
 
 /**
@@ -119,21 +181,21 @@ const LANDED_HINT = /may have landed|may still land|already processed/i;
  * An error that carries `mayHaveLanded` (a send that failed in transit, a relayed refusal) always ends with the
  * signature to check before sending again.
  */
-export function errorMessage(e) {
-  const text = describe(e);
+export function errorMessage(e, { rules = 2 } = {}) {
+  const text = describe(e, rules);
   if (e?.mayHaveLanded && e?.signature && !LANDED_HINT.test(text)) {
     return `${text} The transaction may have landed anyway: check the signature ${e.signature} on the explorer before sending again.`;
   }
   return text;
 }
 
-function describe(e) {
+function describe(e, rules = 2) {
   if (e == null) return 'Unknown error';
   const n = programErrorNumber(e);
   if (n != null) {
-    const known = PROGRAM_ERRORS[n];
-    if (known) return `${known.text} (${known.name}, ${n}). ${known.next}`;
-    if (n >= 6064 && n < 7000) return `Program error ${n}: this kit does not know it (a newer program than the kit; update the kit).`;
+    const known = (rules === 3 && PROGRAM_ERRORS_V3[n]) || PROGRAM_ERRORS[n] || PROGRAM_ERRORS_V3[n];
+    if (known) return e?.retired ? String(e.message) : `${known.display ?? known.text} (${known.name}, ${n}). ${known.next}`;
+    if (n >= 6101 && n < 7000) return `Program error ${n}: this kit does not know it (a newer program than the kit; update the kit).`;
     if (n < 6000) return `Custom error ${n} of another program in the transaction (System, Compute Budget or Metaplex Core): ${String(e?.message ?? '').slice(0, 160)}`;
   }
   const fw = e?.error?.errorCode?.number;

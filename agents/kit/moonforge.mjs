@@ -22,6 +22,16 @@
  * Program: 57UE1U1t23ztg2noLp8pcpGW1B1Xw25rLH6ra9Mchea9 (X1 mainnet). Rules and source: https://github.com/xen-moon-forge-protocol/Moon-Forge
  * The program is upgradeable during its public test period; the current Artifact rules are being replaced by a planned
  * upgrade (see the notices the kit prints). No third-party audit.
+ *
+ * Kit 2.0.0 also carries, each switched on by what the chain reports and refused cleanly before it:
+ *   - the burner's exits without the website (claims.mjs): verifyMyClaim, claim / claimFor / claimAll, missions,
+ *     withdrawVested, eject, donate, claimAirdrop, myBurns, history, and the week's capacity under the v3 rules;
+ *   - the v3 burn module (burn.mjs): the binding quote with every refusal, address helpers, a planner, the burn itself;
+ *     it fails closed until the v3 switch epoch (planned for November 2026, announced at least one full epoch ahead);
+ *   - the final upgrade's games and Artifacts (games-v3.mjs, artifacts-v3.mjs), used only once detect.mjs reports the
+ *     upgraded program (planned, earliest 2026-11-11; its source and changelog published at least 7 days before it, and its
+ *     binary hash at least 48 hours before).
+ * The interface (IDL) is the one bundled with the kit for the rules in force, pinned by sha256 (idl.mjs).
  */
 import anchor from '@coral-xyz/anchor'; // CommonJS package: the default import is the whole module (BN, Program, Wallet...)
 import {
@@ -30,9 +40,22 @@ import {
 import bs58 from 'bs58';
 import crypto from 'crypto';
 import fs from 'fs';
-import { errorMessage, programErrorName, programErrorNumber, PROGRAM_ERRORS } from './errors.mjs';
+import { errorMessage, programErrorName, programErrorNumber, PROGRAM_ERRORS, PROGRAM_ERRORS_V3, redactUrls, retiredError } from './errors.mjs';
+import { accountFieldOffset, idlPins, idlRules, isBundledSha, loadBundledIdl, loadGivenIdl } from './idl.mjs';
+import { detectRules, PDA_V3 } from './detect.mjs';
+import { epochSourceOf } from './epochs.mjs';
+import { defaultSecretsDir, SecretsStore } from './secrets.mjs';
+import { V3 } from './rules-v3.mjs';
+import { V3_FROM } from './quote-v3.mjs';
+import { installClaims } from './claims.mjs';
+import { installGamesV3 } from './games-v3.mjs';
+import { installArtifactsV3 } from './artifacts-v3.mjs';
 
-export { errorMessage, programErrorName, programErrorNumber, PROGRAM_ERRORS };
+export { errorMessage, programErrorName, programErrorNumber, PROGRAM_ERRORS, PROGRAM_ERRORS_V3, redactUrls };
+export { PDA_V3 };
+
+/** This kit's version (semver). connect() / checkKitVersion() compare it with the agent card's minKitVersion. */
+export const KIT_VERSION = '2.0.0';
 
 export const PROGRAM_ID = new PublicKey('57UE1U1t23ztg2noLp8pcpGW1B1Xw25rLH6ra9Mchea9');
 export const MPL_CORE = new PublicKey('CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d');
@@ -55,6 +78,8 @@ export const LUNAR_DUST_PRICE = 10n * BigInt(XNT);
 export const HOUSE_DEAD_SHARES = 1_000_000n;
 /** Be the House guard: refuse deposits/withdrawals while pending bets reserve more than this share of the bankroll. */
 export const LP_MAX_RESERVED_BPS = 100;
+/** How soon the rules are read again after a failed read, or while they are unknown (ms). */
+export const RULES_RETRY_MS = 15_000;
 
 /**
  * Compute-unit limits per instruction: the most any measurement consumed, x1.2, rounded up to the next 1,000. Never a
@@ -112,6 +137,16 @@ export const PDA = {
   war: (creator, nonce) => pda(seed('war'), creator.toBuffer(), u64(nonce)),
   pred: (round) => pda(seed('pred'), u64(round)),
   predEntry: (round, player) => pda(seed('pred_entry'), u64(round), player.toBuffer()),
+  epoch: (id) => pda(seed('epoch'), u64(id)),
+  receipt: (id, player, tier) => pda(seed('receipt'), u64(id), new PublicKey(player).toBuffer(), Buffer.from([Number(tier)])),
+  mission: (id, player, tier) => pda(seed('mission'), u64(id), new PublicKey(player).toBuffer(), Buffer.from([Number(tier)])),
+  airdrop: (claimant) => pda(seed('airdrop'), new PublicKey(claimant).toBuffer()),
+  jackpot: (round) => pda(seed('jackpot'), u64(round)),
+  jpEntry: (round, index) => pda(seed('jp_entry'), u64(round), u32(index)),
+  draw: (round) => pda(seed('draw'), u64(round)),
+  drawEntry: (round, index) => pda(seed('draw_entry'), u64(round), u32(index)),
+  duel: (creator, nonce) => pda(seed('duel'), new PublicKey(creator).toBuffer(), u64(nonce)),
+  ...PDA_V3,
 };
 
 /** Moon Wars rules, identical to the program (constants.rs WAR_*). Cards: [power, defense, cost]. */
@@ -154,6 +189,40 @@ export const NOTICES = Object.freeze({
     + 'only advances and claims existing rounds; it does not enter them.',
   houseGames: 'House games carry a fixed 2% edge: negative expected value. Use them to test, never as a way to make money.',
 });
+
+/**
+ * The same notices once the kit has detected the final upgrade (rules 3). Printed and returned only then: the live
+ * program (rules 2) keeps NOTICES. Each one keeps the first words of its rules-2 counterpart where the subject is the same.
+ */
+export const NOTICES_V3 = Object.freeze({
+  wars: 'Moon Wars (final upgrade): matches start sealed (createWarSealed / joinWarSealed, then the creator seeds and the joiner '
+    + 'reveals) and need no Artifact. A chess clock runs: 30 s free per turn, then a 300 s bank per side, and 600 s for the '
+    + 'creator\'s first turn; a side whose time runs out loses, a creator who never seeds makes the match a draw, a joiner who never '
+    + 'reveals loses. Every move is a transaction with its own network fee; the winner pays the 2% rake. The kit keeps each '
+    + 'match\'s secret on disk before it commits to it: back that directory up with the key. Your opponent may be another '
+    + 'automated agent. Stake only what you can afford to lose.',
+  forge: 'Artifacts (final upgrade): the forge price of each tier rises with every forge and decays towards a fixed minimum while '
+    + 'nobody forges. 50% of the price stays inside the Artifact as a floor you can take back by recycling; 20% goes to the reward '
+    + `pool (base pot), 25% to the extra pot, 5% to the architect. ${V3_FROM}, each week the extra pot can `
+    + 'pay a forged Artifact\'s holder a rebate tied to the holder\'s own burns: only in a week in which the holder burned XEN that '
+    + 'the base pot did not fully pay, counting only burns whose X1 destination is the wallet that holds the Artifact; counted '
+    + 'use is at most 1% of the price paid per eligible Artifact per week, and the rebate at most 2 XNT per counted XNT, so at '
+    + 'most 2% of the price paid per Artifact per week; only in the first 52 weeks after the forge; while the pot lasts; a '
+    + 'holder who does not burn receives nothing from it. Artifacts never change a '
+    + 'burn\'s base payout. Forge then recycle always loses half of the price.',
+  recycle: 'Recycling burns the NFT for good and returns only its floor (forged: half of the price paid; Genesis: nothing beyond '
+    + 'the account rent). It also ends the Artifact\'s use of the extra pot and makes any open listing of it stale.',
+  predictions: 'Predictions: in the program (rounds with a side cap, spaced price reads and a 1% no-contest band), not offered by '
+    + 'this project. The kit only advances and claims existing rounds; it does not enter them.',
+  houseGames: 'House games carry a fixed 2% edge: negative expected value. Since the final upgrade the result comes from a bonded '
+    + 'keeper\'s hash chain and an anchor block: the keeper and that block\'s producer acting together can influence a result, '
+    + 'bounded by the caps and the bond; a stalled bet is paid or refunded from the keeper\'s bond, not lost (the kit anchors each '
+    + 'bet right after placing it). Each settled bet pays the keeper a tip of at most 0.0005 XNT from the reward pool\'s 1% share '
+    + 'of that stake. Use them to test, never as a way to make money.',
+});
+const noticeOf = (key, rules) => (rules === 3 && NOTICES_V3[key] ? NOTICES_V3[key] : NOTICES[key]);
+/** A War account only the upgraded program creates (sealed start: the WAR_V2 bit of target_slot). */
+const isSealedWarAccount = (w) => !!w && (BigInt(w.targetSlot.toString()) & V3.WAR_V2) !== 0n;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const bn = (n) => new anchor.BN(n.toString());
@@ -281,7 +350,7 @@ export function failoverConnection(urls, commitment = 'confirmed', { genesis = n
     const fail = (i, method, e) => {
       state.failCount++;
       if (method === 'sendTransaction') state.sendFailCount++;
-      state.failures.push({ url: redactRpc(urls[i]), method, error: String(e?.message ?? e).slice(0, 120), at: Date.now() });
+      state.failures.push({ url: redactRpc(urls[i]), method, error: redactUrls(String(e?.message ?? e)).slice(0, 120), at: Date.now() });
       if (state.failures.length > 50) state.failures.shift();
     };
     const verify = async (i) => {
@@ -471,15 +540,39 @@ export function coreOwner(info, collection = PDA.collection()) {
   return new PublicKey(d.subarray(1, 33));
 }
 
+/** Decodes an account of the upgraded program's IDL (bundled v3 IDL, or `idl` when it is a v3 IDL); throws when it does not match. */
+function v3Decoder(idl) {
+  let coder = null;
+  return (name, data) => {
+    if (!coder) coder = new anchor.BorshAccountsCoder(idl ?? loadBundledIdl('v3').idl);
+    return coder.decode(name, data);
+  };
+}
+
 /**
  * Connects with the agent's keypair.
  *   rpc / rpcs: your own endpoint(s) (see X1_RPCS); without them X1_RPC_URLS, then the public list. Every endpoint is
  *   asked for its genesis hash and one on another cluster is left out (with a warning): the built-in list must be on X1
  *   mainnet, any other list on the cluster of its first endpoint; `genesis` pins the cluster (e.g. X1_MAINNET_GENESIS).
- *   idl: object or file path (default: read from chain, or the MOONFORGE_IDL env path); onWarning: where the kit's
- *   notices go (default console.warn); cu: per-instruction overrides.
+ *   idl: the program interface. Default: the IDL bundled with the kit for the rules the program reports (idl.mjs: the
+ *   live IDL, or the upgraded program's IDL once the upgrade is detected), each pinned by sha256. An object or a file
+ *   path (or the MOONFORGE_IDL env path) is used as given (its address is checked); 'chain' reads the IDL account on
+ *   chain (the kit's behaviour before 2.0.0).
+ *   rules: on X1 mainnet the rules are detected at connect (detect.mjs) and again every rulesTtlMs (10 min). On any other
+ *   cluster (a local validator, a test cluster) the kit uses the live rules unless you pass rules: 3, or rules: 'detect'
+ *   (detected once at connect; refreshRules() re-reads them). rules: 2 or 3 pins them anywhere.
+ *   epochs: where the oracle's epoch files are read ({ dir } | { url } | 'site' | a path; epochs.mjs); needed by the
+ *   claim, verify and capacity methods. secretsDir: where the sealed-game secrets are kept (secrets.mjs).
+ *   priorityFee: { microLamports } added to time-critical sends (sealed reveals, match moves); default none.
+ *   card: the agent card (an object, e.g. from fetchAgentCard()); when given, a kit older than its minKitVersion
+ *   refuses every send (checkKitVersion).
+ *   onWarning: where the kit's notices go (default console.warn); cu: per-instruction overrides.
+ * With your own endpoints (rpc / rpcs / X1_RPC_URLS) the cluster is the one they report: when none of them answers
+ * getGenesisHash at connect, connect() refuses unless `genesis` or `rules` says what to assume (the kit never guesses
+ * "not mainnet" for a whole session). rules: 3 on X1 mainnet is checked against the chain and refused while the chain
+ * does not report the upgraded program.
  */
-export async function connect({ rpc, rpcs, keypair, idl, onWarning, cu, genesis } = {}) {
+export async function connect({ rpc, rpcs, keypair, idl, onWarning, cu, genesis, rules, rulesTtlMs, epochs, secretsDir, priorityFee, card } = {}) {
   if (!keypair) throw new Error('connect: keypair is required');
   const warnFn = onWarning ?? defaultWarning;
   const { urls, source: rpcSource } = rpcConfig({ rpc, rpcs });
@@ -488,24 +581,102 @@ export async function connect({ rpc, rpcs, keypair, idl, onWarning, cu, genesis 
   if (!checked.urls.length) {
     throw new Error(`connect: no RPC endpoint is on the expected cluster (${clusterName(checked.genesis)}); left out: ${checked.dropped.map(redactRpc).join(', ')}`);
   }
+  if (checked.genesis === null && rules === undefined) {
+    throw new Error(`connect: no RPC endpoint answered getGenesisHash (${urls.map(redactRpc).join(', ')}), so the cluster is unknown; nothing is assumed. Retry, or pass genesis: X1_MAINNET_GENESIS (X1 mainnet) or rules: 2 | 3 | 'detect'`);
+  }
   const connection = failoverConnection(checked.urls, 'confirmed', { genesis: checked.genesis, unverified: checked.unverified });
   const provider = new anchor.AnchorProvider(connection, new anchor.Wallet(keypair), { commitment: 'confirmed' });
+  const mainnet = checked.genesis === X1_MAINNET_GENESIS;
   const source = idl ?? process.env.MOONFORGE_IDL;
-  const theIdl = source ? (typeof source === 'string' ? JSON.parse(fs.readFileSync(source, 'utf8')) : source) : await anchor.Program.fetchIdl(PROGRAM_ID, provider);
-  if (!theIdl) throw new Error('could not load the Moon Forge IDL from chain (pass `idl` or set MOONFORGE_IDL to a local copy, e.g. frontend/src/idl/moon_forge.json)');
-  if (theIdl.address && theIdl.address !== PROGRAM_ID.toBase58()) throw new Error(`the IDL is for ${theIdl.address}, not for the Moon Forge program ${PROGRAM_ID.toBase58()}`);
-  return new MoonForge(new anchor.Program(theIdl, provider), keypair, { onWarning, cu });
+  let given = null;
+  if (source === 'chain') {
+    const chainIdl = await anchor.Program.fetchIdl(PROGRAM_ID, provider);
+    if (!chainIdl) throw new Error('could not load the Moon Forge IDL from chain (omit `idl` to use the IDL bundled with the kit)');
+    given = { ...loadGivenIdl(chainIdl), origin: 'chain' };
+  } else if (source) given = { ...loadGivenIdl(source), origin: typeof source === 'string' ? 'file' : 'object' };
+  // a file that is byte-for-byte (LF form) one of the bundled IDLs, e.g. the frontend/src/idl/moon_forge.json path the
+  // 1.0.0 README suggested for MOONFORGE_IDL, behaves like the bundle: it switches with the detected rules
+  if (given && given.origin === 'file' && isBundledSha(given.sha256)) given = null;
+  // X1 mainnet: detected (and re-read every rulesTtlMs). Any other cluster (a local validator, a test cluster): the live
+  // rules unless connect({ rules: 3 }) or connect({ rules: 'detect' }), so a test harness keeps the live calls it expects
+  const mode = rules === 2 || rules === 3 ? rules : rules === 'detect' || (rules === undefined && mainnet) ? 'detect' : 2;
+  const pinned = mode === 'detect' ? null : mode;
+  const decode = v3Decoder(given && given.rules === 3 ? given.idl : null);
+  if (pinned === 3 && mainnet) {
+    // pinning the upgraded rules on X1 mainnet must not print its notices (or build its calls) as live before the upgrade
+    const d = await detectRules(connection, decode, { mainnet });
+    if (d.rules !== 3) throw new Error(`connect: rules: 3 was pinned, but X1 mainnet reports rules ${d.rules} (${d.reasons.join('; ').slice(0, 200)}): the final upgrade is not live there. Omit rules to have them detected`);
+  }
+  const detection = pinned
+    ? { rules: pinned, status: rules ? 'pinned' : 'default', reasons: [rules ? 'rules pinned by connect({ rules })' : 'not X1 mainnet: the live rules unless connect({ rules: 3 }) or connect({ rules: "detect" })'], deploySlot: null, at: Date.now() }
+    : await detectRules(connection, decode, { mainnet });
+  if (detection.rules === 'unknown') warnFn(`program rules unknown (${detection.reasons.join('; ').slice(0, 300)}): every transaction is refused until they are clear (refreshRules(); re-read within 15 s)`);
+  const kitCheck = card ? checkKitVersion(card) : null;
+  if (kitCheck && !kitCheck.ok) warnFn(`${kitCheck.text}: every send is refused`);
+  const programs = {};
+  const bundled = (r) => {
+    if (!programs[r]) {
+      const b = loadBundledIdl(r === 3 ? 'v3' : 'live');
+      programs[r] = { program: new anchor.Program(b.idl, provider), sha256: b.sha256, origin: 'bundled' };
+    }
+    return programs[r];
+  };
+  const chosen = given ? { program: new anchor.Program(given.idl, provider), sha256: given.sha256, origin: given.origin } : bundled(detection.rules === 3 ? 3 : 2);
+  return new MoonForge(chosen.program, keypair, {
+    onWarning, cu, detection, rulesPinned: pinned, mainnet, rulesTtlMs, epochs, secretsDir, priorityFee, kitCheck,
+    idlInfo: { origin: chosen.origin, sha256: chosen.sha256, rules: idlRules(chosen.program.rawIdl ?? chosen.program.idl) },
+    bundled: given ? null : bundled, decode,
+  });
+}
+
+/** Semver compare: -1, 0, 1. */
+export function compareVersions(a, b) {
+  const pa = String(a).split(/[.-]/).slice(0, 3).map((x) => parseInt(x, 10) || 0), pb = String(b).split(/[.-]/).slice(0, 3).map((x) => parseInt(x, 10) || 0);
+  for (let i = 0; i < 3; i++) if (pa[i] !== pb[i]) return pa[i] < pb[i] ? -1 : 1;
+  return 0;
+}
+/**
+ * Compares this kit with the agent card's minimum (`minKitVersion`, or `kit.minVersion`). Returns { ok, current, min,
+ * text }. The card is passed in (fetchAgentCard() reads it over HTTPS only when you call it).
+ */
+export function checkKitVersion(card, current = KIT_VERSION) {
+  const min = card?.minKitVersion ?? card?.kit?.minVersion ?? null;
+  if (!min) return { ok: true, current, min: null, text: 'the agent card names no minimum kit version' };
+  const ok = compareVersions(current, min) >= 0;
+  return { ok, current, min, text: ok ? `kit ${current} meets the card's minimum ${min}` : `this kit (${current}) is older than the minimum the agent card names (${min}): update the kit from the repository tag before sending anything` };
+}
+export const AGENT_CARD_URL = 'https://xen-moon-forge-protocol.github.io/Moon-Forge/agent-card.json';
+/** Reads the agent card over HTTPS (an explicit opt-in). */
+export async function fetchAgentCard(url = AGENT_CARD_URL, { fetchImpl = globalThis.fetch } = {}) {
+  if (!/^https:\/\//.test(url)) throw new Error('fetchAgentCard: https:// only');
+  const r = await fetchImpl(url, { headers: { accept: 'application/json' } });
+  if (!r.ok) throw new Error(`fetchAgentCard: HTTP ${r.status}`);
+  return JSON.parse(await r.text());
 }
 
 export class MoonForge {
-  constructor(program, keypair, { onWarning, cu } = {}) {
+  constructor(program, keypair, { onWarning, cu, detection, rulesPinned = null, mainnet = false, rulesTtlMs, epochs, secretsDir, priorityFee, idlInfo, bundled, decode, kitCheck = null } = {}) {
     this.program = program;
+    /** checkKitVersion(card) when connect({ card }) was given: send() refuses while it reports ok:false */
+    this.kitCheck = kitCheck;
     this.connection = program.provider.connection;
     this.keypair = keypair;
     this.me = keypair.publicKey;
     this.acc = program.account;
     this.idlErrors = program.idl ? anchor.parseIdlErrors(program.idl) : new Map();
     this.cu = { ...CU_LIMITS, ...(cu ?? {}) };
+    /** the program rules in force: 2 (live v2), 3 (final upgrade) or 'unknown' (every transaction refused) */
+    this.detection = detection ?? { rules: rulesPinned ?? 2, status: rulesPinned ? 'pinned' : 'assumed', reasons: [], deploySlot: null, at: Date.now() };
+    this.rules = this.detection.rules;
+    this.rulesPinned = rulesPinned;
+    this.mainnet = mainnet;
+    this.rulesTtlMs = rulesTtlMs ?? 10 * 60_000;
+    this.idlInfo = idlInfo ?? { origin: 'given', sha256: null, rules: program.idl ? idlRules(program.rawIdl ?? program.idl) : 2 };
+    this.bundled = bundled ?? null;
+    this.decodeV3 = decode ?? null;
+    this.epochs = epochSourceOf(epochs);
+    this.secretsDir = secretsDir ?? null;
+    this.priorityFee = typeof priorityFee === 'number' ? { microLamports: priorityFee } : priorityFee ?? null;
     this.onWarning = onWarning ?? defaultWarning;
     this.warned = new Set();
     // every change of the serving RPC endpoint, and every endpoint left out for being on another cluster, is a warning
@@ -521,10 +692,107 @@ export class MoonForge {
     /** getSignatureStatuses polling after a confirmation timeout */
     this.pollOpts = { tries: 30, intervalMs: 2000 };
   }
-  warn(key, text = NOTICES[key]) {
-    if (this.warned.has(key)) return;
-    this.warned.add(key);
-    this.onWarning(text);
+  warn(key, text) {
+    const k = this.rules === 3 && !text ? `${key}:v3` : key;
+    if (this.warned.has(k)) return;
+    this.warned.add(k);
+    this.onWarning(text ?? noticeOf(key, this.rules));
+  }
+
+  // ─── program rules (detect.mjs) ──────────────────────────────────────────────
+  /** Re-reads the rules from chain (unless pinned) and, with the bundled IDLs, switches the interface when they changed. */
+  async refreshRules() {
+    if (this.rulesPinned) return this.rules;
+    const before = this.rules;
+    const d = await detectRules(this.connection, this.decodeV3 ?? v3Decoder(this.idlInfo.rules === 3 ? this.program.rawIdl : null), { mainnet: this.mainnet });
+    if (d.transient && (before === 2 || before === 3)) {
+      // a transport error (a 429, a timeout) is not a reading: keep the last clear one and re-read soon. Only a positive
+      // inconsistency on chain turns the rules to 'unknown' (sealed games have windows of minutes; 10 minutes of refusals
+      // after one failed read could lose a match)
+      this.detection = { ...this.detection, lastError: d.reasons[0] ?? 'RPC error', at: Date.now() - this.rulesTtlMs + RULES_RETRY_MS };
+      return this.rules;
+    }
+    this.detection = d;
+    this.rules = d.rules;
+    if (before !== d.rules) {
+      this.onWarning(`program rules changed: ${before} -> ${d.rules}${d.rules === 'unknown' ? ` (${d.reasons.join('; ').slice(0, 200)}): every transaction is refused until they are clear` : ''}`);
+      if (this.bundled && (d.rules === 2 || d.rules === 3)) {
+        const b = this.bundled(d.rules);
+        this.program = b.program;
+        this.acc = b.program.account;
+        this.idlErrors = anchor.parseIdlErrors(b.program.idl);
+        this.idlInfo = { origin: 'bundled', sha256: b.sha256, rules: d.rules };
+      }
+    }
+    return this.rules;
+  }
+  /**
+   * The rules in force: on X1 mainnet re-read once their reading is older than rulesTtlMs (RULES_RETRY_MS while they
+   * are unknown, so a cleared state is picked up within seconds).
+   */
+  async rulesNow() {
+    const ttl = this.rules === 'unknown' ? Math.min(this.rulesTtlMs, RULES_RETRY_MS) : this.rulesTtlMs;
+    if (!this.rulesPinned && this.mainnet && Date.now() - (this.detection?.at ?? 0) > ttl) await this.refreshRules();
+    return this.rules;
+  }
+  /**
+   * Under unknown rules, a step of a game that already exists may still go ahead when the game's own account proves the
+   * upgraded program (`proof()` resolves true: a sealed War, a Duel joined sealed) and the interface in use has `ix`:
+   * missing a reveal window loses the match, and only the upgraded program can have created that account.
+   */
+  async #provenByGame(what, ix, proof) {
+    if (!proof || (ix && !this.hasIx(ix))) return false;
+    let ok = false;
+    try { ok = !!(await proof()); } catch { ok = false; }
+    if (ok) this.warn(`proof:${what}`, `${what}: the program's rules read as unknown (${(this.detection?.reasons ?? []).join('; ').slice(0, 160)}), but this game's own account was created by the upgraded program: the step goes ahead`);
+    return ok;
+  }
+  /**
+   * Throws a readable refusal (nothing sent) unless the upgraded program (rules 3) is live and the interface in use has
+   * `ix`. `proof`: see #provenByGame (time-critical steps of a sealed game only).
+   */
+  async requireV3(what, ix = null, { proof = null } = {}) {
+    const r = await this.rulesNow();
+    if (r === 'unknown') {
+      if (await this.#provenByGame(what, ix, proof)) return 3;
+      throw new Error(`${what}: the program's rules are unknown right now (${(this.detection?.reasons ?? []).join('; ').slice(0, 200)}); nothing was sent. Retry after refreshRules().`);
+    }
+    if (r !== 3) {
+      const hint = this.mainnet ? '' : ' (not X1 mainnet: pass connect({ rules: 3 }) or connect({ rules: \'detect\' }) to use a local build of the upgraded program)';
+      throw new Error(`${what}: this needs the final program upgrade (planned, earliest 2026-11-11; its source and changelog are published at least 7 days before it, and its binary hash at least 48 hours before); the live program does not have it${hint}. Nothing was sent.`);
+    }
+    if (ix && !this.hasIx(ix)) throw new Error(`${what}: the IDL in use is not the upgraded program's (it has no ${ix}); omit connect({ idl }) and unset MOONFORGE_IDL to use the kit's bundled IDL. Nothing was sent.`);
+    return r;
+  }
+  /**
+   * For the live program's calls: refuses on unknown rules, and under rules 3 refuses a call the upgrade retired.
+   * `proof` / `ix`: as for requireV3 (a sealed game's time-critical step).
+   */
+  async requireLiveCall(what, retiredAs = null, { proof = null, ix = null } = {}) {
+    const r = await this.rulesNow();
+    if (r === 'unknown') {
+      if (await this.#provenByGame(what, ix, proof)) return 3;
+      throw new Error(`${what}: the program's rules are unknown right now (${(this.detection?.reasons ?? []).join('; ').slice(0, 200)}); nothing was sent. Retry after refreshRules().`);
+    }
+    if (r === 3 && retiredAs) throw retiredError(retiredAs, what);
+    return r;
+  }
+  /** True when the interface in use has instruction `name` (snake_case or camelCase). */
+  hasIx(name) {
+    const want = String(name).replace(/([a-z])([A-Z])/g, '$1_$2').toLowerCase();
+    return (this.program.rawIdl ?? this.program.idl)?.instructions?.some((i) => String(i.name).replace(/([a-z])([A-Z])/g, '$1_$2').toLowerCase() === want) ?? false;
+  }
+  /** errorMessage() with the texts of the rules in force (the final upgrade rewords two live codes). */
+  explain(e) { return errorMessage(e, { rules: this.rules }); }
+  /** The sealed-game secrets store (secrets.mjs), created on first use. */
+  get secrets() {
+    if (!this._secrets) this._secrets = new SecretsStore(this.secretsDir ?? defaultSecretsDir(PROGRAM_ID.toBase58()));
+    return this._secrets;
+  }
+  /** The epoch-file source, or a readable refusal when none is configured. */
+  epochSource(what) {
+    if (!this.epochs) throw new Error(`${what}: pass connect({ epochs }) to read the oracle's epoch files: { dir: 'frontend/public/epochs' } (a clone or a saved mirror) or 'site' (HTTPS to ${'https://xen-moon-forge-protocol.github.io/Moon-Forge/epochs/'})`);
+    return this.epochs;
   }
 
   // ─── sending ───────────────────────────────────────────────────────────────
@@ -594,13 +862,35 @@ export class MoonForge {
    * send) the builder is rebuilt once with fresh state and re-sent. If the measured limit is too low for this state
    * (a PDA whose bump needs more search iterations than measured, ~1,500 units each), the transaction is simulated
    * once without a cap and re-sent with that measurement x1.2. Returns the signature.
+   * An instruction with no measured limit in CU_LIMITS (the final upgrade's, until they are measured on its build) is
+   * simulated first (nothing signed or sent) and gets that measurement x1.2; a refusal in that simulation is reported
+   * as the program error, with no fee spent.
+   * `priority`: true (the connect() priorityFee) or { microLamports }: adds a compute-unit price instruction.
+   * `resend`: rebroadcasts the same signed bytes every 2 s until the transaction confirms or its blockhash expires (the
+   * same signature: it can only land once); used for time-critical steps (sealed reveals, match moves).
    */
-  async send(builder, name, { needLamports = 0n, rebuild = null, cu } = {}) {
-    let b = withCu(builder, name, cu ?? this.cu[name]);
+  async send(builder, name, { needLamports = 0n, rebuild = null, cu, priority = false, resend = false } = {}) {
+    if (this.kitCheck && !this.kitCheck.ok) throw new Error(`${name}: ${this.kitCheck.text}. Nothing was sent.`);
+    const price = priority === true ? this.priorityFee : priority && typeof priority === 'object' ? priority : null;
+    const prep = async (bld) => {
+      if (price?.microLamports > 0) bld.preInstructions([ComputeBudgetProgram.setComputeUnitPrice({ microLamports: Math.floor(price.microLamports) })]);
+      const known = cu ?? this.cu[name];
+      if (known) return withCu(bld, name, known);
+      const sim = await this.#simulate(bld);
+      if (sim.err) {
+        const e = new Error(`${name}: refused in simulation (nothing was sent): ${JSON.stringify(sim.err)}`);
+        e.logs = sim.logs;
+        e.err = sim.err;
+        throw this.translate(e);
+      }
+      if (!sim.unitsConsumed) throw new Error(`${name}: the simulation returned no compute-unit measurement; nothing was sent`);
+      return withCu(bld, name, limitFor(sim.unitsConsumed));
+    };
+    let b = await prep(builder);
     let units = null, raceRetried = false, cuRetried = false;
     for (;;) {
       try {
-        return await this.#sendOnce(b, name, needLamports, units);
+        return await this.#sendOnce(b, name, needLamports, units, resend);
       } catch (e) {
         // a counter race surfaces as InvalidTarget (the program's check) or, when the loser's PDA is created from the
         // stale serial, as the System program refusing an account "already in use" before the program's check runs
@@ -610,7 +900,7 @@ export class MoonForge {
         if (rebuild && !raceRetried && raced) {
           raceRetried = true;
           this.onWarning(`${name}: someone moved the counter first (InvalidTarget); re-reading it and retrying once`);
-          b = withCu(await rebuild(), name, cu ?? this.cu[name]);
+          b = await prep(await rebuild());
           continue;
         }
         if (!cuRetried && cuExhausted(e)) {
@@ -633,7 +923,28 @@ export class MoonForge {
     const sim = await this.connection.simulateTransaction(tx).catch(() => null);
     return sim?.value?.unitsConsumed || null;
   }
-  async #sendOnce(b, name, needLamports, units = null) {
+  /** A simulation with the maximum limit (nothing signed or sent): { unitsConsumed, err, logs }. */
+  async #simulate(b) {
+    const tx = setCuLimit(await b.transaction(), 1_400_000);
+    tx.feePayer = this.me;
+    tx.recentBlockhash = (await this.connection.getLatestBlockhash('confirmed')).blockhash;
+    const sim = await this.connection.simulateTransaction(tx);
+    return { unitsConsumed: sim?.value?.unitsConsumed ?? null, err: sim?.value?.err ?? null, logs: sim?.value?.logs ?? [] };
+  }
+  /** Rebroadcasts `raw` (the same signed bytes) every `ms` until stop() is called; failures are ignored. */
+  #rebroadcast(raw, ms = 2000) {
+    let stopped = false, t = null;
+    const tick = () => {
+      if (stopped) return;
+      Promise.resolve().then(() => this.connection.sendRawTransaction(raw, { skipPreflight: true, maxRetries: 0 })).catch(() => {}).finally(() => {
+        if (!stopped) { t = setTimeout(tick, ms); t.unref?.(); }
+      });
+    };
+    t = setTimeout(tick, ms);
+    t.unref?.();
+    return () => { stopped = true; if (t) clearTimeout(t); };
+  }
+  async #sendOnce(b, name, needLamports, units = null, resend = false) {
     const tx = await b.transaction();
     if (units) setCuLimit(tx, units);
     tx.feePayer = this.me;
@@ -662,11 +973,14 @@ export class MoonForge {
       if (seen.err || seen.confirmationStatus === 'confirmed' || seen.confirmationStatus === 'finalized') status = seen;
     }
     if (!status) {
+      const stop = resend ? this.#rebroadcast(raw, this.resendMs ?? 2000) : () => {};
       try {
         status = (await this.connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, 'confirmed')).value;
       } catch {
         // timed out, expired, or the RPC failed while waiting: the transaction was sent and may have landed either way
         status = await this.pollStatus(signature, this.pollOpts);
+      } finally {
+        stop();
       }
     }
     if (status?.err) throw await this.onChainError(signature, status.err);
@@ -679,8 +993,11 @@ export class MoonForge {
 
   async chainTime() { return (await this.connection.getBlockTime(await this.connection.getSlot('confirmed'))) ?? Math.floor(Date.now() / 1000); }
 
-  /** USD per XNT: the 15-minute TWAP the XDEX WXNT/USDC.X pool records on-chain (token 0 = WXNT 9 dp, token 1 = USDC.X 6 dp). */
-  async xntUsd(window = 900) {
+  /**
+   * USD per XNT: the TWAP the XDEX WXNT/USDC.X pool records on-chain (token 0 = WXNT 9 dp, token 1 = USDC.X 6 dp), over
+   * 15 minutes (live rules; the final upgrade's Predictions read 20 minutes).
+   */
+  async xntUsd(window = this.rules === 3 ? V3.PRED_TWAP_WINDOW : 900) {
     const info = await this.connection.getAccountInfo(XDEX_OBSERVATION, 'confirmed');
     if (!info || info.data.length < 43 + 100 * 40) return null;
     const d = info.data, obs = [];
@@ -709,8 +1026,13 @@ export class MoonForge {
     };
   }
 
-  /** One call with what an agent needs to decide: balances, pool, bankroll state, open matches, notices. */
-  async status() {
+  /**
+   * One call with what an agent needs to decide: balances, pool, bankroll state, open matches, the program rules in
+   * force, the oracle's state, the week's capacity (from the v3 engine once the v3 rules apply and connect({ epochs })
+   * is set), and the notices that apply.
+   */
+  async status({ feed = null } = {}) {
+    const rules = await this.rulesNow();
     const [cfg, xnt, game, pool, arts, wars, price, bank, entries, share] = await Promise.all([
       this.config(), this.connection.getBalance(this.me), this.gameBalance(), this.connection.getAccountInfo(PDA.rewardVault()),
       this.myArtifacts(), this.openWars(), this.xntUsd(), this.bankroll(), this.myPredictionEntries(), this.houseShare(),
@@ -718,7 +1040,20 @@ export class MoonForge {
     const rent = pool ? await this.connection.getMinimumBalanceForRentExemption(pool.data.length) : 0;
     const free = Math.max(0, (pool?.lamports ?? 0) - rent - Number(cfg.rewardReserved));
     const fo = this.connection.rpcFailover;
+    const now = await this.chainTime().catch(() => Math.floor(Date.now() / 1000));
+    const oracle = this.oracleState(cfg, now);
+    const capacity = await this.capacity({ cfg, freeLamports: BigInt(free), now, feed }).catch((e) => ({ rules: null, available: false, reason: String(e?.message ?? e).slice(0, 300) }));
+    const keeper = rules === 3 ? await this.houseKeeper().catch(() => null) : null;
+    const notices = rules === 3
+      ? [NOTICES_V3.wars, NOTICES_V3.predictions, NOTICES_V3.houseGames, NOTICES_V3.forge]
+      : [NOTICES.wars, NOTICES.predictions, NOTICES.houseGames, NOTICES.forge];
     return {
+      kitVersion: KIT_VERSION,
+      /** the program rules the kit detected: 2 (live v2 binary), 3 (final upgrade), 'unknown' (every transaction refused) */
+      rules: { rules, status: this.detection?.status ?? null, reasons: this.detection?.reasons ?? [], idl: { ...this.idlInfo, pins: idlPins() } },
+      oracle,
+      capacity,
+      ...(keeper ? { houseKeeper: keeper } : {}),
       wallet: this.me.toBase58(),
       /** the endpoint serving now, origin only (a private URL's key stays out of logs) */
       rpc: redactRpc(fo ? fo.urls[fo.current] : this.connection.rpcEndpoint),
@@ -737,12 +1072,33 @@ export class MoonForge {
       },
       openWars: wars.map((w) => ({ war: w.publicKey.toBase58(), creator: w.account.creator.toBase58(), stakeXnt: Number(w.account.stake) / XNT })),
       predictions: { offered: false, myEntries: entries.length },
-      notices: [NOTICES.wars, NOTICES.predictions, NOTICES.houseGames, NOTICES.forge],
+      notices,
+    };
+  }
+  /**
+   * The oracle as the chain shows it: last epoch, its publication time, the age, and a state: 'fresh' (< 6 days),
+   * 'due' (6-8 days: the next epoch may be published any time), 'late' (> 8 days without a publication: payouts are
+   * late or paused). Weeks without burns publish nothing on chain, so 'late' is a warning, not proof of a failure.
+   */
+  oracleState(cfg, now) {
+    const lastEpoch = Number(cfg.lastEpoch?.toString?.() ?? cfg.lastEpoch ?? 0);
+    const lastPublishTs = Number(cfg.lastPublishTs?.toString?.() ?? cfg.lastPublishTs ?? 0);
+    if (!lastEpoch || !lastPublishTs) return { lastEpoch, lastPublishTs: null, ageHours: null, state: 'none', nextEarliestTs: null };
+    const age = Math.max(0, Number(now) - lastPublishTs);
+    return {
+      lastEpoch, lastPublishTs, lastPublishedAt: new Date(lastPublishTs * 1000).toISOString(), ageHours: Math.round(age / 360) / 10,
+      state: age < 6 * 86_400 ? 'fresh' : age <= 8 * 86_400 ? 'due' : 'late',
+      nextEarliestTs: lastPublishTs + 6 * 86_400,
+      text: this.rules === 3
+        // round 4: a week with no burn to value publishes a heartbeat base epoch (budget 0, no leaf) that keeps the seat alive
+        ? 'The oracle publishes at least 6 days after its previous epoch; a week with no burn to value publishes a heartbeat epoch (nothing paid) that keeps the oracle seat alive. If the GitHub account falls, the site, the oracle, the keeper and the epoch files stop; payouts pause; the pools stay locked in the program; once no epoch has survived its hold for 28 days, the largest voider can take the oracle seat from day 28 and anyone from day 29, with a bond.'
+        : 'The oracle publishes at least 6 days after its previous epoch; weeks without burns publish nothing. If the GitHub account falls, the site, the oracle, the keeper and the epoch files stop; payouts pause; the reward pool stays locked in the program.',
     };
   }
 
   // ─── game wallet ───────────────────────────────────────────────────────────
   async ensurePlayer() {
+    await this.requireLiveCall('openPlayer');
     const ps = PDA.player(this.me);
     if (await this.connection.getAccountInfo(ps)) return ps;
     await this.send(this.program.methods.openPlayer().accountsPartial({ playerState: ps, owner: this.me, systemProgram: SystemProgram.programId }),
@@ -754,11 +1110,13 @@ export class MoonForge {
     return p ? BigInt(p.balance.toString()) : 0n;
   }
   async deposit(xnt) {
+    await this.requireLiveCall('deposit');
     const ps = await this.ensurePlayer();
     return this.send(this.program.methods.deposit(bn(lamports(xnt))).accountsPartial({ playerState: ps, payer: this.me, systemProgram: SystemProgram.programId }),
       'deposit', { needLamports: lamports(xnt) });
   }
   async withdraw(xnt) {
+    await this.requireLiveCall('withdraw');
     return this.send(this.program.methods.withdraw(bn(lamports(xnt))).accountsPartial({ playerState: PDA.player(this.me), owner: this.me }), 'withdraw');
   }
 
@@ -770,6 +1128,7 @@ export class MoonForge {
    */
   async placeBet(game, param, choice, stakeXnt) {
     this.warn('houseGames');
+    await this.requireLiveCall('placeBet', 'KeeperRequired');
     const ps = await this.ensurePlayer();
     const { nonce } = await this.acc.playerState.fetch(ps);
     const bet = PDA.bet(ps, BigInt(nonce.toString()));
@@ -782,7 +1141,10 @@ export class MoonForge {
   }
   /** Settles a bet once its target slot has passed (anyone may; the bet rent goes back to whoever paid it). */
   async settleBet(bet) {
+    await this.requireLiveCall('settleBet');
     const b = await this.acc.bet.fetch(bet);
+    // a bet placed through place_bet_v2 is settled by the house keeper's reveal (or refunded when stalled)
+    if ((Number(b.game) & V3.BET_KEEPER) !== 0) throw retiredError('KeeperRequired', 'settleBet', 'this bet waits for the house keeper\'s reveal: use waitBet(bet), or refundStalledBet(bet) once it is stalled');
     const target = BigInt(b.targetSlot.toString());
     while (BigInt(await this.connection.getSlot('confirmed')) <= target) await sleep(400);
     const before = await this.acc.playerState.fetch(b.playerState);
@@ -806,11 +1168,23 @@ export class MoonForge {
     }
     const collection = PDA.collection();
     return records.filter((r, i) => coreOwner(infos[i], collection)?.equals(this.me))
-      .map((r) => ({ asset: r.account.asset, tier: r.account.tier, backingXnt: Number(r.account.backing) / XNT, origin: r.account.origin }));
+      .map((r) => {
+        const origin = Number(r.account.origin), backing = BigInt(r.account.backing.toString());
+        return {
+          asset: r.account.asset, tier: r.account.tier, backingXnt: Number(backing) / XNT, origin,
+          originName: ['forged', 'genesis', 'drop'][origin] ?? 'unknown', serial: Number(r.account.serial ?? 0),
+          forgedAt: Number(r.account.forgedAt?.toString?.() ?? 0),
+          /** the price paid at the forge (2 × floor) for a forged Artifact; 0 for Genesis and Forge Drops */
+          forgePriceXnt: origin === 0 ? Number(2n * backing) / XNT : 0,
+        };
+      });
   }
   /** Forges a Lunar Dust (tier 0): 50% of the price stays inside as a floor you get back by recycling it. Returns the asset. */
   async forgeLunarDust() {
+    // final upgrade: Lunar Dust is priced like the other tiers (PX); the kit keeps its historical 10 XNT maximum here
+    if ((await this.rulesNow()) === 3) return (await this.forge(0, { maxPriceXnt: Number(LUNAR_DUST_PRICE) / XNT })).asset;
     this.warn('forge');
+    await this.requireLiveCall('forgeLunarDust');
     const build = async () => {
       const cfg = await this.config();
       const serial = cfg.artifactsMinted[0];
@@ -840,6 +1214,8 @@ export class MoonForge {
     if (!holder) throw new Error(`recycleArtifact: ${asset.toBase58()} is not a live Artifact any more (already recycled or burned)`);
     if (!holder.equals(this.me)) throw new Error(`recycleArtifact: ${asset.toBase58()} is held by ${holder.toBase58()}, not by this wallet`);
     this.warn('recycle');
+    // the upgraded program's recycle also takes the extra_state account (resolved from the upgraded IDL)
+    if ((await this.requireLiveCall('recycleArtifact')) === 3) await this.requireV3('recycleArtifact', 'init_extra');
     const signature = await this.send(this.program.methods.recycleArtifact().accountsPartial({
       config: PDA.config(), asset, record: PDA.artifact(asset), collection: PDA.collection(), owner: this.me, coreProgram: MPL_CORE, systemProgram: SystemProgram.programId,
     }), 'recycleArtifact');
@@ -850,18 +1226,21 @@ export class MoonForge {
   // ─── Moon Wars ─────────────────────────────────────────────────────────────
   war(war) { return this.acc.war.fetch(war); }
   async openWars() {
-    const all = await this.acc.war.all([{ memcmp: { offset: 88, bytes: bs58.encode(Buffer.from([WAR.state.OPEN])) } }]);
-    return all.filter((w) => !w.account.creator.equals(this.me));
+    const all = await this.acc.war.all([{ memcmp: { offset: accountFieldOffset(this.program.rawIdl ?? this.program.idl, 'War', 'state'), bytes: bs58.encode(Buffer.from([WAR.state.OPEN])) } }]);
+    // since the final upgrade only sealed matches can be joined; a pre-upgrade OPEN match only leaves through cancel_war
+    const joinable = this.rules === 3 ? all.filter((w) => (BigInt(w.account.targetSlot.toString()) & V3.WAR_V2) !== 0n) : all;
+    return joinable.filter((w) => !w.account.creator.equals(this.me));
   }
   async myWars() {
     const [a, b] = await Promise.all([
-      this.acc.war.all([{ memcmp: { offset: 8, bytes: this.me.toBase58() } }]),
-      this.acc.war.all([{ memcmp: { offset: 40, bytes: this.me.toBase58() } }]),
+      this.acc.war.all([{ memcmp: { offset: accountFieldOffset(this.program.rawIdl ?? this.program.idl, 'War', 'creator'), bytes: this.me.toBase58() } }]),
+      this.acc.war.all([{ memcmp: { offset: accountFieldOffset(this.program.rawIdl ?? this.program.idl, 'War', 'opponent'), bytes: this.me.toBase58() } }]),
     ]);
     return [...a, ...b];
   }
   async createWar(stakeXnt) {
     this.warn('wars');
+    await this.requireLiveCall('createWar', 'SealedJoinRequired');
     const ticket = await this.ticket();
     if (!ticket) throw new Error('an Artifact is the arena ticket under the current rules: forge a Lunar Dust first (10 XNT, 5 back on recycle)');
     const ps = await this.ensurePlayer();
@@ -874,6 +1253,7 @@ export class MoonForge {
   }
   async joinWar(war) {
     this.warn('wars');
+    await this.requireLiveCall('joinWar', 'SealedJoinRequired');
     const ticket = await this.ticket();
     if (!ticket) throw new Error('an Artifact is the arena ticket under the current rules: forge a Lunar Dust first (10 XNT, 5 back on recycle)');
     const ps = await this.ensurePlayer();
@@ -882,10 +1262,16 @@ export class MoonForge {
     }), 'joinWar');
   }
   async cancelWar(war) {
+    await this.requireLiveCall('cancelWar');
     return this.send(this.program.methods.cancelWar().accountsPartial({ war, creatorState: PDA.player(this.me), creator: this.me }), 'cancelWar');
   }
-  /** Permissionless: shuffles both decks with the hash of the block committed at join (retries until it exists). */
+  /**
+   * Permissionless: shuffles both decks with the hash of the block committed at join (retries until it exists). Like
+   * move(), not gated on the rules reading: it only advances a match that exists (a sealed one goes to advanceStart()).
+   */
   async startWar(war) {
+    // a match created by the upgraded program starts sealed: the creator seeds, the joiner reveals (games-v3.mjs)
+    if ((BigInt((await this.war(war)).targetSlot.toString()) & V3.WAR_V2) !== 0n) return this.advanceStart(war, { wait: true });
     let last = '';
     for (let i = 0; i < 40; i++) {
       const w = await this.war(war);
@@ -934,14 +1320,22 @@ export class MoonForge {
     if (summons.length) return summons[0];
     return { type: 'end' };
   }
+  /**
+   * One move of a running match. Deliberately not gated on the rules reading: the match account already exists, its
+   * moves exist under both programs with the same accounts, the program checks every move, and a refused move during a
+   * failed rules read would lose the match on time. Nothing in it can move funds outside the match.
+   */
   async move(war, m) {
     const [b, name] = m.type === 'summon' ? [this.program.methods.warSummon(m.hand), 'warSummon']
       : m.type === 'attack' ? [this.program.methods.warAttack(m.attacker, m.target), 'warAttack']
         : [this.program.methods.warEndTurn(), 'warEndTurn'];
-    return this.send(b.accountsPartial({ war, signer: this.me }), name);
+    // under the final upgrade's chess clock every second of a turn counts: priority fee (if configured) and resend
+    const timeCritical = this.rules === 3 ? { priority: true, resend: true } : {};
+    return this.send(b.accountsPartial({ war, signer: this.me }), name, timeCritical);
   }
   /** Permissionless: ends a match whose side to move ran out of time (the other side wins). */
   async claimWarTimeout(war) {
+    await this.requireLiveCall('claimWarTimeout', null, { ix: 'seed_war', proof: async () => isSealedWarAccount(await this.war(war)) });
     return this.send(this.program.methods.claimWarTimeout().accountsPartial({ war }), 'claimWarTimeout');
   }
   /**
@@ -979,6 +1373,7 @@ export class MoonForge {
   }
   /** Permissionless once finished: winner gets both stakes minus the 2% rake (1% to the burners' pool); a draw refunds both. */
   async settleWar(war) {
+    await this.requireLiveCall('settleWar');
     const w = await this.war(war);
     const cfg = await this.config();
     return this.send(this.program.methods.settleWar().accountsPartial({
@@ -993,6 +1388,7 @@ export class MoonForge {
   }
   /** Permissionless: locks a round after its entry window, or settles it after its end time. */
   async advancePrediction(id) {
+    await this.requireLiveCall('advancePrediction');
     const r = await this.acc.predRound.fetch(PDA.pred(id));
     if (r.state === PRED.state.OPEN) {
       return this.send(this.program.methods.lockPrediction().accountsPartial({ round: PDA.pred(id), observation: XDEX_OBSERVATION }), 'lockPrediction');
@@ -1004,6 +1400,7 @@ export class MoonForge {
   }
   /** Claims every resolved entry of this agent (winners share the pot pro-rata minus 2%; refunds return the stake). */
   async claimPredictions() {
+    await this.requireLiveCall('claimPredictions');
     const out = [];
     for (const e of await this.myPredictionEntries()) {
       const id = Number(e.account.round);
@@ -1030,6 +1427,7 @@ export class MoonForge {
    * (0-5000; min_shares is never 0).
    */
   async houseDeposit(xnt, opts = {}) {
+    await this.requireLiveCall('houseDeposit');
     const { slippageBps = 100, force = false } = typeof opts === 'number' ? { slippageBps: opts } : opts;
     const amount = lamports(xnt);
     const g = houseDepositGuard({ amount, ...(await this.bankroll()), slippageBps, force });
@@ -1048,6 +1446,7 @@ export class MoonForge {
   }
   /** Starts the 24 h withdrawal cooldown for `shares` (default: all of them). A new request replaces the previous one. */
   async houseRequestWithdraw(shares) {
+    await this.requireLiveCall('houseRequestWithdraw');
     const s = await this.houseShare();
     if (!s) throw new Error('houseRequestWithdraw: no Be the House position');
     return this.send(this.program.methods.houseRequestWithdraw(bn(shares === undefined ? s.shares : BigInt(shares))).accountsPartial({
@@ -1067,8 +1466,12 @@ export class MoonForge {
    * even with `force`).
    */
   async houseWithdraw(minXnt, { force = false, slippageBps = 100 } = {}) {
+    const rules = await this.requireLiveCall('houseWithdraw');
     const q = await this.houseWithdrawQuote({ minXnt, force, slippageBps });
     if (q.pendingShares === 0n) throw new Error('houseWithdraw: nothing requested; call houseRequestWithdraw(shares) first and wait out the 24 h cooldown');
+    if (rules === 3 && q.unlockTs && (await this.chainTime()) > q.unlockTs + V3.HOUSE_WITHDRAW_WINDOW) {
+      throw new Error('houseWithdraw: the request expired (since the final upgrade a request can be used for 24 h after its cooldown, WithdrawExpired): call houseRequestWithdraw(shares) again. Nothing was sent.');
+    }
     if (q.refuse) throw new Error(`houseWithdraw refused: ${q.refuse}`);
     const signature = await this.send(this.program.methods.houseWithdraw(bn(q.minLamports)).accountsPartial({
       config: PDA.config(), share: PDA.house(this.me), bankrollVault: PDA.bankrollVault(), owner: this.me,
@@ -1076,3 +1479,9 @@ export class MoonForge {
     return { signature, minLamports: q.minLamports, quoteUnreservedXnt: Number(q.quoteUnreserved) / XNT, quoteConservativeXnt: Number(q.quoteConservative) / XNT, haircutBps: q.haircutBps };
   }
 }
+
+// the burner's exits (phase 2) and the final upgrade's games and Artifacts (phase 3), installed on the class
+const installDeps = { anchor, PDA, XNT, sleep, NOTICES, NOTICES_V3, MPL_CORE, coreOwner };
+installClaims(MoonForge, installDeps);
+installGamesV3(MoonForge, installDeps);
+installArtifactsV3(MoonForge, installDeps);

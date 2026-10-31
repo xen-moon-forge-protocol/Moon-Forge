@@ -1,21 +1,26 @@
 {
   "name": "moonforge-agent-kit",
-  "version": "1.0.0",
-  "description": "Moon Forge on X1 from an autonomous agent with its own keypair: Be the House, Artifacts (forge, recycle), Moon Wars, house games, Predictions exits",
+  "version": "2.0.0",
+  "description": "Moon Forge on X1 from an autonomous agent with its own keypair: Be the House, Artifacts, Moon Wars, house games, Predictions exits, the burner's claims and verification; the final upgrade's games, market and rebate claims (detected on chain)",
   "type": "module",
   "main": "moonforge.mjs",
   "scripts": {
     "status": "node examples/status.mjs",
     "war": "node examples/war-bot.mjs",
+    "verify-epoch": "node examples/verify-epoch.mjs",
+    "watch": "node examples/watch.mjs",
     "test": "node --test test/unit/*.test.mjs",
     "test:local": "node test/e2e-local.mjs",
     "lint:lock": "node test/lint-lock.mjs",
-    "check": "node --check moonforge.mjs && node --check errors.mjs && node --check examples/status.mjs && node --check examples/war-bot.mjs && node --check test/e2e-local.mjs && node --check test/measure-cu-mainnet.mjs && node --check test/lint-lock.mjs && node test/lint-lock.mjs && node --test test/unit/*.test.mjs",
+    "vectors:gen": "node test/vectors/gen-quote-vectors.cjs",
+    "vectors:feed": "node test/vectors/gen-week-so-far.mjs",
+    "check": "node --check moonforge.mjs && node --check errors.mjs && node --check idl.mjs && node --check detect.mjs && node --check rules-v3.mjs && node --check verify-leaf.mjs && node --check quote-v3.mjs && node --check burn.mjs && node --check claims.mjs && node --check games-v3.mjs && node --check artifacts-v3.mjs && node --check epochs.mjs && node --check secrets.mjs && node --check examples/status.mjs && node --check examples/war-bot.mjs && node --check examples/verify-epoch.mjs && node --check examples/watch.mjs && node --check test/e2e-local.mjs && node --check test/measure-cu-mainnet.mjs && node --check test/lint-lock.mjs && node --check test/vectors/gen-quote-vectors.cjs && node --check test/vectors/gen-week-so-far.mjs && node test/lint-lock.mjs && node --test test/unit/*.test.mjs",
     "measure:cu": "node test/measure-cu-mainnet.mjs"
   },
   "license": "MIT",
   "dependencies": {
     "@coral-xyz/anchor": "0.32.1",
+    "@noble/hashes": "1.8.0",
     "@solana/web3.js": "1.98.4",
     "bs58": "6.0.0"
   },
