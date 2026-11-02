@@ -29,11 +29,11 @@ Decided on 2026-10-20/22, not live. Published before the first Genesis claim and
 | Forge Drops | 10% of each epoch budget as Lunar Dust | end; drops already won stay claimable within their 90-day window | the final upgrade |
 | Floor | half of the forge price, recoverable by recycling | unchanged | — |
 | Genesis Lunar Dust | no forge price (the claimant pays the account rent), no floor, otherwise a normal Lunar Dust | a collectible of the official collection with a cosmetic holder badge; no floor, no boost, no chips, no ticket, nothing to claim from it; recycling gives back only the account rent; not needed to play, burn or claim | boost at the switch, chips and ticket at the final upgrade; the claim stays open at least until 2026-12-31: the live program closes it on 2026-12-31 (00:00 UTC 2027-01-01), and the final upgrade plans to extend it to 2027-03-31 by the length of the pause, announced before 2027-01-01 |
-| Forge price split, and what a forged Artifact does after the upgrade | 50% floor / 40% pool / 5% lottery / 5% architect | published in [docs/UPGRADE-2026-11.md](UPGRADE-2026-11.md) §3.3-3.4 and in the section [After the final upgrade](#after-the-final-upgrade-planned-earliest-2026-11-11-not-live) below (2026-11-04); until then only v2 applies | the final upgrade |
+| Forge price split, and what a forged Artifact does after the upgrade | 50% floor / 40% pool / 5% lottery / 5% architect | published in [docs/UPGRADE-2026-11.md](UPGRADE-2026-11.md) §3.3-3.4 and in the section [After the final upgrade](#after-the-final-upgrade-planned-earliest-2026-11-18-not-live) below (the amended source by 2026-11-11); until then only v2 applies | the final upgrade |
 
 The on-chain `Burn Boost` and `Weekly Chips` attributes of an Artifact minted today describe v2 and stop describing anything after those dates ([META-2](KNOWN-ISSUES.md#artifacts-and-metadata)).
 
-## After the final upgrade (planned, earliest 2026-11-11; not live)
+## After the final upgrade (planned, earliest 2026-11-18; not live)
 
 Everything in this section is a plan until the upgrade transaction exists ([UPGRADE-2026-11.md](UPGRADE-2026-11.md) §3.3-3.4 has the full changelog). Until then the v2 rules above apply.
 

@@ -93,7 +93,7 @@ describe('the v2/v3 boundary (X-034, T9-25: burns after the last v2 publish tx a
     it('a boundary tx not listed yet = rewards 2 (the burn is then held by the Forge gate below)', async () => {
         const r = await readRewards(fake(files), '/r/', 'NotPublishedYetTx');
         expect([r.rewards, r.boundaryPassed]).toEqual([2, false]);
-        expect(v2EstimateAllowed(r.rewards, { date: '2026-11-08', lastV2PublishTx: 'NotPublishedYetTx' })).toBe(false);
+        expect(v2EstimateAllowed(r.rewards, { date: '2026-11-15', lastV2PublishTx: 'NotPublishedYetTx' })).toBe(false);
     });
     it('a version-2 file NEWER than the announced boundary = unknown (constant and files disagree: fail-closed)', async () => {
         const later = { ...epoch1, epoch: 2 };
@@ -120,12 +120,12 @@ describe('the v2/v3 boundary (X-034, T9-25: burns after the last v2 publish tx a
         expect([2, 'unknown'].map((r) => v2EstimateAllowed(r as any, null))).toEqual([true, true]);
         expect(boundaryHold('unknown', null)).toBeNull();
         // date announced, transaction not yet, before the planned UTC date: v2 only on a positive rewards-2 read
-        const dateOnly = { date: '2026-11-08', lastV2PublishTx: null };
-        const before = Date.parse('2026-11-07T23:59:59Z');
+        const dateOnly = { date: '2026-11-15', lastV2PublishTx: null };
+        const before = Date.parse('2026-11-14T23:59:59Z');
         expect([v2EstimateAllowed(2, dateOnly, before), v2EstimateAllowed('unknown', dateOnly, before)]).toEqual([true, false]);
         expect(boundaryHold('unknown', dateOnly, before)).toBe('read-failed');
         // transaction known: never the v2 path
-        const known = { date: '2026-11-08', lastV2PublishTx: epoch1Tx };
+        const known = { date: '2026-11-15', lastV2PublishTx: epoch1Tx };
         expect([v2EstimateAllowed(2, known, before), v2EstimateAllowed('unknown', known, before)]).toEqual([false, false]);
         expect(boundaryHold(2, known, before)).toBe('tx-known');
         // boundary set + a fetch failure: readRewards throws, the store reads 'unknown' (or keeps a 3 already seen): the v2 path stays closed
@@ -133,8 +133,8 @@ describe('the v2/v3 boundary (X-034, T9-25: burns after the last v2 publish tx a
         expect(v2EstimateAllowed('unknown', known)).toBe(false);
     });
     it('the Forge gate from 00:00 UTC of the planned date: held until a release names the transaction (no v2 estimate for a v3 burn)', () => {
-        const dateOnly = { date: '2026-11-08', lastV2PublishTx: null };
-        const midnight = Date.parse('2026-11-08T00:00:00Z');
+        const dateOnly = { date: '2026-11-15', lastV2PublishTx: null };
+        const midnight = Date.parse('2026-11-15T00:00:00Z');
         expect(boundaryHold(2, dateOnly, midnight - 1)).toBeNull();
         expect(boundaryHold(2, dateOnly, midnight)).toBe('date-reached');
         expect(boundaryHold(2, dateOnly, midnight + 3 * 86_400_000)).toBe('date-reached');

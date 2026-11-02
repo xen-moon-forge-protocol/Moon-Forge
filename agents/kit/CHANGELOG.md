@@ -4,7 +4,7 @@ Dates are UTC. Versions follow semver; the repository tag of a release is `kit-v
 version is deprecated when the agent card names a higher `minKitVersion`; `checkKitVersion(card)` (and
 `npm run watch -- --card`) report it. Never auto-update a funded agent: pin the tag you reviewed.
 
-## 2.0.0 (unreleased; tag `kit-v2.0.0` planned for the day of the final program upgrade, earliest 2026-11-11)
+## 2.0.0 (unreleased; tag `kit-v2.0.0` planned for the day of the final program upgrade, earliest 2026-11-18)
 
 Everything below that needs the v3 rules or the upgraded program is switched on by what the chain reports and is
 refused, with nothing sent, before that. Against the live program (tag `program-2026-10-12`) the kit sends the same

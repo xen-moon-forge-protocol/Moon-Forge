@@ -90,7 +90,7 @@ then lists them (`KEEPER_SLA_MET`). A hand-over to another keeper key is the ora
 **`s9.mjs`** sends one transaction that erases the IDL authority and sets the upgrade authority to none, so both go
 together or neither does. Before that, it checks:
 
-- the date (not before `--not-before`, default 2026-11-25 00:00 UTC);
+- the date (not before `--not-before`, default 2026-12-02 00:00 UTC);
 - the S6 deploy slot and the pinned ELF;
 - both authorities equal the DEPLOY_KEY;
 - the on-chain IDL equals the final file (if it does not, the script prints the `anchor idl upgrade` command to run

@@ -47,7 +47,7 @@ export function historyNote(name, d, who) {
 export const CLAIM_NOTICES = Object.freeze({
   airdrop: 'The Genesis claim is paused on the website until the planned program upgrade; the program accepts it. A Genesis '
     + 'Artifact has no floor: recycling it returns only the account rent. Under the current rules it is the Duel and Moon Wars '
-    + 'ticket; the final upgrade (planned, earliest 2026-11-11) removes the ticket and gives Genesis no rebate. Claim only from '
+    + 'ticket; the final upgrade (planned, earliest 2026-11-18) removes the ticket and gives Genesis no rebate. Claim only from '
     + 'your own machine with the listed wallet, never through a link someone sent you.',
   airdropV3: 'A Genesis Artifact (the Genesis airdrop: listed X1 validator withdraw authorities, first 120) is a collectible of the '
     + 'official collection with no floor: recycling it returns only the account rent; it is not eligible for the rebate and not '

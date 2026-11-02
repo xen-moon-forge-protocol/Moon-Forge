@@ -4,7 +4,7 @@
 //   [1] loader SetAuthority(none)                                   = `solana program set-upgrade-authority --final`
 // so both powers end together or neither does. After it nothing can change the program or its IDL, ever.
 // Checks before (all must be green; any red refuses before anything is signed):
-//   the date is not before --not-before (S7 + 14 stable days; default 2026-11-25 00:00 UTC);
+//   the date is not before --not-before (S7 + 14 stable days; default 2026-12-02 00:00 UTC);
 //   the program is the S6 deploy (--expect-deploy-slot) and its ELF is the pinned S2 build;
 //   both authorities are the DEPLOY_KEY (= the key file);
 //   the IDL on chain equals the final IDL file (if the docs changed, run `anchor idl upgrade` first: the command is printed);
@@ -31,7 +31,7 @@ const USAGE = `usage: node scripts/upgrade/s9.mjs --deploy-key <pubkey> --expect
   --elf <file> | --elf-sha <hex> --elf-bytes <n>   the S2 build (default: the UPGRADED_ELF pin of oracle/src/x1-v3.ts)
   --pin-file <file>          where to read the UPGRADED_ELF pin (default oracle/src/x1-v3.ts)
   --idl <file>               the final IDL that must be on chain (default oracle/src/idl/moon_forge.v3.json)
-  --not-before <ISO time>    earliest freeze (default 2026-11-25T00:00:00Z: S7 + 14 stable days)
+  --not-before <ISO time>    earliest freeze (default 2026-12-02T00:00:00Z: S7 + 14 stable days)
   --not-after <ISO time>     the "no later than" date (default 2026-12-31T23:59:59Z): later only warns
   --pins <file>              default oracle/src/health-pins.json (written only after a verified freeze)
   --send                     sign and send the freeze (else dry run)
@@ -54,7 +54,7 @@ async function main() {
   console.log('\nchecks before the freeze (read-only)');
 
   // date
-  const notBefore = Date.parse(args['not-before'] || '2026-11-25T00:00:00Z');
+  const notBefore = Date.parse(args['not-before'] || '2026-12-02T00:00:00Z');
   const notAfter = Date.parse(args['not-after'] || '2026-12-31T23:59:59Z');
   if (!Number.isFinite(notBefore) || !Number.isFinite(notAfter)) refuse('--not-before / --not-after must be ISO times');
   const slot = await conn.getSlot('confirmed');

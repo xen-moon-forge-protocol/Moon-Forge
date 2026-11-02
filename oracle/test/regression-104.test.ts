@@ -67,7 +67,7 @@ const HOUR = 3_600;
 const DAY = 86_400;
 const WEEK = 7 * DAY;
 const WEEKS = 104;
-/** Sunday 2026-11-15 00:00 UTC: the first v3 epoch's slot (window end of week 1 = T0 + 1 week) */
+/** Sunday 2026-11-15 00:00 UTC, a fixed test origin (no live meaning): the first v3 epoch's slot in this simulation (window end of week 1 = T0 + 1 week) */
 const T0 = 1_794_700_800;
 /** a stand-in for the last v2 epoch before the switch (the number is a label; live: epoch 1, epoch 2 published nothing) */
 const V2_EPOCH = 4;

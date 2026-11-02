@@ -1,6 +1,6 @@
 # Deploying Moon Forge v2
 
-*Status 2026-10-22: this is the record of the v2 deploy done on 2026-10-07 and 2026-10-12 (tag `program-2026-10-12`) and of how the automation is set up. The final program upgrade (earliest 2026-11-11) gets its own sequence in `docs/UPGRADE-2026-11.md`, published at least 7 days before it; section 7 below describes the freeze that follows it.*
+*Status 2026-10-22: this is the record of the v2 deploy done on 2026-10-07 and 2026-10-12 (tag `program-2026-10-12`) and of how the automation is set up. The final program upgrade (earliest 2026-11-18, moved from 2026-11-11 on 2026-11-02) gets its own sequence in `docs/UPGRADE-2026-11.md`, published at least 7 days before it; section 7 below describes the freeze that follows it.*
 
 Order: **(1) upgrade the X1 program → (2) initialize → (3) deploy EVM portals → (4) start the oracle → (5) seed pools → (6) airdrop list → (7) burn the upgrade authority after the final upgrade, the mainnet proof plan and 14 stable days.**
 
@@ -92,7 +92,7 @@ node scripts/airdrop/build-airdrop.mjs wallets.txt         # writes frontend/pub
 
 ## 7. The freeze (after the final upgrade)
 
-Conditions and dates: [IMMUTABILITY.md](IMMUTABILITY.md#when-the-upgrade-authority-will-be-burned) — the final upgrade live with its announced hash, the mainnet proof plan complete, 14 consecutive daily health runs with no FAIL, the metadata on Arweave; earliest 2026-11-25, no later than 2026-12-31. Before signing, compare the on-chain bytes with a reproducible build of the published source. Then, in one session:
+Conditions and dates: [IMMUTABILITY.md](IMMUTABILITY.md#when-the-upgrade-authority-will-be-burned) — the final upgrade live with its announced hash, the mainnet proof plan complete, 14 consecutive daily health runs with no FAIL, the metadata on Arweave; earliest 2026-12-02, no later than 2026-12-31. Before signing, compare the on-chain bytes with a reproducible build of the published source. Then, in one session:
 
 ```bash
 anchor idl erase-authority --program-id 57UE1U1t23ztg2noLp8pcpGW1B1Xw25rLH6ra9Mchea9 --provider.cluster $URL --provider.wallet $KEY

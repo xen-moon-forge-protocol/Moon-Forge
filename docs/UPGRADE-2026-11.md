@@ -1,10 +1,30 @@
 # Final program upgrade, November 2026
 
-*Published with the commit tagged `upgrade-review-2026-11` (the publication time is when that commit reached the repository's `main` branch, UTC, as GitHub's public event log shows), by 2026-11-04 16:00 UTC, at least 7 days before the upgrade. Planned upgrade window: Wednesday 2026-11-11, 16:00–20:00 UTC (the earliest date; the same hours a week later, 2026-11-18, if a gate is not green). Until the upgrade transaction exists, everything in this file under "after the upgrade" is a plan, not the program that runs. Today the program is v2 (tag `program-2026-10-12`, last deployed at slot 85,429,880) and the oracle runs the v2 reward rules.*
+*The review window opened on 2026-11-02 08:35 UTC with the commit tagged `upgrade-review-2026-11` (9d63e9f; a publication time is when the tagged commit reached the repository's `main` branch, UTC, as GitHub's public event log shows). The amended program source is published with the commit tagged `upgrade-review-2026-11-amended` by 2026-11-11 16:00 UTC, and the minimum of 7 days before the upgrade counts from that amendment. Planned upgrade window: Wednesday 2026-11-18, 16:00–20:00 UTC (the earliest date, moved from 2026-11-11 on 2026-11-02: see [Schedule change](#schedule-change-2026-11-02); the same hours a week later, 2026-11-25, if a gate is not green). Until the upgrade transaction exists, everything in this file under "after the upgrade" is a plan, not the program that runs. Today the program is v2 (tag `program-2026-10-12`, last deployed at slot 85,429,880) and the oracle runs the v2 reward rules.*
 
-This is the announcement of the last upgrade of the Moon Forge program `57UE1U1t23ztg2noLp8pcpGW1B1Xw25rLH6ra9Mchea9` on X1. It gives the source to review, the procedure to rebuild the binary and check its hash, the full list of changes, what happens to every kind of account that exists today, and the review window. After this upgrade the program is observed on mainnet and then frozen (earliest 2026-11-25, no later than 2026-12-31: [IMMUTABILITY.md](../IMMUTABILITY.md#when-the-upgrade-authority-will-be-burned)). The technical specification is published with the upgrade as `docs/spec/UPGRADE-2026-11.md`.
+This is the announcement of the last upgrade of the Moon Forge program `57UE1U1t23ztg2noLp8pcpGW1B1Xw25rLH6ra9Mchea9` on X1. It gives the source to review, the procedure to rebuild the binary and check its hash, the full list of changes, what happens to every kind of account that exists today, and the review window. After this upgrade the program is observed on mainnet and then frozen (earliest 2026-12-02, no later than 2026-12-31: [IMMUTABILITY.md](../IMMUTABILITY.md#when-the-upgrade-authority-will-be-burned)). The technical specification is published with the upgrade as `docs/spec/UPGRADE-2026-11.md`.
 
 What this upgrade does not change: the reward rules the oracle applies. The v3 reward rules are a separate, off-chain change with their own dated notice, published in POLICY-CHANGES.md with the announcement; the first epoch under them can only be published by the upgraded program, so it comes no earlier than the first Sunday after this upgrade is deployed and checked, and it is announced at least one full epoch ahead with the last v2 publish transaction. The program id, the five EVM portals and the burn path do not change. Zero protocol fee on the burn path stays.
+
+## Schedule change (2026-11-02)
+
+The upgrade window moves by one week, from Wednesday 2026-11-11 to **Wednesday 2026-11-18, 16:00–20:00 UTC**. The reasons:
+
+- more testing of the final binary on X1's current runtime (X1 validators run version 4.0.3 since late October), and a rehearsal of the deployment on X1 itself;
+- three safety changes to the program: a time fallback when the SlotHashes sysvar does not serve a hash, donations to the retired Burn Lottery refused, and a dated opening of the house-keeper seat if it was never armed. The review window opened on 2026-11-02 08:35 UTC with `upgrade-review-2026-11` (9d63e9f); the amended source, with this changelog updated for them, is published with a new tag, `upgrade-review-2026-11-amended`, by 2026-11-11 16:00 UTC, and the 7-day minimum before the window counts from that amendment.
+
+| What (UTC) | Before | Now |
+|---|---|---|
+| Source for review and changelog | tag `upgrade-review-2026-11`, due by 2026-11-04 16:00 (published 2026-11-02 08:35) | amended source, tag `upgrade-review-2026-11-amended`, by 2026-11-11 16:00 |
+| Build commit (tag `program-2026-11-18`), binary sha256 and executable hash | by 2026-11-09 16:00 | by 2026-11-16 16:00 |
+| Upgrade window | Wednesday 2026-11-11, 16:00–20:00 | Wednesday 2026-11-18, 16:00–20:00 |
+| Base price start of never-forged Artifact tiers (`PRICE_LAUNCH_TS`) | 2026-11-18 00:00 | 2026-11-25 00:00 |
+| Last epoch under the current (v2) reward rules (planned) | Sunday 2026-11-08 | Sunday 2026-11-15 |
+| First epoch under the v3 reward rules (planned: the first Sunday after the upgrade) | Sunday 2026-11-15 | Sunday 2026-11-22 |
+| Freeze, earliest | 2026-11-25 | 2026-12-02 |
+| Freeze, no later than | 2026-12-31 | 2026-12-31 (unchanged) |
+
+What does not change: the v3 reward rules, the splits (forge, market, games), the fees (zero protocol fee on the burn path; the three changes add no fee and change no split), every exit of section 4, and the notice periods: source and changelog at least 7 days ahead, the binary hash at least 48 hours ahead, a review window of at least 14 days up to the freeze. The last v2 publish transaction and the date of the first v3 epoch are still announced at least one full epoch ahead.
 
 ## 1. In one table
 
@@ -32,9 +52,9 @@ What this upgrade does not change: the reward rules the oracle applies. The v3 r
 
 | Item | Value |
 |---|---|
-| Source to review | the commit tagged `upgrade-review-2026-11`, the one that publishes this file: the complete program, with the build-time values still placeholders in `constants.rs` |
-| Build commit | tag `program-2026-11-11` (`program-2026-11-18` if the window moves by a week); the commit itself is published at S2, by Monday 2026-11-09 16:00 UTC, at least 48 hours before the upgrade (earlier notices said 7 days: section 3.9) |
-| What the build commit adds | only the values that must be fixed at build time, in `programs/moon-forge/src/constants.rs`: `INITIAL_KEEPER`, `SEAT_COLD_INITIAL`, `SEAT_REFUND_INITIAL`, `METADATA_BASE_URI`, `PRICE_LAUNCH_TS`, plus the `Cargo.lock` that `cargo build-sbf` writes. `git diff upgrade-review-2026-11 program-2026-11-11` shows nothing else |
+| Source to review | the commit tagged `upgrade-review-2026-11-amended` (by 2026-11-11 16:00 UTC), which amends the commit tagged `upgrade-review-2026-11` (9d63e9f, published 2026-11-02 08:35 UTC with this file): the complete program, with the build-time values still placeholders in `constants.rs` |
+| Build commit | tag `program-2026-11-18` (`program-2026-11-25` if the window moves by another week); the commit itself is published at S2, by Monday 2026-11-16 16:00 UTC, at least 48 hours before the upgrade (earlier notices said 7 days: section 3.9) |
+| What the build commit adds | only the values that must be fixed at build time, in `programs/moon-forge/src/constants.rs`: `INITIAL_KEEPER`, `SEAT_COLD_INITIAL`, `SEAT_REFUND_INITIAL`, `METADATA_BASE_URI`, `PRICE_LAUNCH_TS`, plus the `Cargo.lock` that `cargo build-sbf` writes. `git diff upgrade-review-2026-11-amended program-2026-11-18` shows nothing else |
 | Binary | `target/deploy/moon_forge.so`; its size and sha256 are published at S2 |
 | Executable hash | published at S2 (sha256 of the binary without its trailing zero bytes; what `solana-verify get-executable-hash` prints and what `solana-verify get-program-hash` reads from the chain after the deploy) |
 | IDL | `anchor idl build --no-docs`, sha256 `9617cd5eaf80168026957ae77396fc72497e9c154de2f55432b0f571e793a72f`, 11,887 bytes compressed (the on-chain IDL account holds 16,214); the same file as `frontend/src/idl/moon_forge.v3.json` and `oracle/src/idl/moon_forge.v3.json` of this commit. The build-time values are not in the IDL, so the build commit must give the same hash; it is confirmed at S2 |
@@ -46,7 +66,7 @@ What this upgrade does not change: the reward rules the oracle applies. The v3 r
 
 ```bash
 git clone https://github.com/xen-moon-forge-protocol/Moon-Forge && cd Moon-Forge
-git checkout program-2026-11-11                                  # the build commit, published at S2
+git checkout program-2026-11-18                                  # the build commit, published at S2
 cargo test -p moon-forge --lib                                   # unit tests, mainnet constants
 bash tests/check-mainnet-guards.sh --final                       # prints "S2 gate OK": no placeholder, no test key
 SOURCE_DATE_EPOCH=0 cargo build-sbf --manifest-path programs/moon-forge/Cargo.toml
@@ -105,7 +125,7 @@ A stolen hot key therefore cannot be paid anything during the hold, and the cold
 ### 3.4 Artifacts
 
 - **Forge split:** 50% floor kept inside the Artifact's record, 20% to the reward pool (base pot), 25% to the extra pot, 5% to the architect, 0% to the Burn Lottery. A compile-time assert checks that the shares sum to 100%.
-- **Prices (every tier moves).** A forge multiplies the tier's price by the step; each full period without a forge divides it by the same step, down to the minimum; the price never exceeds 10× base; it does not fall while the tier is full (all slots alive). A tier with no forge yet starts at its base price on 2026-11-18 00:00 UTC (`PRICE_LAUNCH_TS`: the upgrade date + 7 days, set in the build commit; this source still holds 2026-11-24, and the value moves by a week with the window) and falls from then. The buyer signs a maximum price, so a move can only make a forge fail.
+- **Prices (every tier moves).** A forge multiplies the tier's price by the step; each full period without a forge divides it by the same step, down to the minimum; the price never exceeds 10× base; it does not fall while the tier is full (all slots alive). A tier with no forge yet starts at its base price on 2026-11-25 00:00 UTC (`PRICE_LAUNCH_TS` = 1,795,564,800: the upgrade date + 7 days, fixed at the latest in the build commit; the value moves with the window) and falls from then. The buyer signs a maximum price, so a move can only make a forge fail.
 
   | Tier | Max alive | Base | Step per forge | Down one step after | Minimum | Maximum |
   |---|---|---|---|---|---|---|
@@ -182,7 +202,7 @@ One line per key, from the sections above. No key can pause the program or veto 
 
 ## 4. What happens to each kind of account (exit windows)
 
-Nothing is taken from anyone by the upgrade, no account changes size, and every exit that exists today keeps working; recycling and orphan reclaims wait for `init_extra`, which runs in the first run, within about 2 hours of the deploy (section 5). Where a rule changes, the table says what to do before the upgrade if you prefer the old rule. Deadlines are relative to the upgrade window (Wednesday 2026-11-11, 16:00–20:00 UTC, or the same hours a week later if a gate slips); the site and the kit keep every exit open throughout.
+Nothing is taken from anyone by the upgrade, no account changes size, and every exit that exists today keeps working; recycling and orphan reclaims wait for `init_extra`, which runs in the first run, within about 2 hours of the deploy (section 5). Where a rule changes, the table says what to do before the upgrade if you prefer the old rule. Deadlines are relative to the upgrade window (Wednesday 2026-11-18, 16:00–20:00 UTC, or the same hours a week later if a gate slips); the site and the kit keep every exit open throughout.
 
 | Account or position | Before the upgrade | After the upgrade | If you want out under today's rules |
 |---|---|---|---|
@@ -214,7 +234,7 @@ Clients built for today's program get readable errors for the retired paths (`Ke
 | Step | When (UTC) | Who | What you will see |
 |---|---|---|---|
 | Census | about 30 minutes before the window | the operator, read-only | a list of every open account on the program, published with the record |
-| Deploy | Wednesday 2026-11-11, 16:00–20:00 (a week later if a gate slips) | the upgrade authority signs: extend the program account, write the buffer, check the buffer's hash, deploy | a new last-deploy slot on the explorer |
+| Deploy | Wednesday 2026-11-18, 16:00–20:00 (a week later if a gate slips) | the upgrade authority signs: extend the program account, write the buffer, check the buffer's hash, deploy | a new last-deploy slot on the explorer |
 | Checks | right after | anyone | `solana-verify get-program-hash` = the executable hash published at S2; simulations show the new instructions; the IDL is upgraded and compared with the published one |
 | Authorities | same session | the upgrade authority | the upgrade authority and the IDL authority move to a new deploy key kept in an encrypted folder on the project computer, never in GitHub (its address is published in [SECURITY.md](../SECURITY.md) at S2, next to the command that checks the authority), used once more at the freeze; the wallet that holds them today keeps no upgrade or IDL power, and stops being the architect payee when `set_architect` runs in the first run (below) |
 | First run | within about 2 hours | the operator (permissionless, or signed by the architect wallet and the new payee for `set_architect`, and by the new payee for `lock_collection_royalties`) | `refresh_collection_uri`, `set_architect`, `lock_collection_royalties`, `init_seat`, `init_extra`; no `arm_keeper`: the house keeper is not armed and no keeper bond is posted (section 3.5); until `init_extra` runs, recycles and orphan reclaims are refused (section 4) |
@@ -240,7 +260,7 @@ Measured with the rehearsal binary of 2026-10-31 (1,401,200 bytes, this source b
 ## 7. Review window
 
 - **Source review: from the publication of this file to the upgrade window.** The source commit above is complete. Read it, run the tests, rebuild. Send findings to the project mailbox, xen-moon-forge-protocol@tutamail.com, or open a GitHub issue titled `SECURITY` without exploit details. Reports are answered in batches; every report and its outcome is recorded in [REVIEW-2026-10.md](REVIEW-2026-10.md) under "Final upgrade review".
-- **Hash check: from Monday 2026-11-09 16:00 UTC at the latest (at least 48 hours before the window; earlier notices said 7 days, section 3.9).** Rebuild the build commit and compare with section 2.
+- **Hash check: from Monday 2026-11-16 16:00 UTC at the latest (at least 48 hours before the window; earlier notices said 7 days, section 3.9).** Rebuild the build commit and compare with section 2.
 - **What stops the deploy:** a finding that would lose or lock anyone's funds, let a key do more than this file says, or make the hash irreproducible. The fix goes into a new build commit; the window moves to the next possible weekday, and the new hash is published at least 48 hours before it; a change of behaviour also restarts the 7-day notice with an updated changelog.
 - **After the deploy:** the mainnet proof plan and at least 14 consecutive stable days run before the freeze, and any defect found then is fixed by a corrective upgrade, announced the same way, which restarts the 14 days. No fix after the freeze is possible.
 - There is no third-party audit. Earlier reviews were internal ([REVIEW-2026-10.md](REVIEW-2026-10.md)). The review path of this upgrade is this public window, from the publication of this file to the freeze (at least 14 days), with no bounty and no named reviewer ([REVIEW-2026-10.md](REVIEW-2026-10.md)).

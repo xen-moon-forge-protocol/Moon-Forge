@@ -135,7 +135,7 @@ test("finding 12: a heartbeat is never held or blocked by the anomaly gate (GATE
 
 // ── finding 2 (C-14): the weekly epoch row past the v2 boundary ───────────────────────────────────────────────────
 test("finding 2: past the v2 boundary on the v2 binary the overdue weekly epoch warns 'v2 closed at the boundary' (never red); before it, as before", () => {
-  const after = V2_BOUNDARY_TS_DEFAULT + 9 * DAY + 3 * 3_600; // Wednesday 09:00 UTC: the slot of Sunday 2026-11-15 is 57 h old (overdue)
+  const after = V2_BOUNDARY_TS_DEFAULT + 9 * DAY + 3 * 3_600; // Wednesday 09:00 UTC: the slot of the first Sunday after the boundary is 57 h old (overdue)
   const lastTs = V2_BOUNDARY_TS_DEFAULT - DAY;
   const closed = epochVerdict(5, lastTs, after, 3, "BSC", null, false, true);
   assert.strictEqual(closed.state, "warn");
