@@ -14,7 +14,7 @@ import { ComputeBudgetProgram, Keypair, PublicKey, SYSVAR_SLOT_HASHES_PUBKEY, Sy
 import bs58 from "bs58";
 import { keccak } from "../src/merkle";
 import { MPL_CORE, PDA, programId, randomU64 } from "../src/x1";
-import { BPF_LOADER_UPGRADEABLE, CLAIM_COST_MAX, claimFundsOkV3, claimGuardV3, LIVE_DEPLOY_SLOT, ORACLE_PUBLISH_RESERVE, PDA_V3, programV3 } from "../src/x1-v3";
+import { BPF_LOADER_UPGRADEABLE, CLAIM_COST_MAX, claimFundsOkV3, claimGuardV3, FEE_COST_MAX, feeFundsOkV3, LIVE_DEPLOY_SLOT, ORACLE_PUBLISH_RESERVE, PDA_V3, programV3, RENT_FLOOR } from "../src/x1-v3";
 import {
   armDecision, betPack, betUnpack, buildChain, chainIdOf, chainIdsOf, chainKeyOf, chainLengthOf, chainSeed, CHAIN_LEN_BASE, CLAIM_HOLD, CLAIM_WINDOW, DAY, drawDecision, HELPER_DRAW_GRACE,
   jackpotTicketV2, KEEPALIVE_AFTER, KEEPER_BOND_MIN, KEEPER_STALL_SLOTS, KeeperChains, keeperModeV3, keeperPassV3, keeperTipDueV3, KEEPER_TIP_MIN_CLAIM_V3, lookupSlotHash,
@@ -984,6 +984,63 @@ async function main() {
     help.c.balance = 0;
     await keeperPassV3(help.c.connection(), help.p, help.keeper, () => undefined, opts(files));
     assert.deepStrictEqual(help.c.names().filter((n) => n.startsWith("claim")), ["claimInstant", "claimInstant", "claimExtra"], "a helper key pays its own claims, whatever its balance");
+  });
+
+  await test("upkeep guard: the oracle key's expiries and extra closes wait while its wallet is under the publish reserve, unless the close refunds it; a helper key is never held back", async () => {
+    // pure rule
+    assert(RENT_FLOOR > FEE_COST_MAX, "every closed account refunds more than one upkeep fee");
+    assert.deepStrictEqual(
+      [feeFundsOkV3(ORACLE_PUBLISH_RESERVE + FEE_COST_MAX), feeFundsOkV3(ORACLE_PUBLISH_RESERVE + FEE_COST_MAX - 1n), feeFundsOkV3(FEE_COST_MAX, RENT_FLOOR), feeFundsOkV3(FEE_COST_MAX - 1n, RENT_FLOOR), feeFundsOkV3(0n)],
+      [true, false, true, false, false],
+    );
+    assert(feeFundsOkV3(ORACLE_PUBLISH_RESERVE + FEE_COST_MAX) && !claimFundsOkV3(ORACLE_PUBLISH_RESERVE + FEE_COST_MAX), "an upkeep fee is allowed where a claim is not");
+    const me = Keypair.generate().publicKey;
+    const conn = (bal: number | null) => ({ getBalance: async () => { if (bal === null) throw new Error("503"); return bal; } });
+    assert.strictEqual(await claimGuardV3(conn(0), me, Keypair.generate().publicKey).checkFee(), null, "a key that does not publish is never held back");
+    assert.match((await claimGuardV3(conn(null), me, me).checkFee())!, /^D-47 \(upkeep\): .*could not be read/, "fail closed");
+    const g = claimGuardV3(conn(Number(ORACLE_PUBLISH_RESERVE)), me, me);
+    assert.match((await g.checkFee())!, /^D-47 \(upkeep\): the oracle wallet holds 0\.0500 XNT/);
+    assert.strictEqual(await g.checkFee(RENT_FLOOR), null, "a close that refunds this wallet still goes");
+    assert.strictEqual(g.stopped, null, "the claims' state is separate");
+
+    // the keeper pass with the oracle key: an expired epoch and an extra epoch past its 90 days
+    const oracleKp = Keypair.generate();
+    const mk = (keeper: Keypair, rentPayer: PublicKey) => {
+      const w = world(keeper);
+      w.c.put(PDA.config(), programId, enc(w.p, "Config", { version: 2, architect: w.architect, oracle: oracleKp.publicKey, jackpotRound: BN(5), drawRound: BN(3) }));
+      w.c.put(PDA.epoch(1), programId, enc(w.p, "Epoch", { id: BN(1), totalScore: BN(1000), budget: BN(XNT), publishedAt: BN(NOW - 91 * DAY), expiresAt: BN(NOW - DAY), bump: 255 }));
+      w.c.put(PDA_V3.extraEpoch(4), programId, enc(w.p, "ExtraEpoch", { id: BN(4), root: Array.from(Buffer.from("cd".repeat(32), "hex")), publishedAt: BN(NOW - CLAIM_WINDOW), leaves: 1, budget: BN(XNT), bitmap: Array(125).fill(0), rentPayer, bump: 255 }));
+      return w;
+    };
+    const files = { extraFiles: [{ epoch: 4, root: "cd".repeat(32), leaves: [{ index: 0, wallet: Keypair.generate().publicKey.toBase58(), amount: "5000000" }], proofs: {} } as any] };
+    const low = Number(ORACLE_PUBLISH_RESERVE + FEE_COST_MAX - 1n);
+    // under the reserve: the expiry waits; the close whose rent goes back to another key waits too
+    const a = mk(oracleKp, Keypair.generate().publicKey);
+    a.c.balance = low;
+    const logs: string[] = [];
+    const rep = await keeperPassV3(a.c.connection(), a.p, a.keeper, (s) => logs.push(s), opts(files));
+    assert.deepStrictEqual(a.c.names().filter((n) => n === "expireEpoch" || n === "closeExtraEpoch"), [], "held back: the reserve is for publishing");
+    assert.strictEqual(logs.filter((l) => /D-47 \(upkeep\)/.test(l)).length, 1, "said once per pass: " + logs.join(" | "));
+    assert(rep.notes.some((n) => /^D-47 \(upkeep\)/.test(n)), "the pass report carries it");
+    // under the reserve, but the close refunds its rent to this very wallet: it goes (the expiry still waits)
+    const b = mk(oracleKp, oracleKp.publicKey);
+    b.c.balance = low;
+    await keeperPassV3(b.c.connection(), b.p, b.keeper, () => undefined, opts(files));
+    assert.deepStrictEqual(b.c.names().filter((n) => n === "expireEpoch" || n === "closeExtraEpoch"), ["closeExtraEpoch"]);
+    // at the line: both go
+    const c = mk(oracleKp, Keypair.generate().publicKey);
+    c.c.balance = Number(ORACLE_PUBLISH_RESERVE + FEE_COST_MAX);
+    await keeperPassV3(c.c.connection(), c.p, c.keeper, () => undefined, opts(files));
+    assert.deepStrictEqual(c.c.names().filter((n) => n === "expireEpoch" || n === "closeExtraEpoch"), ["expireEpoch", "closeExtraEpoch"]);
+    // balance unreadable: nothing (fail closed); a helper key with no balance at all is never held back
+    const d = mk(oracleKp, oracleKp.publicKey);
+    d.c.balance = null;
+    await keeperPassV3(d.c.connection(), d.p, d.keeper, () => undefined, opts(files));
+    assert.deepStrictEqual(d.c.names().filter((n) => n === "expireEpoch" || n === "closeExtraEpoch"), []);
+    const h = mk(Keypair.generate(), oracleKp.publicKey);
+    h.c.balance = 0;
+    await keeperPassV3(h.c.connection(), h.p, h.keeper, () => undefined, opts(files));
+    assert.deepStrictEqual(h.c.names().filter((n) => n === "expireEpoch" || n === "closeExtraEpoch"), ["expireEpoch", "closeExtraEpoch"]);
   });
 
   await test("publish record of a held epoch: health says ok (claims after the hold, by the keeper), the announcement names the opening time", () => {

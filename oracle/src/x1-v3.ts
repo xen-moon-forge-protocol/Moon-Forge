@@ -482,6 +482,26 @@ export function claimFundsOkV3(balance: bigint, reserve: bigint = ORACLE_PUBLISH
   return balance >= reserve + cost;
 }
 
+/**
+ * upkeep guard: the most one fee-only upkeep transaction costs its payer (the expiry of a base
+ * epoch, the close of an extra epoch), rounded up: one signature at the base fee with room for a priority fee. Neither
+ * opens an account.
+ */
+export const FEE_COST_MAX = 100_000n;
+/** the rent of an account's 128-byte header at X1's rate (6,960 lamports per byte): every closed account refunds at least this */
+export const RENT_FLOOR = 128n * 6_960n;
+
+/**
+ * upkeep guard, pure: an upkeep transaction paid by the oracle wallet (expire_epoch; close_extra_epoch, which returns the
+ * unclaimed extra budget to the extra pot) may go out only while the wallet keeps the publish reserve after its fee, or
+ * when it refunds this payer at least its fee (a close whose rent comes back to this wallet can only raise the balance),
+ * and in every case only when the wallet can pay the fee at all.
+ */
+export function feeFundsOkV3(balance: bigint, refundToPayer = 0n, reserve: bigint = ORACLE_PUBLISH_RESERVE, cost: bigint = FEE_COST_MAX): boolean {
+  if (balance < cost) return false;
+  return refundToPayer >= cost || balance >= reserve + cost;
+}
+
 /** The D-47 guard of one automatic claim loop (one pass). `stopped` keeps the reason once the claims stopped. */
 export interface ClaimGuardV3 {
   /** null = the next claim may go out; else why the automatic claims stopped (the loop stops) */
@@ -489,6 +509,14 @@ export interface ClaimGuardV3 {
   readonly stopped: string | null;
   /** true when the payer is (or is taken to be) the oracle key, the only one the guard holds back */
   readonly isOracle: boolean;
+  /**
+   * The upkeep guard of the fee-only upkeep (base expiries, extra closes): null = it may go out (feeFundsOkV3, the balance
+   * re-read each time), else why it is held back. `refundToPayer`: what the transaction refunds to this payer (0 when it
+   * refunds nothing to it). Separate from the claims: a wallet too low for a claim may still pay an upkeep fee.
+   */
+  checkFee(refundToPayer?: bigint): Promise<string | null>;
+  /** the last reason an upkeep transaction was held back in this pass (null: none was) */
+  readonly feeStopped: string | null;
 }
 
 const xntStr = (l: bigint) => (Number(l) / 1e9).toFixed(4);
@@ -502,10 +530,27 @@ const xntStr = (l: bigint) => (Number(l) / 1e9).toFixed(4);
 export function claimGuardV3(connection: { getBalance(pk: PublicKey, c?: Commitment): Promise<number> }, payer: PublicKey, oracle: PublicKey | string | null, reserve: bigint = ORACLE_PUBLISH_RESERVE): ClaimGuardV3 {
   const isOracle = oracle === null || payer.toBase58() === (typeof oracle === "string" ? oracle : oracle.toBase58());
   let stopped: string | null = null;
+  let feeStopped: string | null = null;
   return {
     isOracle,
     get stopped() {
       return stopped;
+    },
+    get feeStopped() {
+      return feeStopped;
+    },
+    async checkFee(refundToPayer = 0n) {
+      if (!isOracle) return null;
+      let bal: bigint;
+      try {
+        bal = BigInt(await connection.getBalance(payer, "confirmed"));
+      } catch (e) {
+        feeStopped = `D-47 (upkeep): the oracle wallet's balance could not be read (${String((e as Error)?.message ?? e).slice(0, 120)}): expiries and extra closes held back, publication keeps priority`;
+        return feeStopped;
+      }
+      if (feeFundsOkV3(bal, refundToPayer, reserve)) return null;
+      feeStopped = `D-47 (upkeep): the oracle wallet holds ${xntStr(bal)} XNT, under the ${xntStr(reserve)} XNT kept for publishing plus one fee (${xntStr(FEE_COST_MAX)} XNT): expiries and extra closes that do not refund it are held back, publication keeps priority (anyone can send them)`;
+      return feeStopped;
     },
     async check() {
       if (!isOracle || stopped) return stopped;

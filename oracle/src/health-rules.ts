@@ -742,24 +742,72 @@ export function siteRulesVerdict(marker: { program: string; oracle: string } | n
 
 // ── Verification green ───────────────────────────────────────────────────────────────────────────────────────────────
 
-/** One entry of ops/verification.json (written by src/health-verify.ts with `npm run verify -- <file> --full`). */
-export interface VerificationEntry { file: string; kind: "epoch" | "extra"; epoch: number; dataHash: string; status: "ok" | "failed" | "error"; detail: string; at: string }
+/** Per chain: one chain's result of a per-chain `verify --full` (a v3 epoch file: one run per chain, each kept on its own) */
+export interface VerificationChain { status: "ok" | "failed" | "error"; detail: string; at: string }
+/**
+ * One entry of ops/verification.json (written by src/health-verify.ts with `npm run verify -- <file> --full`). `chains`
+ * (v3 epoch files, per chain): the result per chain id; the entry's status is then failed if a chain (or the file) disagrees,
+ * error if a chain could not finish, ok when every chain is green.
+ */
+export interface VerificationEntry {
+  file: string; kind: "epoch" | "extra"; epoch: number; dataHash: string; status: "ok" | "failed" | "error"; detail: string; at: string; chains?: Record<string, VerificationChain>;
+  /** Per chain: a per-chain run failed on the file itself (not on a chain); red only when the next run on the same data hash fails it again */
+  fileFailure?: string;
+  /**
+   * a file-level read (the publication, the previous publication, the snapshot block time) returned nothing in
+   * this run and in every run before it on the same data hash since `unreadableSince`, `unreadableRuns` runs in a row.
+   * Red once that lasts UNREADABLE_RED_RUNS runs and UNREADABLE_RED_S (verificationVerdict).
+   */
+  unreadable?: string;
+  unreadableSince?: string;
+  unreadableRuns?: number;
+}
 export interface VerificationFile { at: string; results: VerificationEntry[] }
 /** A newly published epoch must be verified green within this long (inside its 48-h hold). */
 export const VERIFY_GRACE_S = 36 * 3600;
+/**
+ * a publication that can never be read (a wrong publish.tx, a failed or missing transaction) is not a passing
+ * RPC miss. A file-level read that returned nothing is a warning (VERIFICATION INCOMPLETE, retried by the next run)
+ * until it has missed in UNREADABLE_RED_RUNS runs in a row on the same data hash, spanning at least UNREADABLE_RED_S
+ * (72 h, three daily runs); then the row is red. One run that reads it ends the streak.
+ */
+export const UNREADABLE_RED_S = 72 * 3600;
+export const UNREADABLE_RED_RUNS = 3;
 
-/** The newest on-chain epoch must have a green full verification of exactly its file; a mismatch is red, a run that could not finish warns. */
+/** Pure: the entry's file-level read has missed for UNREADABLE_RED_RUNS runs in a row and UNREADABLE_RED_S. */
+export function unreadableSustained(r: VerificationEntry, now: number): boolean {
+  if (!r.unreadableSince || !r.unreadableRuns) return false;
+  const since = Date.parse(r.unreadableSince) / 1000;
+  return Number.isFinite(since) && r.unreadableRuns >= UNREADABLE_RED_RUNS && now - since >= UNREADABLE_RED_S;
+}
+
+/**
+ * The newest on-chain epoch must have a green full verification of exactly its file; a mismatch is red, a run that could
+ * not finish warns, and a file-level read that keeps returning nothing is red after UNREADABLE_RED_RUNS runs and
+ * UNREADABLE_RED_S.
+ */
 export function verificationVerdict(v: VerificationFile | null, newest: { epoch: number; dataHash: string; publishedAt: number } | null, now: number): Row {
   const check = "verification";
   if (!newest) return { check, state: "ok", detail: "no epoch published yet" };
   const failed = (v?.results ?? []).filter((r) => r.status === "failed");
   if (failed.length) return { check, state: "fail", detail: `verify --full FAILED for ${failed.map((r) => `${r.file} (${r.detail.slice(0, 120)})`).join("; ")}` };
+  // a file-level read that keeps returning nothing is red after a sustained period, never a warning for ever
+  const lost = (v?.results ?? []).filter((r) => r.status === "error" && unreadableSustained(r, now));
+  if (lost.length) return { check, state: "fail", detail: `could not read the publication data of ${lost.map((r) => `${r.file} in ${r.unreadableRuns} runs in a row since ${r.unreadableSince} (${String(r.unreadable ?? "").slice(0, 120)})`).join("; ")}: red after ${UNREADABLE_RED_RUNS} runs and ${UNREADABLE_RED_S / 3600} h` };
   const mine = (v?.results ?? []).find((r) => r.kind === "epoch" && r.epoch === newest.epoch && r.dataHash === newest.dataHash);
   const young = now - newest.publishedAt < VERIFY_GRACE_S;
   if (!v) return { check, state: young ? "warn" : "fail", detail: `no verification.json for epoch ${newest.epoch} (published ${new Date(newest.publishedAt * 1000).toISOString().slice(0, 16)}Z)` };
   if (!mine) return { check, state: young ? "warn" : "fail", detail: `epoch ${newest.epoch} not verified yet (latest verification.json ${v.at} covers ${v.results.map((r) => r.file).join(", ") || "nothing"})` };
-  if (mine.status === "error") return { check, state: "warn", detail: `verify --full of ${mine.file} could not finish (${mine.detail.slice(0, 120)}); the next run retries` };
-  return { check, state: "ok", detail: `${v.results.filter((r) => r.status === "ok").map((r) => r.file).join(", ")} verified green (--full) at ${mine.at}` };
+  if (mine.status === "error") {
+    // per chain: the chains that are green stay green; only the others are retried
+    const chains = mine.chains ? Object.entries(mine.chains) : [];
+    const green = chains.filter(([, c]) => c.status === "ok").map(([k]) => k);
+    const open = chains.filter(([, c]) => c.status !== "ok").map(([k]) => k);
+    const per = chains.length ? ` (chain ${open.join(", ")} not finished${green.length ? `; chain ${green.join(", ")} verified green` : ""})` : "";
+    return { check, state: "warn", detail: `verify --full of ${mine.file} could not finish${per}: ${mine.detail.slice(0, 120)}; the next run retries` };
+  }
+  const perChain = mine.chains ? ` per chain (${Object.keys(mine.chains).join(", ")})` : "";
+  return { check, state: "ok", detail: `${v.results.filter((r) => r.status === "ok").map((r) => r.file).join(", ")} verified green (--full${perChain}) at ${mine.at}` };
 }
 
 // ── Privileged-change rows: pinned expectations ──────────────────────────────────────────────────────────────────────
@@ -972,4 +1020,83 @@ export function feedVerdict(detection: Detection, live: boolean, seen: FeedSeen 
   if (age > FEED_WARN_AGE_S) return { check, state: "warn", detail: `the feed is ${(age / 3_600).toFixed(1)} h old (the keeper workflow writes it every hour): no quote until it is fresh` };
   if (seen.readingsHour !== hour && seen.readingsHour !== hour - 1) return { check, state: "warn", detail: `the feed's readings are for hour ${String(seen.readingsHour)}, not the current one (${hour})` };
   return { check, state: "ok", detail: `epoch ${String(seen.epoch)}, as of ${Math.round(age / 60)} min ago, readings for hour ${String(seen.readingsHour)}` };
+}
+
+// ── The frozen NFT metadata gateway ─────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The metadata gateway row: the Artifact metadata the program points at (METADATA_BASE_URI) must keep serving. Each run
+ * loads collection.json, one metadata file and one image per tier through the set's own gateway and one alternative,
+ * and compares every body with the sha256 of deployments/nft-arweave-final.json. Before the S2 build the row reports
+ * every set of the record (the build picks one); once programs/moon-forge/src/constants.rs holds the final URI, only
+ * the set compiled into METADATA_BASE_URI.
+ * A gateway miss (a path one gateway did not serve, or served with another hash) only warns, and so does a path no
+ * gateway served (lost) in one run. Red only on a SUSTAINED loss: a path lost on every gateway for GATEWAY_LOSS_RUNS
+ * runs in a row spanning at least GATEWAY_LOSS_HOURS (before the build: on every set at once).
+ */
+export const GATEWAY_LOSS_RUNS = 3;
+export const GATEWAY_LOSS_HOURS = 48;
+/** one checked path through one gateway: ok, or why not */
+export interface GatewayProbe { path: string; gateway: string; ok: boolean; why?: string }
+/** one set's run: its metadata manifest id, its gateways, every probe */
+export interface GatewaySetRun { manifest: string; label: string; gateways: string[]; probes: GatewayProbe[] }
+/** carried in the health snapshot, per metadata manifest: the run of consecutive runs with a lost path, and since when */
+export type GatewayHistory = Record<string, { lostRuns: number; lostSince: number | null }>;
+
+/** the paths no gateway served with the recorded hash in this run */
+export function lostPaths(run: GatewaySetRun): string[] {
+  const paths = [...new Set(run.probes.map((p) => p.path))];
+  return paths.filter((p) => !run.probes.some((q) => q.path === p && q.ok));
+}
+
+/** the history after this run (a run with nothing lost resets the set) */
+export function gatewayHistoryNext(prev: GatewayHistory | null | undefined, runs: GatewaySetRun[], now: number): GatewayHistory {
+  const next: GatewayHistory = {};
+  for (const r of runs) {
+    const was = prev?.[r.manifest];
+    next[r.manifest] = lostPaths(r).length ? { lostRuns: (was?.lostRuns ?? 0) + 1, lostSince: was?.lostSince ?? now } : { lostRuns: 0, lostSince: null };
+  }
+  return next;
+}
+
+/** a set's loss is sustained: lost in GATEWAY_LOSS_RUNS runs in a row that span at least GATEWAY_LOSS_HOURS */
+export function sustainedLoss(h: { lostRuns: number; lostSince: number | null } | undefined, now: number): boolean {
+  return !!h && h.lostSince !== null && h.lostRuns >= GATEWAY_LOSS_RUNS && now - h.lostSince >= GATEWAY_LOSS_HOURS * 3_600;
+}
+
+/**
+ * The row. `phase`: "candidates" before the build (every set of the record; red only when every set has a sustained loss),
+ * "compiled" after it (the one set of METADATA_BASE_URI; red on its sustained loss). `problem`: a configuration fault
+ * found before any probe (no record, a compiled URI that is in no set of the record): warn before the build, red after.
+ */
+export function gatewayVerdict(phase: "candidates" | "compiled", runs: GatewaySetRun[], history: GatewayHistory, now: number, problem: string | null = null): Row {
+  const check = "nft metadata gateway";
+  if (problem) return { check, state: phase === "compiled" ? "fail" : "warn", detail: problem };
+  if (!runs.length) return { check, state: "warn", detail: "no metadata set to check" };
+  const parts: string[] = [];
+  let anyMiss = false;
+  let anyLost = false;
+  const sustained: string[] = [];
+  for (const r of runs) {
+    const paths = new Set(r.probes.map((p) => p.path)).size;
+    const misses = r.probes.filter((p) => !p.ok);
+    const lost = lostPaths(r);
+    const h = history[r.manifest];
+    if (misses.length) anyMiss = true;
+    if (lost.length) anyLost = true;
+    if (sustainedLoss(h, now)) sustained.push(r.label);
+    const served = paths - lost.length;
+    let s = `${r.label}: ${served}/${paths} paths served with the recorded hash on ${r.gateways.join(" or ")}`;
+    if (misses.length) {
+      const byGw = r.gateways.map((g) => [g, misses.filter((m) => m.gateway === g)] as const).filter(([, m]) => m.length);
+      s += `; misses: ${byGw.map(([g, m]) => `${g} ${m.length} (${m[0].path}${m[0].why ? `: ${m[0].why}` : ""})`).join(", ")}`;
+    }
+    if (lost.length) s += `; LOST on every gateway: ${lost.slice(0, 3).join(", ")}${lost.length > 3 ? " …" : ""} (${h?.lostRuns ?? 1} run(s) in a row)`;
+    parts.push(s);
+  }
+  const red = phase === "compiled" ? sustained.length > 0 : sustained.length === runs.length;
+  const scope = phase === "compiled" ? "the set compiled into METADATA_BASE_URI" : `${runs.length} candidate set(s), before the build`;
+  const state: State = red ? "fail" : anyMiss || anyLost ? "warn" : "ok";
+  const why = red ? ` RED: lost for ${GATEWAY_LOSS_RUNS}+ runs over ${GATEWAY_LOSS_HOURS}+ h (runbook: serve the same ids through another gateway)` : "";
+  return { check, state, detail: `${scope}: ${parts.join(" | ")}${why}` };
 }

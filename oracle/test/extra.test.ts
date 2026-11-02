@@ -18,7 +18,7 @@ import {
   extraClaimArgs, ExtraFileV1, extraLeaf, ExtraPoolInfo, extraPublishArgs, ExtraSnapshot, ExtraSnapshotRecord, extraTree, MIN_PAY, NEED_BPS, needOf,
   pinnedExtraError, pricePaid, releaseOf, RHO_MAX_BPS, SEASON_WEEKS, seasonAfterOf, uncovered, verifyExtraChainLink, verifyExtraFile, verifyPublishedExtra,
   baseNftTermsError, needWeeksOf, preUpgradePotError, backingBoundOf, buildSkipExtraFile, skipExtraEpoch, skipReasonOf, NEED_WEEK_SLACK,
-  checkedInitMark, EXTRA_EXCLUDE_PRE_UPGRADE, isPreUpgrade,
+  checkedInitMark, EXTRA_EXCLUDE_PRE_UPGRADE, isPreUpgrade, carryOf, EXTRA_BACKLOG_CARRY_WEEKS, carryWeeksOf, policy,
 } from "../src/extra";
 import { catchUpExtrasV3, extraCreatedAtV3, extraInitV3, extraPoolV3, ExtraRecoverySourcesV3, rebuildExtraV3, buildExtraAfterBaseV3 } from "../src/flow-v3";
 import { EXTRA_MAX_WEEKS } from "../src/extra";
@@ -91,6 +91,8 @@ interface BaseBurn {
   lp?: bigint;
   basePaid?: bigint;
   tier?: number;
+  /** The backlog carry: a D-12 backlog burn (a chain the previous base file skipped), stamped before the window */
+  backlog?: boolean;
 }
 interface BaseOpt {
   epoch: number;
@@ -111,6 +113,7 @@ function mkBase(o: BaseOpt): EpochFileV3 {
     return {
       chainId: 10, txHash: "0x" + id.toString(16).padStart(64, "0"), logIndex: i, blockNumber: 1_000 + i, missionId: String(id), pilot: "0x" + "ab".repeat(20),
       amountWei: "0", tier: b.tier ?? 0, x1: b.x1, timestamp: startTs + i, base: b.base.toString(), lp: lp.toString(), basePaid: (b.basePaid ?? 0n).toString(),
+      ...(b.backlog ? { backlog: true, timestamp: startTs - HOUR - i } : {}),
     };
   });
   const snapshot = {
@@ -144,14 +147,14 @@ interface Week {
   burns?: BaseBurn[];
   X?: bigint;
 }
-function run(weeks: Week[]): { bases: EpochFileV3[]; extras: ExtraFileV1[] } {
+function run(weeks: Week[], carryWeeks?: number): { bases: EpochFileV3[]; extras: ExtraFileV1[] } {
   const bases: EpochFileV3[] = [];
   const extras: ExtraFileV1[] = [];
   weeks.forEach((w, i) => {
     const epoch = i + 1;
     const endTs = T0 + epoch * WEEK;
     const base = mkBase({ epoch, endTs, startTs: i ? bases[i - 1].window.endTs + 60 : undefined, burns: w.burns, prev: i ? bases[i - 1] : null, snapshot: { slot: 1_000 * epoch, records: w.records } });
-    const extra = buildExtraFile(base, i ? extras[i - 1] : null, snap(1_000 * epoch, endTs, w.records), pool(w.X ?? 0n, endTs + 30, w.X ?? 0n, 1_000 * epoch + 5));
+    const extra = buildExtraFile(base, i ? extras[i - 1] : null, snap(1_000 * epoch, endTs, w.records), pool(w.X ?? 0n, endTs + 30, w.X ?? 0n, 1_000 * epoch + 5), carryWeeks);
     bases.push(base);
     extras.push(clone(extra));
   });
@@ -1012,6 +1015,104 @@ test("OD-9: the init_extra transaction is recognised by this program's discrimin
   assert.strictEqual(initExtraMarkOfTxV3(program, s, tx(disc, { err: { InstructionError: [0, "x"] } })), null, "a failed transaction");
   assert.strictEqual(initExtraMarkOfTxV3(program, s, null), null);
   assert.throws(() => initExtraMarkOfTxV3(program, s, tx(disc, { blockTime: null })), /no block time/);
+});
+
+// The backlog carry: a burn counts against the need of its own week, also when its chain was skipped and it arrives as backlog.
+// Built but OFF in the first v3 rules version: these tests switch it on (carry weeks 1) explicitly.
+function t138(u2: bigint, u3: bigint, skipped: boolean, opts: { bigHolder?: boolean; newInWeek2?: boolean; carryWeeks?: number } = {}) {
+  const H = W(61);
+  const G = W(62);
+  const big = opts.bigHolder === false ? [] : [rec(ASSET(611), 3, G), rec(ASSET(612), 3, G), rec(ASSET(613), 3, G)];
+  const h = rec(ASSET(610), 3, H);
+  const w1 = opts.newInWeek2 ? big : [h, ...big];
+  const X = 10_000n * XNT;
+  return run([
+    { records: w1, X },
+    { records: [h, ...big], X, burns: skipped ? [] : [{ x1: H, base: u2 }] },
+    { records: [h, ...big], X, burns: skipped ? [{ x1: H, base: u2, backlog: true }, { x1: H, base: u3 }] : [{ x1: H, base: u3 }] },
+  ], opts.carryWeeks ?? 1);
+}
+test("the backlog carry is OFF in the first v3 rules version: counted = min(use, need), no carry fields, no policy field, at most 2% of the price per week", () => {
+  const H = W(61);
+  assert.strictEqual(EXTRA_BACKLOG_CARRY_WEEKS, 0, "switching the backlog carry on is a new extra policy version, announced two epochs ahead (C2)");
+  assert.strictEqual(Object.prototype.hasOwnProperty.call(policy(), "backlogCarryWeeks"), false, "the policy of the first v3 rules version");
+  const { bases, extras } = t138(3n * XNT, 3n * XNT, true, { carryWeeks: 0 });
+  for (const f of extras) {
+    assert.strictEqual(Object.prototype.hasOwnProperty.call(f.policy, "backlogCarryWeeks"), false);
+    for (const r of f.rows) {
+      assert.strictEqual(r.useBacklog, undefined);
+      assert.strictEqual(r.carry, undefined);
+      assert.strictEqual(r.counted, min(BigInt(r.use), BigInt(r.need)).toString(), "counted = min(use, need)");
+    }
+  }
+  // the skipped week's backlog counts against this week's need: one Void (200 XNT paid) gets at most 2 × 2 XNT = 2%
+  assert.strictEqual(rowOf(extras[2], H)!.counted, (2n * XNT).toString());
+  assert.strictEqual(payOf(extras[2], H), 4n * XNT, "2% of the 200 XNT price paid, never more in one weekly file");
+  for (let i = 0; i < extras.length; i++) assert.deepStrictEqual(verifyExtraFile(extras[i], bases[i], i ? extras[i - 1] : null), [], `extra ${i + 1} verifies under the default`);
+  // a file built with the carry on is refused by the default verifier (another policy), and the reverse
+  const on = t138(3n * XNT, 3n * XNT, true, { carryWeeks: 1 });
+  assert(verifyExtraFile(on.extras[2], on.bases[2], on.extras[1]).some((e) => /policy|rows/.test(e)), "a carry file is not a file of the first v3 rules version");
+  assert(verifyExtraFile(extras[2], bases[2], extras[1], 1).some((e) => /policy|rows/.test(e)));
+  // a row that records carry fields while the rule is off is refused on the recorded numbers too
+  const forged = clone(extras[2]);
+  const fr = forged.rows.find((z) => z.wallet === H)!;
+  fr.useBacklog = "0";
+  fr.carry = "0";
+  assert(verifyExtraFile(forged, bases[2], extras[1]).some((e) => /the backlog carry is off/.test(e)));
+  assert.strictEqual(carryWeeksOf(0), 0);
+  assert.strictEqual(carryWeeksOf(1), 1);
+  assert.throws(() => carryWeeksOf(2), /only 0 \(off\) and 1/);
+  assert.throws(() => policy(2), /only 0 \(off\) and 1/);
+});
+test("backlog carry: the same burns with and without a one-week chain skip give the holder the same extra over the two weeks", () => {
+  const H = W(61);
+  const cases: [bigint, bigint][] = [[XNT, XNT], [3n * XNT, XNT / 2n], [XNT / 2n, 3n * XNT], [3n * XNT, 3n * XNT], [2n * XNT, 2n * XNT]];
+  for (const [u2, u3] of cases) {
+    const a = t138(u2, u3, false).extras;
+    const b = t138(u2, u3, true).extras;
+    const total = (xs: ExtraFileV1[]) => payOf(xs[1], H) + payOf(xs[2], H);
+    const counted = (xs: ExtraFileV1[]) => BigInt(rowOf(xs[1], H)!.counted) + BigInt(rowOf(xs[2], H)!.counted);
+    assert.strictEqual(counted(b), counted(a), `counted, u2 ${u2}, u3 ${u3}`);
+    assert.strictEqual(total(b), total(a), `pay, u2 ${u2}, u3 ${u3}`);
+    // the skipped week's need is carried into the next file, and only the backlog burn uses it
+    const r = rowOf(b[2], H)!;
+    assert.deepStrictEqual([r.useBacklog, r.carry], [u2.toString(), (2n * XNT).toString()], "Void need 2 XNT, unused in the skipped week");
+    assert.strictEqual(rowOf(a[2], H)!.carry, (2n * XNT - min(u2, 2n * XNT)).toString(), "without the skip the carry is what week 2 left");
+    assert.strictEqual(b[1].policy.backlogCarryWeeks, 1);
+  }
+  // without the backlog carry the skip lost a week of need: 3 + 3 XNT of uncovered value counted 2 XNT instead of 4
+  const b = t138(3n * XNT, 3n * XNT, true).extras;
+  assert.strictEqual(rowOf(b[2], H)!.counted, (4n * XNT).toString());
+  assert.strictEqual(payOf(b[2], H), 8n * XNT, "2 × (2 XNT of its own week + 2 XNT carried)");
+});
+test("backlog carry: a backlog burn counts only against last week's unused need: none without a row then, never this week's need", () => {
+  const H = W(61);
+  // H's Void arrived in week 2 ("new" there: no row), so its week-2 backlog burn has nothing to count against
+  const x = t138(3n * XNT, 0n, true, { newInWeek2: true }).extras;
+  assert.strictEqual(rowOf(x[1], H), undefined);
+  assert.deepStrictEqual([rowOf(x[2], H)!.useBacklog, rowOf(x[2], H)!.carry, rowOf(x[2], H)!.counted], [(3n * XNT).toString(), "0", "0"]);
+  // a backlog burn alone never uses this week's need (it belongs to last week); the week's own burns still do
+  const y = t138(XNT, XNT, true).extras;
+  assert.strictEqual(rowOf(y[2], H)!.counted, (2n * XNT).toString(), "1 XNT carried + 1 XNT of its own week");
+  // a skip heartbeat has no rows: nothing is carried from it
+  assert.strictEqual(carryOf(undefined), 0n);
+  assert.strictEqual(carryOf({ need: "100", use: "30", useBacklog: "20" }), 90n, "only the week's own burns used the need");
+  assert.strictEqual(carryOf({ need: "100", use: "300" }), 0n, "a row written without the backlog carry reads useBacklog 0");
+});
+test("backlog carry: the bounds are unchanged: a carry that would pass the backing bound pays pro rata; verify refuses a forged carry", () => {
+  const H = W(61);
+  // H alone: backing 100 XNT, bound 4 XNT a week; own 2 XNT + carried 2 XNT of need would pay 8 XNT at rho 2
+  const { bases, extras: x } = t138(3n * XNT, 3n * XNT, true, { bigHolder: false });
+  assert.deepStrictEqual([x[2].totals.counted, x[2].totals.backingBound, x[2].totals.budget], [(4n * XNT).toString(), (4n * XNT).toString(), (4n * XNT).toString()]);
+  assert(BigInt(x[2].totals.budget) <= BigInt(x[2].totals.backingBound));
+  // verify recomputes the carry from the previous file and checks it on the recorded numbers too
+  const f = clone(x[2]);
+  const r = f.rows.find((z) => z.wallet === H)!;
+  r.carry = (5n * XNT).toString();
+  r.counted = (5n * XNT).toString();
+  const errs = verifyExtraFile(f, bases[2], x[1], 1);
+  assert(errs.some((e) => /carry/.test(e)), errs.join("; "));
+  assert.deepStrictEqual(verifyExtraFile(x[2], bases[2], x[1], 1), [], "the carry file verifies with the carry on");
 });
 
 // ── 7. property suite ──────────────────────────────────────────────────────────────────────────

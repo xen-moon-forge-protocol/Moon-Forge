@@ -14,16 +14,20 @@ name: Health check (daily)
 # oldest unsettled bet is older than KEEPER_STALL_SLOTS; the keeper bond does not cover reserved + jackpot_reserved;
 # the site shows rules that are not the detected ones; the newest epoch has no green `verify --full` 36 h after
 # publication; a pinned privileged key (oracle/src/health-pins.json) changed; a new keeper chain overlaps an earlier
-# one (K-5); the extra pot's vault, accounting or release bound is off. Rows that need the upgraded program print
-# "n/a until upgrade" while the live v2 binary is detected. A "stable-days streak" row counts the consecutive UTC
-# days whose health runs had no FAIL (read from the previous runs), restarting after a program deploy.
+# one (K-5); the extra pot's vault, accounting or release bound is off; the NFT metadata (deployments/
+# nft-arweave-final.json: every set before the S2 build, the set compiled into METADATA_BASE_URI after it) has a path
+# that no gateway served with its recorded hash for 3 runs over 48 h (a single gateway miss only warns). Rows
+# that need the upgraded program print "n/a until upgrade" while the live v2 binary is detected. A "stable-days
+# streak" row counts the consecutive UTC days whose health runs had no FAIL (read from the previous runs),
+# restarting after a program deploy.
 # The repository variables PAT_EXPIRES and DISPATCH_EXPIRES are reported as information only: nothing in the
 # scheduled automation uses a personal access token (the dispatch token is only for the external cron), so an
 # expired one never turns this red.
 #
 # Results: the job summary (a table), the console, and ops/health-latest.json kept as the run artifact
-# "health-snapshot" (30 days). The next run downloads the previous snapshot for its 24 h comparisons and the
-# K-5 chain history. The verify job keeps ops/verification.json as the artifact "verification" (90 days).
+# "health-snapshot" (30 days). The next run downloads the previous snapshot for its 24 h comparisons, the
+# K-5 chain history and the gateway-loss history. The verify job keeps ops/verification.json as the artifact
+# "verification" (90 days).
 # Nothing is committed here; the oracle workflow's heartbeat job owns the commits.
 #
 # Two keep-alive layers run at the end, whatever the check found: when the last commit is getting old
@@ -56,6 +60,9 @@ jobs:
     # `npm run verify -- <file> --full` on the newest epoch file (and its extra file), so the check below can say
     # "verification green". A file the previous run already verified green, with the same data hash, is carried over
     # from that run's "verification" artifact: the full run happens about once a week, after each publication.
+    # Per chain: a v3 epoch file is verified one chain at a time (--chain=<id>, each run limited to VERIFY_CHAIN_TIMEOUT_MS
+    # inside VERIFY_TIMEOUT_MS), so one chain's RPC failure leaves the others verified; a chain already green on the
+    # same file is carried over and only the others are re-run. v2 files are verified whole, as before.
     # It never fails the run (the check's "verification" row judges the result) and it needs no secret.
     runs-on: ubuntu-24.04
     timeout-minutes: 55
@@ -98,6 +105,9 @@ jobs:
           EPOCHS_DIR: ../frontend/public/epochs
           VERIFY_PREV: prev-verify/verification.json
           VERIFY_JSON: ../ops/verification.json
+          # the whole run's budget (under this step's 45 min) and one chain's share of it (per chain)
+          VERIFY_TIMEOUT_MS: '2400000'
+          VERIFY_CHAIN_TIMEOUT_MS: '1200000'
           X1_RPC_URLS: ${{ vars.X1_RPC_URLS }}
         run: npm run health-verify
       - name: Keep it
@@ -170,6 +180,9 @@ jobs:
           HEALTH_PREV: prev/health-latest.json
           HEALTH_JSON: ../ops/health-latest.json
           VERIFY_JSON: ../ops/verification.json
+          # the NFT metadata record and the program source this checkout holds (the defaults, written out)
+          NFT_RECORD: ../deployments/nft-arweave-final.json
+          METADATA_CONSTANTS: ../programs/moon-forge/src/constants.rs
           PORTAL_ETH: ${{ vars.PORTAL_ETH }}
           PORTAL_OP: ${{ vars.PORTAL_OP }}
           PORTAL_BSC: ${{ vars.PORTAL_BSC }}

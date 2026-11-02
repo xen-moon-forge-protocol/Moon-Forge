@@ -51,6 +51,7 @@ import {
 } from "./x1-v3";
 import { assembleWeekSoFarV3, engineSha256Of, feedGateV3, feedText, fetchFeedV1, knownReadingsOfFeedV1, prevFeedDecisionV1, PrevFeedStatusV1, samplesOfFeedV1 } from "./feed-v3";
 import { countersMissingV3, rulesInForceErrorV3 } from "./rules-v3";
+import { ChainResult, chainLine, chainsArg, chainsToVerify, checkChains, unreadableLine, verifyOutcomeV3 } from "./verify-chains";
 import { seatStatusCli, takeSeatCli, voidEpochCli } from "./seat-v3";
 import {
   anchorsForRoleV3, armKeeperCli, CLAIM_HOLD, HOUSE_TICK_MS, houseDueV3, KeeperChains, keeperModeV3, KeeperModeV3, keeperPassV3, newMemoV3, nextDeadlineV3, readOracleSeatLivenessV3, RoleV3,
@@ -1073,27 +1074,38 @@ async function verifyV3(p: string, f: EpochFileV3, full: boolean) {
   }
   if (!f.publish?.tx) console.log(`(epoch-${f.epoch}.json has no publish record: the publication is looked up on-chain)`);
   const { connection, program } = connectV3();
+  // a file-level read that returns nothing (an RPC node without the transaction, a failed account fetch,
+  // no block time) is "unreadable": the run is INCOMPLETE (exit 2, warn, retried), never FAILED. A publication that was
+  // read and disagrees stays an error.
+  const unreadable: string[] = [];
   const read = await readEpochPublishedV3(connection, program, f.epoch, f.publish?.tx);
-  if (!read) errors.push("epoch not found on-chain (no EpochPublished transaction)");
+  if (!read) unreadable.push("the epoch publication could not be read (no EpochPublished transaction returned)");
   else errors.push(...verifyPublishedV3(f, toPublishedEpochV3(read)));
   if (prev) {
     const pr = await readEpochPublishedV3(connection, program, prev.epoch, prev.publish?.tx);
-    if (!pr || pr.publishedAt === null) errors.push(`epoch ${prev.epoch}'s publication could not be read: the window start and F_ref are unconfirmed`);
+    if (!pr || pr.publishedAt === null) unreadable.push(`epoch ${prev.epoch}'s publication could not be read: the window start and F_ref are unconfirmed`);
     else errors.push(...verifyChainLinkV3(f, { publishedAt: pr.publishedAt, budget: BigInt(pr.budget), freePoolBefore: BigInt(pr.freePoolBefore) }));
   } else errors.push(...verifyChainLinkV3(f, null));
+  const chainResults: Record<string, ChainResult> = {};
   if (full) {
-    // A8: the window end is the block time of the snapshot slot (a null reading is reported, never a pass)
-    errors.push(...verifySnapshotTimeV3(f, await connection.getBlockTime(f.snapshot.slot)));
+    // A8: the window end is the block time of the snapshot slot (a null reading is reported as unreadable, never a pass)
+    const bt = await connection.getBlockTime(f.snapshot.slot);
+    if (bt === null || bt === undefined) unreadable.push(`no block time for snapshot slot ${f.snapshot.slot}: the window end ${f.window.endTs} is unconfirmed`);
+    else errors.push(...verifySnapshotTimeV3(f, bt));
     // the burns re-read from the configured portals, from one RPC with the mission counters (A11)
     // the history next to the file under verification (P7), not the oracle's EPOCHS_DIR
     const last = lastMissionIds(readAllEpochsAny(dir).filter((x) => x.epoch < f.epoch));
     const order = (a: { blockNumber: number; logIndex: number }, b: { blockNumber: number; logIndex: number }) => a.blockNumber - b.blockNumber || a.logIndex - b.logIndex;
-    for (const c of f.chains) {
-      if (c.skipped || c.toBlock <= c.fromBlockExclusive) continue;
+    // per chain: each chain on its own (an RPC failure is that chain's "error", the others are still checked); --chain=<id>
+    // limits the re-read to those chains (health-verify.ts runs one process per chain)
+    const only = chainsArg(process.argv);
+    const reread = chainsToVerify(f);
+    for (const id of only ?? []) if (!reread.includes(id)) throw new Error(`--chain=${id}: epoch ${f.epoch} has no burns range to re-read on chain ${id} (it re-reads ${reread.join(", ") || "none"})`);
+    const checkChain = async (c: EpochFileV3["chains"][number]): Promise<void> => {
       const chain = CHAINS.find((x) => x.chainId === c.chainId);
       if (!chain) {
         errors.push(`${c.name}: chain ${c.chainId} is not configured`);
-        continue;
+        return;
       }
       const again = await readChainV3({ ...chain, portal: c.portal }, c.fromBlockExclusive, c.toBlock);
       const mine = f.burns.filter((b) => b.chainId === c.chainId).map(burnEvent).sort(order);
@@ -1110,13 +1122,23 @@ async function verifyV3(p: string, f: EpochFileV3, full: boolean) {
       else if ((c.missionsAt !== null && second.totalMissions !== c.missionsAt) || (c.burnedAt !== null && second.totalBurned !== c.burnedAt)) {
         errors.push(`${c.name}: the second provider ${second.rpc} reads ${second.totalMissions} missions / ${second.totalBurned} wei at block ${c.toBlock}, the file records ${c.missionsAt} / ${c.burnedAt}`);
       }
-    }
+    };
+    Object.assign(chainResults, await checkChains(f.chains, reread, only, errors, checkChain, (s) => console.error(s)));
+    console.log(chainLine(chainResults));
   }
-  if (errors.length) {
-    console.error("❌ VERIFICATION FAILED\n - " + errors.join("\n - "));
+  const outcome = verifyOutcomeV3(errors, unreadable, chainResults);
+  // health-verify.ts reads this line; a run with a file-level miss never makes a chain green
+  if (unreadable.length) console.log(unreadableLine(unreadable));
+  if (outcome.exit === 1) {
+    console.error("❌ VERIFICATION FAILED\n - " + (errors.length ? errors : [outcome.detail]).join("\n - "));
     process.exit(1);
   }
-  console.log(`✅ epoch ${f.epoch} (v3) verified: ${f.leaves.length} leaves, ${f.burns.length} burns, root ${f.root}${full ? " (full: logs, counters, snapshot time)" : ""}`);
+  if (outcome.exit === 2) {
+    console.error(`⚠️ VERIFICATION INCOMPLETE (epoch ${f.epoch}): no disagreement found, but ${outcome.detail}. The next run retries.`);
+    process.exit(2);
+  }
+  const scope = full ? ` (full: logs, counters, snapshot time; ${Object.keys(chainResults).length ? `chain ${Object.keys(chainResults).join(", ")}` : "no chain to re-read"})` : "";
+  console.log(`✅ epoch ${f.epoch} (v3) verified: ${f.leaves.length} leaves, ${f.burns.length} burns, root ${f.root}${scope}`);
 }
 
 async function verifyExtraV3(p: string, f: ExtraFileV1) {

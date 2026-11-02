@@ -13,7 +13,7 @@ import {
   K5History, k5Verdict, KEEPER_DEAD_DELAY_S, KEEPER_STALL_SLOTS, keeperBondVerdict, keeperSeatVerdict, keeperSlaVerdict, LIVE_PROGRAM_TAG,
   naUntilUpgrade, oracleSeatVerdict, parseIdlAuthority, parseRulesMarker, pinVerdict, reconcileVerdict, SITE_GRACE_S, siteRulesVerdict,
   streakVerdict, utcDay, VerificationFile, verificationVerdict, x1RpcVerdict, keeperRevealVerdict, REVEAL_STALL_RED_SLOTS, REVEAL_STALL_WARN_SLOTS,
-  epochCostsOf,
+  epochCostsOf, gatewayHistoryNext, gatewayVerdict, GATEWAY_LOSS_HOURS, GATEWAY_LOSS_RUNS, lostPaths,
 } from "../src/health-rules";
 import { keccak } from "../src/merkle";
 
@@ -527,7 +527,311 @@ t("health-verify: ok / failed / error from the verifier's exit and output; the n
   }
 });
 
-t("r7 audit F13: no Telegram channel, ever: no Telegram code, secret or channel wording in the announcer or the workflows", () => {
+t("per chain: verify --full per chain: --chain parsing, the chains a file re-reads, the VERIFY-CHAINS line, the combined status and exit code", () => {
+  const { chainsArg, chainsToVerify, chainLine, parseChainLine, combineChains, chainsExitCode } = require("../src/verify-chains");
+  assert.equal(chainsArg(["node", "index.ts", "verify", "f.json", "--full"]), null, "absent: every chain");
+  assert.deepEqual(chainsArg(["verify", "f.json", "--full", "--chain=56"]), [56]);
+  assert.deepEqual(chainsArg(["--chain=10,56,10"]), [10, 56], "duplicates once");
+  assert.throws(() => chainsArg(["--chain=bsc"]), /expected chain ids/);
+  assert.throws(() => chainsArg(["--chain"]), /expected chain ids/);
+  assert.throws(() => chainsArg(["--chain=10", "--chain=56"]), /more than once/);
+  const f = { chains: [{ chainId: 10, toBlock: 5, fromBlockExclusive: 1 }, { chainId: 56, skipped: true, toBlock: 9, fromBlockExclusive: 1 }, { chainId: 137, toBlock: 3, fromBlockExclusive: 3 }, { chainId: 8453, toBlock: 8, fromBlockExclusive: 2 }] };
+  assert.deepEqual(chainsToVerify(f), [10, 8453], "a skipped chain and an empty range are not re-read");
+  const res = { 137: { status: "error", detail: "Polygon: 503" }, 10: { status: "ok", detail: "Optimism: logs and counters agree" }, 56: { status: "failed", detail: "BNB Chain: burns differ from chain logs" } };
+  const line = chainLine(res);
+  assert.ok(line.startsWith("VERIFY-CHAINS {\"10\":"), "keys in chain order");
+  assert.deepEqual(parseChainLine(`loading\n${chainLine({ 10: res[10] })}\n${line}\n✅ done`), res, "the last line wins");
+  assert.equal(parseChainLine("no line here"), null);
+  assert.equal(parseChainLine("VERIFY-CHAINS {\"x\":{\"status\":\"ok\"}}"), null, "a malformed line is ignored");
+  assert.equal(parseChainLine("VERIFY-CHAINS {\"10\":{\"status\":\"maybe\"}}"), null);
+  assert.equal(combineChains(res).status, "failed", "a disagreement on one chain is red whatever the others say");
+  assert.match(combineChains(res).detail, /failed on chain 56 .*could not finish on chain 137 .*verified on chain 10/);
+  const okErr = { 10: res[10], 137: res[137] };
+  assert.equal(combineChains(okErr).status, "error", "one chain's RPC failure: that chain only, the others stay verified");
+  assert.equal(combineChains({ 10: res[10] }).status, "ok");
+  assert.equal(combineChains({}).detail, "no chain to re-read");
+  assert.deepEqual([chainsExitCode(0, { 10: res[10] }), chainsExitCode(0, okErr), chainsExitCode(0, res), chainsExitCode(1, { 10: res[10] }), chainsExitCode(0, {})], [0, 2, 1, 1, 0]);
+});
+
+const pendingR10: Promise<void>[] = [];
+pendingR10.push((async () => {
+  const { checkChains, chainsExitCode } = require("../src/verify-chains");
+  const chains = [{ chainId: 10, name: "Optimism" }, { chainId: 56, name: "BNB Chain" }, { chainId: 137, name: "Polygon" }, { chainId: 8453, name: "Base" }];
+  const seen: number[] = [];
+  const errors: string[] = ["file-level: kept"];
+  const check = async (c: { chainId: number; name: string }) => {
+    seen.push(c.chainId);
+    if (c.chainId === 56) throw new Error("getLogs: 503 Service Unavailable");
+    if (c.chainId === 137) errors.push("Polygon: burns differ from chain logs");
+    if (c.chainId === 8453) {
+      errors.push("Base: missionsAt 7, but the RPC reads 8");
+      throw new Error("timeout");
+    }
+  };
+  const logs: string[] = [];
+  const r = await checkChains(chains, [10, 56, 137, 8453], null, errors, check, (s: string) => logs.push(s));
+  assert.deepEqual(seen, [10, 56, 137, 8453], "every chain is checked after BNB Chain's RPC failed");
+  assert.deepEqual(Object.fromEntries(Object.entries(r).map(([k, v]: [string, any]) => [k, v.status])), { 10: "ok", 56: "error", 137: "failed", 8453: "failed" });
+  assert.match((r as any)[8453].detail, /missionsAt 7.*then: timeout/, "a disagreement found before the failure stays a disagreement");
+  assert.deepEqual(errors, ["file-level: kept", "Polygon: burns differ from chain logs", "Base: missionsAt 7, but the RPC reads 8"], "an RPC failure adds no error");
+  assert.equal(logs.length, 2);
+  const only = await checkChains(chains, [10, 56, 137, 8453], [56, 10], [], async () => undefined);
+  assert.deepEqual(Object.keys(only), ["10", "56"], "--chain limits the re-read");
+  const skip = await checkChains(chains, [10], null, [], async () => undefined);
+  assert.deepEqual(Object.keys(skip), ["10"], "a chain the file does not re-read is never checked");
+  assert.equal(chainsExitCode(0, { 10: { status: "ok", detail: "" }, 56: { status: "error", detail: "" } }), 2);
+  n++;
+  console.log("  ok  per chain: checkChains: one chain's RPC failure is that chain's error, every other chain is still checked");
+})());
+
+t("per chain: health-verify keeps the result per chain: a run's line, a file-level failure, an INCOMPLETE run; the verification row says which chain", () => {
+  const { classify, chainOutcome, chainsEntry } = require("../src/health-verify");
+  const { chainLine } = require("../src/verify-chains");
+  assert.equal(classify(2, "⚠️ VERIFICATION INCOMPLETE (epoch 9): no disagreement found, but could not finish on chain 137 (Polygon: 503). The next run retries.", false).status, "error", "exit 2 is not a mismatch");
+  assert.match(classify(2, "⚠️ VERIFICATION INCOMPLETE (epoch 9): x", false).detail, /INCOMPLETE/);
+  const okLine = chainLine({ 56: { status: "ok", detail: "BNB Chain: logs and counters agree" } });
+  assert.deepEqual(chainOutcome(56, { status: "ok", detail: "verified" }, okLine), { chain: { status: "ok", detail: "BNB Chain: logs and counters agree" }, fileFailure: null });
+  const errLine = chainLine({ 137: { status: "error", detail: "Polygon: 503" } });
+  assert.deepEqual(chainOutcome(137, { status: "error", detail: "INCOMPLETE" }, errLine).chain.status, "error");
+  const badLine = chainLine({ 56: { status: "failed", detail: "BNB Chain: burns differ" } });
+  assert.deepEqual(chainOutcome(56, { status: "failed", detail: "BNB Chain: burns differ" }, badLine), { chain: { status: "failed", detail: "BNB Chain: burns differ" }, fileFailure: null });
+  const fileBad = chainOutcome(56, { status: "failed", detail: "on-chain root differs" }, okLine);
+  assert.deepEqual([fileBad.chain.status, fileBad.fileFailure], ["ok", "on-chain root differs"], "the chain agreed, the file did not");
+  assert.equal(chainOutcome(10, { status: "error", detail: "Error: 503" }, "").chain.status, "error", "a crash before the line: that chain could not finish");
+  const at = "2026-11-16T12:00:00.000Z";
+  const base = { file: "epoch-9.json", kind: "epoch", epoch: 9, dataHash: "h9", at };
+  const e1 = chainsEntry(base, { 10: { status: "ok", detail: "a", at }, 137: { status: "error", detail: "Polygon: 503", at } }, null);
+  assert.equal(e1.status, "error");
+  // defence in depth: a file-level failure is red only on the second run in a row on the same data hash
+  const once = chainsEntry(base, { 10: { status: "ok", detail: "a", at } }, "on-chain root differs");
+  assert.deepEqual([once.status, once.fileFailure], ["error", "on-chain root differs"], "a first file-level failure warns and is remembered");
+  const twice = chainsEntry(base, { 10: { status: "ok", detail: "a", at } }, "on-chain root differs", once.fileFailure);
+  assert.deepEqual([twice.status, twice.fileFailure], ["failed", "on-chain root differs"], "the same file failing again is red");
+  assert.match(twice.detail, /two runs in a row/);
+  assert.equal(chainsEntry(base, { 10: { status: "failed", detail: "burns differ", at } }, null).status, "failed", "a chain that disagrees is red at once");
+  assert.equal(chainsEntry(base, { 10: { status: "ok", detail: "a", at } }, null, "on-chain root differs").status, "ok", "a file that passes after a first failure is green");
+  assert.equal(verificationVerdict({ at, results: [once] }, { epoch: 9, dataHash: "h9", publishedAt: Date.UTC(2026, 10, 15) / 1000 }, Date.UTC(2026, 10, 17) / 1000).state, "warn", "one file-level failure never turns the row red");
+  assert.equal(chainsEntry(base, { 10: { status: "ok", detail: "a", at }, 56: { status: "ok", detail: "b", at } }, null).status, "ok");
+  // the row: one chain could not finish -> warn, naming it and the green ones
+  const newest = { epoch: 9, dataHash: "h9", publishedAt: Date.UTC(2026, 10, 15) / 1000 };
+  const now = newest.publishedAt + 2 * 86_400;
+  const row = verificationVerdict({ at, results: [e1] }, newest, now);
+  assert.equal(row.state, "warn", "never red for an RPC failure");
+  assert.match(row.detail, /chain 137 not finished; chain 10 verified green/);
+  const ok = verificationVerdict({ at, results: [chainsEntry(base, { 10: { status: "ok", detail: "a", at }, 56: { status: "ok", detail: "b", at } }, null)] }, newest, now);
+  assert.equal(ok.state, "ok");
+  assert.match(ok.detail, /--full per chain \(10, 56\)/);
+  assert.equal(verificationVerdict({ at, results: [chainsEntry(base, { 56: { status: "failed", detail: "burns differ", at } }, null)] }, newest, now).state, "fail");
+});
+
+t("verification: a file-level read that returns nothing is INCOMPLETE (warn); a publication that was read and disagrees is FAILED (red)", () => {
+  const { verifyOutcomeV3 } = require("../src/verify-chains");
+  const { verifyPublishedV3 } = require("../src/rewards");
+  const { classify } = require("../src/health-verify");
+  const line = (o: { exit: number; detail: string }) => (o.exit === 1 ? `❌ VERIFICATION FAILED
+ - ${o.detail}` : o.exit === 2 ? `⚠️ VERIFICATION INCOMPLETE (epoch 9): no disagreement found, but ${o.detail}. The next run retries.` : "✅ epoch 9 (v3) verified");
+  const ok = { 56: { status: "ok", detail: "BNB Chain: logs and counters agree" } };
+  // a null publication read (an RPC node without the transaction), a null previous publication, a null block time
+  for (const miss of ["the epoch publication could not be read (no EpochPublished transaction returned)", "epoch 8's publication could not be read: the window start and F_ref are unconfirmed", "no block time for snapshot slot 123: the window end 0 is unconfirmed"]) {
+    const o = verifyOutcomeV3([], [miss], ok);
+    assert.equal(o.exit, 2, miss);
+    assert.equal(classify(o.exit, line(o), false).status, "error", "a passing miss is never red");
+  }
+  // a decoded publication whose root differs from the file's: a real disagreement
+  const f = { epoch: 9, root: "aa".repeat(32), dataHash: "bb".repeat(32), leaves: [{}], totalScore: "5", freePool: { lamports: "100" }, window: { endTs: 1_000 } };
+  const ev = { epoch: 9, root: "cc".repeat(32), dataHash: "bb".repeat(32), leaves: 1, totalScore: 5n, budget: 5n, dropReserve: 0n, freePoolBefore: 100n };
+  const errs = verifyPublishedV3(f, ev);
+  assert.equal(errs.length, 1);
+  assert.match(errs[0], /on-chain root/);
+  const bad = verifyOutcomeV3(errs, ["no block time for snapshot slot 123"], ok);
+  assert.equal(bad.exit, 1, "a disagreement wins over a read miss");
+  assert.equal(classify(bad.exit, line(bad), false).status, "failed");
+  assert.deepEqual(verifyOutcomeV3([], [], ok), { exit: 0, detail: "" });
+  assert.equal(verifyOutcomeV3([], [], { 56: { status: "error", detail: "BNB Chain: 503" } }).exit, 2, "a chain RPC failure stays INCOMPLETE");
+  assert.equal(verifyOutcomeV3([], [], { 56: { status: "failed", detail: "burns differ" } }).exit, 1);
+  // a timeout names the limit the run actually had
+  assert.equal(classify(null, "", true, 20 * 60_000).detail, "timed out after 20 min");
+  assert.equal(classify(null, "", true).detail, "timed out after 40 min", "the run's default budget");
+});
+
+t("verification fails closed: a per-chain run whose chain agreed but which missed a file-level read is never green, never carried over", () => {
+  const { classify, chainOutcome, chainsEntry, runUnreadable, unreadableTrack, withUnreadable } = require("../src/health-verify");
+  const { chainLine, unreadableLine, parseUnreadableLine, verifyOutcomeV3 } = require("../src/verify-chains");
+  const miss = "the epoch publication could not be read (no EpochPublished transaction returned)";
+  const ok = { 56: { status: "ok", detail: "BNB Chain: logs and counters agree" } };
+  const o = verifyOutcomeV3([], [miss], ok);
+  // the output of `verify epoch-9.json --full --chain=56` when the publication read returns nothing (index.ts verifyV3)
+  const output = [chainLine(ok), unreadableLine([miss]), `⚠️ VERIFICATION INCOMPLETE (epoch 9): no disagreement found, but ${o.detail}. The next run retries.`].join("\n");
+  const run = classify(o.exit, output, false);
+  assert.equal(run.status, "error");
+  assert.deepEqual(parseUnreadableLine(output), [miss]);
+  const c = chainOutcome(56, run, output);
+  assert.equal(c.chain.status, "error", "the chain line says ok, but the run was incomplete: not green");
+  assert.match(c.chain.detail, /the chain agreed, but the run was incomplete/);
+  assert.equal(c.fileFailure, null, "a read miss is not a disagreement");
+  assert.equal(chainOutcome(56, { status: "error", detail: "timed out after 20 min" }, chainLine(ok)).chain.status, "error", "a timeout after the line: not green either");
+  const at = "2026-11-16T12:00:00.000Z";
+  const base = { file: "epoch-9.json", kind: "epoch", epoch: 9, dataHash: "h9", at };
+  const e = chainsEntry(base, { 56: { ...c.chain, at } }, c.fileFailure);
+  assert.equal(e.status, "error", "the entry is not green");
+  assert.equal(e.chains["56"].status, "error", "so the chain is not carried over by the next run (only ok chains are)");
+  const newest = { epoch: 9, dataHash: "h9", publishedAt: Date.UTC(2026, 10, 15) / 1000 };
+  const row = verificationVerdict({ at, results: [withUnreadable(e, unreadableTrack(undefined, runUnreadable([{ ...run, output }]), true, at))] }, newest, newest.publishedAt + 2 * 86_400);
+  assert.equal(row.state, "warn", "a first miss warns");
+  // a run that reads the file and agrees is green, as before
+  assert.equal(chainOutcome(56, { status: "ok", detail: "verified" }, chainLine(ok)).chain.status, "ok");
+});
+
+t("a publication that can never be read turns red after 3 runs in a row and 72 h; one run that reads it ends the streak", () => {
+  const { runUnreadable, unreadableTrack, withUnreadable } = require("../src/health-verify");
+  const { chainLine, unreadableLine } = require("../src/verify-chains");
+  const { UNREADABLE_RED_S, UNREADABLE_RED_RUNS, unreadableSustained } = require("../src/health-rules");
+  assert.equal(UNREADABLE_RED_RUNS, 3);
+  assert.equal(UNREADABLE_RED_S, 72 * 3600);
+  const miss = "the epoch publication could not be read (no EpochPublished transaction returned)";
+  const missed = { status: "error", output: `${chainLine({ 56: { status: "ok", detail: "a" } })}\n${unreadableLine([miss])}\nVERIFICATION INCOMPLETE` };
+  const read = { status: "error", output: chainLine({ 137: { status: "error", detail: "Polygon: 503" } }) };
+  assert.equal(runUnreadable([missed]), miss);
+  assert.equal(runUnreadable([missed, missed]), miss, "the same miss is named once");
+  assert.equal(runUnreadable([missed, read]), null, "another process of the same run read the publication: not unreadable");
+  assert.equal(runUnreadable([{ status: "ok", output: "✅ epoch 9 (v3) verified" }]), null);
+  assert.equal(runUnreadable([]), null);
+  assert.equal(runUnreadable([{ status: "error", output: "VERIFY-UNREADABLE {bad" }]) !== null, true, "a malformed line still counts as a miss (fail closed)");
+  const base = { file: "epoch-9.json", kind: "epoch" as const, epoch: 9, dataHash: "h9", status: "error" as const, detail: "VERIFICATION INCOMPLETE" };
+  const day = (n: number) => new Date(Date.UTC(2026, 10, 16 + n, 12)).toISOString();
+  const newest = { epoch: 9, dataHash: "h9", publishedAt: Date.UTC(2026, 10, 16, 6) / 1000 };
+  const nowAt = (iso: string) => Date.parse(iso) / 1000;
+  // one entry per daily run, each built from the previous one (health-verify main)
+  let prev: VerificationFile["results"][0] | undefined;
+  const states: string[] = [];
+  for (let n = 0; n <= 3; n++) {
+    const at = day(n);
+    prev = withUnreadable({ ...base, at }, unreadableTrack(prev, runUnreadable([missed]), true, at));
+    states.push(verificationVerdict({ at, results: [prev!] }, newest, nowAt(at)).state);
+  }
+  assert.deepEqual(prev!.unreadableRuns, 4);
+  assert.equal(prev!.unreadableSince, day(0), "the streak counts from the first miss");
+  assert.deepEqual(states, ["warn", "warn", "warn", "fail"], "warn on runs 1-3 (3 runs but only 48 h at run 3), red at run 4 (72 h)");
+  const red = verificationVerdict({ at: day(3), results: [prev!] }, newest, nowAt(day(3)));
+  assert.match(red.detail, /could not read the publication data of epoch-9\.json in 4 runs in a row since/);
+  assert.match(red.detail, /red after 3 runs and 72 h/);
+  // three runs over 72 h but with only 2 recorded misses (a day without a run): still warn until the 3rd miss
+  assert.equal(unreadableSustained({ ...base, at: day(3), unreadableSince: day(0), unreadableRuns: 2 }, nowAt(day(3))), false);
+  // a day with no process started (the run's budget was spent) carries the streak unchanged
+  const carried = unreadableTrack(prev, null, false, day(4));
+  assert.deepEqual([carried.unreadableSince, carried.unreadableRuns], [day(0), 4]);
+  // one run that reads the publication ends the streak: back to warn (a chain RPC failure), never red
+  const after = withUnreadable({ ...base, at: day(4), detail: "could not finish on chain 137" }, unreadableTrack(prev, runUnreadable([read]), true, day(4)));
+  assert.equal(after.unreadableSince, undefined);
+  assert.equal(verificationVerdict({ at: day(4), results: [after] }, newest, nowAt(day(4))).state, "warn");
+  // a green or failed entry never keeps a streak
+  assert.equal(withUnreadable({ ...base, status: "ok", at: day(4) }, { unreadable: miss, unreadableSince: day(0), unreadableRuns: 5 }).unreadableSince, undefined);
+  // the whole-file path (one process) counts the same way
+  let w: VerificationFile["results"][0] | undefined;
+  for (let n = 0; n <= 3; n++) w = withUnreadable({ ...base, at: day(n) }, unreadableTrack(w, runUnreadable([missed]), true, day(n)));
+  assert.equal(verificationVerdict({ at: day(3), results: [w!] }, newest, nowAt(day(3))).state, "fail");
+});
+
+t("metadata gateway: the gateway row's sets: every set of the record before the build, the compiled set after it; 9 paths per set, two gateways", () => {
+  const G = require("../src/health-gateway");
+  const fs = require("fs"), path = require("path");
+  const root = path.join(__dirname, "..", "..");
+  const rec = G.recordOf(JSON.parse(fs.readFileSync(path.join(root, "deployments", "nft-arweave-final.json"), "utf8")));
+  const src = fs.readFileSync(path.join(root, "programs", "moon-forge", "src", "constants.rs"), "utf8");
+  // the source holds the placeholder until the S2 build (every set is checked), then one set of the record
+  const compiledNow = G.compiledMetadataUri(src);
+  if (compiledNow === null) assert.ok(src.includes(G.PLACEHOLDER));
+  else assert.equal(G.gatewayTargets(rec, compiledNow).problem, null, "the compiled URI is a set of deployments/nft-arweave-final.json");
+  const before = G.gatewayTargets(rec, null);
+  assert.equal(before.phase, "candidates");
+  assert.equal(before.targets.length, rec.sets.length);
+  for (const t of before.targets) {
+    assert.equal(t.items.length, 9, "collection.json + one metadata file and one image per tier");
+    assert.deepEqual(t.items.filter((i: any) => i.path.endsWith(".json")).map((i: any) => i.path), ["collection.json", "lunar_dust/0.json", "cosmic_shard/0.json", "solar_core/0.json", "void_anomaly/0.json"]);
+    assert.equal(t.items.filter((i: any) => i.manifest === rec.images.manifest).length, 4, "the images through the images manifest");
+    assert.equal(t.gateways.length, 2, "the set's gateway and one alternative");
+    assert.notEqual(t.gateways[0], t.gateways[1]);
+  }
+  // after the build: the compiled set only, through the compiled host
+  const s1 = rec.sets[1];
+  const built = src.replace(/pub const METADATA_BASE_URI: &str = "[^"]*";/, `pub const METADATA_BASE_URI: &str = "${s1.metadataBaseUri}";`);
+  assert.equal(G.compiledMetadataUri(built), s1.metadataBaseUri);
+  const after = G.gatewayTargets(rec, s1.metadataBaseUri);
+  assert.deepEqual([after.phase, after.targets.length, after.targets[0].manifest, after.targets[0].gateways[0], after.problem], ["compiled", 1, s1.manifest, new URL(s1.metadataBaseUri).host, null]);
+  // the same manifest through arweave.net is the same set; a URI of no set is a configuration fault
+  assert.equal(G.gatewayTargets(rec, `https://arweave.net/${s1.manifest}/`).targets[0].gateways[0], "arweave.net");
+  assert.match(G.gatewayTargets(rec, "https://arweave.net/" + "A".repeat(43) + "/").problem, /not a metadata set/);
+  assert.throws(() => G.recordOf({ kind: "moon-forge-nft-arweave", version: 1 }), /version 2/);
+});
+
+const pendingT331: Promise<void>[] = [];
+pendingT331.push((async () => {
+  const G = require("../src/health-gateway");
+  const { createHash } = require("crypto");
+  const sha = (s: string) => createHash("sha256").update(Buffer.from(s)).digest("hex");
+  const t = { manifest: "M".repeat(43), label: "set a", gateways: ["gw-a.example", "gw-b.example"], items: [{ manifest: "M".repeat(43), path: "collection.json", sha256: sha("c") }, { manifest: "I".repeat(43), path: "lunar_dust/x.webp", sha256: sha("img") }] };
+  const bodies: Record<string, string> = { "collection.json": "c", "lunar_dust/x.webp": "img" };
+  const urls: string[] = [];
+  const fetcher = (down: string[], wrong: string[] = []) => async (url: string) => {
+    urls.push(url);
+    const [, , host, , ...rest] = url.split("/");
+    const p = rest.join("/");
+    if (down.includes(host) || down.includes(p)) throw new Error("HTTP 404");
+    return new Uint8Array(Buffer.from(wrong.includes(host) ? "tampered" : bodies[p]));
+  };
+  const ok = await G.probeTarget(t, fetcher([]));
+  assert.equal(ok.probes.length, 4);
+  assert.ok(ok.probes.every((p: any) => p.ok));
+  assert.ok(urls.includes(`https://gw-a.example/${"I".repeat(43)}/lunar_dust/x.webp`), "the image through the images manifest");
+  const miss = await G.probeTarget(t, fetcher(["gw-b.example"]));
+  assert.deepEqual(miss.probes.filter((p: any) => !p.ok).map((p: any) => [p.gateway, p.why]), [["gw-b.example", "HTTP 404"], ["gw-b.example", "HTTP 404"]]);
+  const bad = await G.probeTarget(t, fetcher([], ["gw-a.example"]));
+  assert.match(bad.probes.find((p: any) => !p.ok).why, /^sha256 /, "another body is a miss, never a pass");
+  const lost = await G.probeTarget(t, fetcher(["collection.json"]));
+  assert.deepEqual(lostPaths(lost), ["collection.json"]);
+  n++;
+  console.log("  ok  metadata gateway: probes: every path through every gateway, the body's sha256 against the record, a 404 and another body are misses");
+})());
+
+t("metadata gateway: the gateway row warns on a miss and on a short loss, turns red only on a loss sustained over 3 runs and 48 h", () => {
+  const NOW = Date.UTC(2026, 10, 12) / 1000;
+  const run = (manifest: string, label: string, probes: [string, string, boolean][]) => ({ manifest, label, gateways: ["a", "b"], probes: probes.map(([path, gateway, ok]) => ({ path, gateway, ok, ...(ok ? {} : { why: "HTTP 404" }) })) });
+  const allOk = run("m1", "set a", [["c.json", "a", true], ["c.json", "b", true], ["x.webp", "a", true], ["x.webp", "b", true]]);
+  const oneMiss = run("m1", "set a", [["c.json", "a", true], ["c.json", "b", false], ["x.webp", "a", true], ["x.webp", "b", true]]);
+  const lost = run("m1", "set a", [["c.json", "a", false], ["c.json", "b", false], ["x.webp", "a", true], ["x.webp", "b", true]]);
+  const otherOk = { ...allOk, manifest: "m2", label: "set b" };
+  assert.equal(gatewayVerdict("compiled", [allOk], gatewayHistoryNext({}, [allOk], NOW), NOW).state, "ok");
+  const r1 = gatewayVerdict("compiled", [oneMiss], gatewayHistoryNext({}, [oneMiss], NOW), NOW);
+  assert.equal(r1.state, "warn", "a single gateway miss warns");
+  assert.match(r1.detail, /2\/2 paths served .*misses: b 1 \(c\.json: HTTP 404\)/);
+  // a loss on every gateway: warn while short, red once it has lasted 3 runs over 48 h, back to ok when served again
+  let h = gatewayHistoryNext({}, [lost], NOW);
+  assert.equal(gatewayVerdict("compiled", [lost], h, NOW).state, "warn");
+  h = gatewayHistoryNext(h, [lost], NOW + 86_400);
+  assert.equal(gatewayVerdict("compiled", [lost], h, NOW + 86_400).state, "warn", "2 runs");
+  h = gatewayHistoryNext(h, [lost], NOW + 40 * 3_600);
+  assert.equal(gatewayVerdict("compiled", [lost], h, NOW + 40 * 3_600).state, "warn", "3 runs, but only 40 h");
+  h = gatewayHistoryNext(h, [lost], NOW + 48 * 3_600);
+  const red = gatewayVerdict("compiled", [lost], h, NOW + 48 * 3_600);
+  assert.equal(red.state, "fail");
+  assert.match(red.detail, /LOST on every gateway: c\.json \(4 run\(s\) in a row\).*RED/);
+  assert.deepEqual(gatewayHistoryNext(h, [oneMiss], NOW + 72 * 3_600).m1, { lostRuns: 0, lostSince: null }, "served again: the count restarts");
+  // before the build: red only when every candidate set has a sustained loss
+  let hc: any = {};
+  for (const dt of [0, 24, 48]) hc = gatewayHistoryNext(hc, [lost, otherOk], NOW + dt * 3_600);
+  assert.equal(gatewayVerdict("candidates", [lost, otherOk], hc, NOW + 48 * 3_600).state, "warn", "one set still serves: the build can pick it");
+  const lostB = { ...lost, manifest: "m2", label: "set b" };
+  let hb: any = {};
+  for (const dt of [0, 24, 48]) hb = gatewayHistoryNext(hb, [lost, lostB], NOW + dt * 3_600);
+  assert.equal(gatewayVerdict("candidates", [lost, lostB], hb, NOW + 48 * 3_600).state, "fail");
+  // configuration faults
+  assert.equal(gatewayVerdict("compiled", [], {}, NOW, "METADATA_BASE_URI x is not a metadata set").state, "fail");
+  assert.equal(gatewayVerdict("candidates", [], {}, NOW, "deployments/nft-arweave-final.json unreadable").state, "warn");
+  assert.equal(GATEWAY_LOSS_RUNS, 3);
+  assert.equal(GATEWAY_LOSS_HOURS, 48);
+});
+
+t("no Telegram channel, ever: no Telegram code, secret or channel wording in the announcer or the workflows", () => {
   const fs = require("fs"), path = require("path");
   const root = path.join(__dirname, "..", "..");
   for (const rel of ["oracle/src/announce.ts", ".github/workflows/announce.yml", ".github/workflows/oracle.yml"]) {
@@ -536,4 +840,7 @@ t("r7 audit F13: no Telegram channel, ever: no Telegram code, secret or channel 
   }
 });
 
-console.log(`health rules: ${n} tests passed`);
+Promise.all([...pendingR10, ...pendingT331]).then(() => console.log(`health rules: ${n} tests passed`), (e) => {
+  console.error(e);
+  process.exit(1);
+});

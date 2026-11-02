@@ -36,6 +36,9 @@
  *      hold with the v3 tip rule (no tip when the oracle submits; 0.2 XNT minimum), Forge Drop delivery of v2 epochs,
  *      claim_extra / close_extra_epoch of the extra files, close_listing of stale or expired listings, the
  *      close_receipt sweep (every SWEEP_EVERY_MS), and the oracle seat's liveness (a warning before the seat can die).
+ *      D-47: paid by the oracle key, the automatic claims stop before its wallet falls under the publish reserve, and
+ *      the fee-only upkeep (expire_epoch, close_extra_epoch) waits too, unless the close refunds its rent to that wallet
+ *      (the upkeep guard, x1-v3.ts feeFundsOkV3). Any other key is never held back.
  *
  * ── Hash-chain secrets (GitHub Actions has no private persistent storage) ───────────────────────────────────────────
  * Every chain is derived, never stored:
@@ -81,7 +84,7 @@ import { ExtraFileV1 } from "./extra";
 import { gatedSealActionV3, sealAllowedV3 } from "./flow-v3";
 import { keccak } from "./merkle";
 import { deliverDrops, MPL_CORE, PDA, programId, randomU64, XDEX_XNT_OBSERVATION } from "./x1";
-import { claimExtraIxV3, ClaimGuardV3, claimGuardV3, closeExtraEpochIxV3, isV3Program, PDA_V3, readUpgradeProbeV3, sweepReceiptsV3, UpgradeProbeV3, upgradeVerdictV3, UpgradeVerdictV3 } from "./x1-v3";
+import { claimExtraIxV3, ClaimGuardV3, claimGuardV3, closeExtraEpochIxV3, isV3Program, RENT_FLOOR, PDA_V3, readUpgradeProbeV3, sweepReceiptsV3, UpgradeProbeV3, upgradeVerdictV3, UpgradeVerdictV3 } from "./x1-v3";
 import { trustedConnectionFor } from "./x1-rpc";
 
 // ── program constants (mainnet values of constants.rs / state.rs) ───────────────────────────────────────────────────
@@ -561,7 +564,7 @@ interface Ctx {
   architect: PublicKey;
   report: PassReportV3;
   allowDraw: boolean;
-  /** D-47: one guard for every automatic claim of the pass (base and extra), from Config.oracle */
+  /** D-47: one guard for every automatic claim of the pass (base and extra), and for the upkeep fees (the upkeep guard), from Config.oracle */
   claimGuard: ClaimGuardV3;
   /**
    * R-5: the connection of every read that decides a reveal (the seat, the Bet and JackpotRound lists, SlotHashes, the
@@ -640,6 +643,7 @@ export async function keeperPassV3(connection: Connection, program: anchor.Progr
   if (run.canSend() && due("sweep", SWEEP_EVERY_MS)) await step("receipt sweep", async () => void (await sweepReceiptsV3(connection, program, payer, log, run)));
   if (due("liveness", LIVENESS_EVERY_MS)) await step("oracle seat", () => oracleSeatV3(c));
   if (c.claimGuard.stopped) report.notes.push(c.claimGuard.stopped);
+  if (c.claimGuard.feeStopped && c.claimGuard.feeStopped !== c.claimGuard.stopped) report.notes.push(c.claimGuard.feeStopped);
   if (report.role === "holder-unknown-chain") report.notes.push(UNKNOWN_CHAIN_ALERT);
   report.sent = run.sent;
   report.failed = run.failed;
@@ -1252,6 +1256,8 @@ async function epochsV3(c: Ctx, files: EpochFile[]): Promise<void> {
     if (e.acc.closed || !run.canSend()) continue;
     const id = num(e.acc.id);
     if (now >= num(e.acc.expiresAt)) {
+      // upkeep guard: an expiry paid by the oracle key waits while its wallet is too low to publish (it refunds it nothing)
+      if (await feeHeldV3(c, 0n)) continue;
       if (await run.send(`epoch ${id} expired: unclaimed budget back to the pool`, () => methods(program).expireEpoch().accountsPartial({ config: PDA.config(), epoch: e.pk }).instruction().then((ix: TransactionInstruction) => sendTx(c, [ix])))) e.acc.closed = true;
       continue;
     }
@@ -1275,6 +1281,14 @@ async function epochsV3(c: Ctx, files: EpochFile[]): Promise<void> {
   }
 }
 
+/** upkeep guard: true (and said once per pass) when the oracle key must not pay this upkeep transaction now */
+async function feeHeldV3(c: Ctx, refundToPayer: bigint): Promise<boolean> {
+  const was = c.claimGuard.feeStopped;
+  const stop = await c.claimGuard.checkFee(refundToPayer);
+  if (stop && stop !== was) c.log(`  ${stop}`);
+  return stop !== null;
+}
+
 // ── extra pot claims and closes ─────────────────────────────────────────────────────────────────────────────────────
 async function sendIx(c: { program: anchor.Program; payer: Keypair }, ix: TransactionInstruction): Promise<string> {
   return sendTx(c, [ix]);
@@ -1289,6 +1303,9 @@ async function extrasV3(c: Ctx, files: ExtraFileV1[]): Promise<void> {
     if (!x || Buffer.from(x.root).toString("hex") !== f.root) continue; // not published (yet), or another file
     const at = num(x.publishedAt);
     if (now >= at + CLAIM_WINDOW) {
+      // upkeep guard: the close returns the unclaimed budget to the extra pot and the rent to x.rentPayer; paid by the
+      // oracle key, it waits while the wallet is too low to publish, unless that rent comes back to this very wallet
+      if (await feeHeldV3(c, (x.rentPayer as PublicKey).equals(payer.publicKey) ? RENT_FLOOR : 0n)) continue;
       await run.send(`extra epoch ${f.epoch} closed (rent back to the oracle)`, async () => sendIx(c, await closeExtraEpochIxV3(program, f.epoch, x.rentPayer)));
       continue;
     }

@@ -15,7 +15,8 @@ npm run publish-extra -- [<n>]             # upgraded program only: publish extr
 npm run rebuild-extra -- <n>               # rebuild a lost extra-<n>.json byte for byte (read-only)
 npm run init                               # one-time v2 setup after the program upgrade
 npm run health                             # read-only daily health check (no key)
-npm run health-verify                      # read-only: verify --full of the newest epoch file → verification.json
+npm run health-verify                      # read-only: verify --full of the newest epoch file → verification.json (a v3 file one chain at a time)
+npm run verify -- <file> --full --chain=56 # v3 files: re-read only these chains (comma list); prints VERIFY-CHAINS, exit 2 = a chain or a file-level read (publication, block time) returned nothing
 npm run feed -- --out <file>               # rewards v3 only: the hourly week-so-far feed (read-only, no key; nothing before the switch)
 npm run seat                               # upgraded program only, read-only: the oracle seat, its liveness, every epoch in its 48-h hold vs this repository
 npm run void-epoch -- <n> [--extra]        # upgraded program only: dry run (decide, build, simulate) of void_epoch / void_extra_epoch; --yes sends it (VOIDER_PRIVATE_KEY)
@@ -40,6 +41,14 @@ K-5 chain history, the extra pot, the stable-days streak) answer "n/a until upgr
 detected and switch on by themselves after it. `src/health-pins.json` holds the expected privileged keys: change a pin
 only in a reviewed commit, in the same session as the change it expects (the upgrade authority at the final upgrade and
 at the freeze, the seat keys once the seats exist).
+
+**Verification row.** `npm run health-verify` re-runs `verify --full` on the newest epoch file (a v3 file one chain at a
+time). A file or a chain that disagrees with the chain is red. A run that could not finish (an RPC outage, a timeout) is
+a warning and the next run retries it; a chain counts as verified only from a run that finished green, so a run that
+could not read the publication never marks a chain green. A file-level read that returns nothing (the publication, the
+previous publication, the snapshot block time: the `VERIFY-UNREADABLE` line) warns at first, and turns the row red once
+it has missed in at least 3 runs in a row on the same file, the first of them at least 72 hours ago (`UNREADABLE_RED_RUNS`,
+`UNREADABLE_RED_S` in `src/health-rules.ts`); one run that reads it ends the count.
 
 `npm run keeper` picks its pass by itself: the v2 pass (`x1.ts keeperPass`, unchanged) while the live binary runs, the
 v3 pass (`keeper-v3.ts`) once the upgraded program is detected on chain (last-deploy slot after 85,429,880 and the
@@ -72,6 +81,17 @@ verifies, the same file is already in the pushed history (A10.11: durable first;
 - **D-47 (order):** the automatic claims paid by the oracle key stop while its wallet would keep less than
   `ORACLE_PUBLISH_RESERVE` (0.05 XNT, `src/x1-v3.ts`) after one more claim; publication keeps that reserve. A key that
   is not the oracle is never held back. Burners can always claim their own leaf.
+- **D-47 (upkeep guard):** the fee-only upkeep paid by the oracle key, `expire_epoch` and
+  `close_extra_epoch` (which returns the unclaimed extra budget to the extra pot), also waits while the wallet would
+  keep less than the reserve after one fee (`FEE_COST_MAX`, 0.0001 XNT), unless the close refunds its rent to that
+  same wallet (it can only raise the balance). Anyone can send both; a key that is not the oracle is never held back.
+- **The backlog carry (a burn's own week), built and OFF:** not part of the first v3 rules version (it came after the 2026-10-30
+  rules cut-off), so `EXTRA_BACKLOG_CARRY_WEEKS = 0` and the files are those of `counted = min(use, need)`. When switched
+  on (1), a burn counts against the need of the week it was made in: a chain skipped last week brings its burns in as
+  the D-12 backlog, and they count against the holder's need of the previous extra week that its own burns left unused
+  (`carry`, read from that week's row), never against this week's need. One week is carried; the bounds are unchanged
+  (8% of X, weeks × 4% of the eligible backing, rate ≤ 2). It is not in force: switching it on needs a dated owner decision row and is a new
+  extra policy version, announced at least two epochs ahead.
 - **D-47 (allowance, upgraded program only):** `publish_epoch` refunds the new Epoch account's rent and tops the oracle
   wallet up toward 0.25 XNT by at most 0.05 XNT per epoch, from what the epoch's budget leaves of the 10% bound and
   never more than 1% of the free pool (a running cost of the pool, booked in `stats.keeper_tips`; nothing while the
@@ -219,7 +239,10 @@ asserted byte for byte by `test/rules-v3.test.ts` and `test/price-rules.test.ts`
 | `src/xdex-v3.ts` | the XDEX WXNT/USDC.X pool reader (D-22 a, the feed's `xdex`) |
 | `src/x1-rpc.ts` | the X1 connection: optional `X1_RPC_URLS` before the default endpoint, failover, genesis check |
 | `src/health.ts`, `src/health-rules.ts` | the daily health check: live reads, and the pure rules with their thresholds (tested) |
-| `src/health-verify.ts`, `src/health-pins.json` | the verification the health check reads, and the pinned privileged keys |
+| `src/health-verify.ts`, `src/health-pins.json` | the verification the health check reads (per chain: a v3 epoch file one chain at a time, kept per chain), and the pinned privileged keys |
+| `src/verify-chains.ts` | `verify --full` per chain (`--chain=`, the VERIFY-CHAINS line, one chain's RPC failure never blocks the others) |
+| `src/health-gateway.ts` | the NFT metadata of `deployments/nft-arweave-final.json` through the set's gateway and one alternative (every set before the S2 build, the compiled one after); a miss warns, a loss over 3 runs and 48 h is red |
+| `test/regression-104.test.ts` | 104 weekly builds of the final engine (base + extra) in 8 seeded scenarios, every pot invariant each week, the digests pinned in `test/fixtures/regression-104.json` |
 | `src/index.ts` | CLI |
 
 Operations guide: [../OPERATORS.md](../OPERATORS.md).

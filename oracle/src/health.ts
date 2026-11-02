@@ -23,6 +23,9 @@
  * history (carried in the snapshot), extra vault / accounting / bound, the stable-days streak (the previous health
  * runs, from the Actions API) and the dispatch token (DISPATCH_EXPIRES). Rows that need the upgraded program print
  * "n/a until upgrade" while the live v2 binary is detected.
+ * "nft metadata gateway" (health-gateway.ts): the Artifact metadata of deployments/nft-arweave-final.json through
+ * the set's gateway and one alternative, every set before the S2 build, the set compiled into METADATA_BASE_URI after
+ * it; a miss warns, only a loss sustained over 3 runs and 48 h is red (the history is carried in the snapshot).
  */
 import * as fs from "fs";
 import * as path from "path";
@@ -42,6 +45,7 @@ import PINS from "./health-pins.json";
 import { FEED_PATH } from "./feed-v3";
 import { rewardsVersionGatedV3, v2ClosedV3 } from "./flow-v3";
 import * as R from "./health-rules";
+import { gatewayTargets, httpFetcher, probeTarget, readGatewayInputs } from "./health-gateway";
 
 const SITE = "https://xen-moon-forge-protocol.github.io/Moon-Forge/";
 /** XDEX WXNT/USDC.X pool: the one x1report quotes and the program's Predictions read. */
@@ -78,6 +82,8 @@ interface Snapshot {
   deploy?: { slot: number; day: string };
   /** K-5: every chain the keeper seat armed since `since` (the chain itself keeps no history of past heads) */
   k5?: R.K5History | null;
+  /** per metadata manifest, the runs in a row with a path lost on every gateway, and since when */
+  gateway?: R.GatewayHistory;
 }
 const next: Snapshot = { at: Math.floor(Date.now() / 1000) };
 /** Inputs of the weekly-epoch verdict, judged after both the X1 and the GitHub groups have run (see main). */
@@ -732,6 +738,26 @@ async function webChecks() {
   }
 }
 
+// ── NFT metadata gateway ──────────────────────────────────────────────────────
+
+async function gatewayChecks(prev: Snapshot | null) {
+  next.gateway = prev?.gateway ?? {}; // kept as it was if this group cannot finish
+  const inp = readGatewayInputs();
+  if (!inp.rec) {
+    push(R.gatewayVerdict("candidates", [], {}, next.at, inp.problem));
+    return;
+  }
+  const { phase, targets, problem } = gatewayTargets(inp.rec, inp.compiled);
+  if (problem) {
+    push(R.gatewayVerdict(phase, [], {}, next.at, problem));
+    return;
+  }
+  const fetcher = httpFetcher();
+  const runs = await Promise.all(targets.map((t) => probeTarget(t, fetcher)));
+  next.gateway = R.gatewayHistoryNext(prev?.gateway, runs, next.at);
+  push(R.gatewayVerdict(phase, runs, next.gateway, next.at));
+}
+
 // ── Main ─────────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -743,6 +769,7 @@ async function main() {
     group("EVM RPCs", rpcChecks),
     group("X1 RPCs", x1RpcChecks),
     group("site", webChecks),
+    group("nft metadata gateway", () => gatewayChecks(prev)),
   ]);
   // needs both groups: the burns waiting (X1 + portals) and whether the oracle already judged them in this slot (GitHub)
   if (epochInput) push(R.epochVerdict(epochInput.lastEpoch, epochInput.lastPublishTs, next.at, epochInput.unpaid, epochInput.where, oracleRun, detection === "upgraded", v2ClosedV3(next.at)));

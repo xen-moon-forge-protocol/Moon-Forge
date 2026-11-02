@@ -11,7 +11,9 @@
  *            need_w = Σ need_e over w's eligible Artifacts.
  *  Use:      for every burn b of base file n with x1 = w: u_b = ⌊base_b × (lp_b − basePaid_b)/lp_b⌋ (0 when
  *            basePaid_b ≥ lp_b or lp_b = 0): the market value the base pot did NOT pay. Band, vesting, ent ignored.
- *  Counted:  counted_w = min(U_w, need_w); W = Σ counted_w.
+ *  Counted:  counted_w = min(U_w, need_w); W = Σ counted_w. The backlog carry (built, OFF in the first v3 rules version:
+ *            EXTRA_BACKLOG_CARRY_WEEKS = 0): when switched on, counted_w = min(U_w − Ub_w, need_w) + min(Ub_w, carry_w), with
+ *            Ub_w = the use of w's D-12 backlog burns and carry_w = w's need of extra week n−1 its own burns left unused.
  *  Release:  R = ⌊X × 800/10^4⌋ with X = free_after of extra epoch n−1 (known at the week's start): ONE release per
  *            published base epoch, whatever the window (A13.3). B = min(R, ⌊W × 20,000/10^4⌋, k × ⌊backing × 400/10^4⌋),
  *            0 when W = 0, where k = the 7-day weeks of the base window (need is k weeks' worth too, A12.7 / A13.3).
@@ -85,6 +87,31 @@ export const EXTRA_FIRST_EPOCH: number | null = null;
  * published; a later change is a new policy version (files built under the old value no longer re-verify).
  */
 export const EXTRA_EXCLUDE_PRE_UPGRADE = true;
+/**
+ * The backlog carry: each burn's uncovered value counts against the need of its OWN week. A chain the base file
+ * skipped in week n−1 brings its burns into base file n as the D-12 backlog (stamped before the window); without this
+ * rule they count against week n's need while week n−1's need of the same holder goes unused, so a holder loses a week
+ * of need whenever a chain is skipped. With the rule on (1), a backlog burn counts against the wallet's unused need of
+ * extra week n−1 (`carry`, read from its row there) and never against week n's need; the window's own burns count
+ * against week n's need as before. Every backlog burn, whatever its age (a chain skipped one week or more, or the first
+ * range of a chain the previous base file did not list), counts against the wallet's unused need of extra week n−1
+ * only: one week is carried. A wallet with no row in week n−1 (no eligible Artifact then) and a week n−1 that was a skip
+ * heartbeat (no rows) carry nothing. The bounds are unchanged (budget ≤ 8% of X and ≤ weeks × 4% of the eligible
+ * backing, rho ≤ 2), so when a carry makes 2W exceed the backing bound every wallet of that week is paid pro rata; one
+ * weekly file can then pay a holder up to twice the bound of one week of burns.
+ *
+ * OFF (0) in the first v3 rules version: the rule came after the 2026-10-30 rules cut-off, so it is not
+ * part of the rules in the commit tagged upgrade-review-2026-11. At 0 the files are exactly those of the rule without
+ * it: counted = min(use, need), no useBacklog / carry per row, no policy.backlogCarryWeeks. Switching it on needs a dated owner
+ * decision row and is a new extra policy version (files built under the old value no longer re-verify), announced at least two epochs before
+ * the first epoch it applies to (C2). Only 0 and 1 are valid.
+ */
+export const EXTRA_BACKLOG_CARRY_WEEKS: 0 | 1 = 0;
+/** The backlog carry: a carry-weeks value checked (0 = off, 1 = one week carried); anything else throws. */
+export function carryWeeksOf(v: unknown): 0 | 1 {
+  if (v === 0 || v === 1) return v;
+  throw new Error(`backlogCarryWeeks ${String(v)}: only 0 (off) and 1 are valid`);
+}
 export const EXTRA_FORMAT = "extra" as const;
 export const EXTRA_VERSION = 1 as const;
 const U64 = 2n ** 64n;
@@ -151,7 +178,15 @@ export interface ExtraWalletRow {
   need: string;
   /** U_w: Σ uncovered market value of the wallet's burns in base file n */
   use: string;
-  /** min(use, need) */
+  /** The backlog carry (only when EXTRA_BACKLOG_CARRY_WEEKS > 0): the part of use from the base file's D-12 backlog burns (stamped before the window) */
+  useBacklog?: string;
+  /**
+   * The backlog carry: the wallet's need of the previous extra week that its own burns of that week did not use (need − min(use −
+   * useBacklog, need) of its row in extra file n−1; 0 without such a row): the backlog burns count against it. Only
+   * when EXTRA_BACKLOG_CARRY_WEEKS > 0.
+   */
+  carry?: string;
+  /** min(use, need); with the backlog carry on: min(use − useBacklog, need) + min(useBacklog, carry) (each burn against the need of its own week) */
   counted: string;
   pay: string;
 }
@@ -175,6 +210,8 @@ export interface ExtraPolicy {
   pricePaidNum: number;
   /** OD-9: EXTRA_EXCLUDE_PRE_UPGRADE (Artifacts forged before init_extra never enter the extra pot) */
   preUpgradeExcluded: boolean;
+  /** The backlog carry: EXTRA_BACKLOG_CARRY_WEEKS when above 0 (a backlog burn counts against the unused need of the previous extra week); absent when off */
+  backlogCarryWeeks?: number;
 }
 
 export interface ExtraTotals {
@@ -243,11 +280,23 @@ export interface ExtraFileV1 extends ExtraBodyV1 {
 const min = (a: bigint, b: bigint) => (a < b ? a : b);
 const cmpStr = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 
-export const policy = (): ExtraPolicy => ({
+export const policy = (carryWeeks: number = EXTRA_BACKLOG_CARRY_WEEKS): ExtraPolicy => ({
   needBps: Number(NEED_BPS), rhoMaxBps: Number(RHO_MAX_BPS), minPay: MIN_PAY.toString(), releaseBps: Number(EXTRA_RELEASE_BPS),
   backingBoundBps: Number(EXTRA_BACKING_BOUND_BPS), seasonWeeks: SEASON_WEEKS, pricePaidNum: Number(PRICE_PAID_NUM),
-  preUpgradeExcluded: EXTRA_EXCLUDE_PRE_UPGRADE,
+  preUpgradeExcluded: EXTRA_EXCLUDE_PRE_UPGRADE, ...(carryWeeksOf(carryWeeks) > 0 ? { backlogCarryWeeks: carryWeeks } : {}),
 });
+
+/**
+ * The backlog carry: a wallet's need of extra week n−1 that its own burns of that week did not use (0 for a wallet without a row
+ * there, and for a skip heartbeat, which has no rows). Rows written without the backlog carry have no useBacklog: read as 0.
+ */
+export function carryOf(prevRow: { need: string; use: string; useBacklog?: string } | undefined): bigint {
+  if (!prevRow) return 0n;
+  const need = uint(prevRow.need, "previous row need", U64);
+  const own = uint(prevRow.use, "previous row use", U64) - uint(prevRow.useBacklog ?? "0", "previous row useBacklog", U64);
+  if (own < 0n) throw new Error("previous row: useBacklog above use");
+  return need - min(own, need);
+}
 
 /**
  * OD-9: whether an Artifact forged at `forgedAt` was forged before the extra pot existed (before the init_extra
@@ -295,7 +344,8 @@ export function backingBoundOf(eligibleBacking: bigint, weeks: number): bigint {
 
 /**
  * B = min(R, ⌊W × rhoMax/10^4⌋, the backing bound), 0 when W = 0. With the backing bound scaled by the window (A13.3) it
- * never binds: pay ≤ 2 × need = 2 × weeks × Σ⌊backing/50⌋ ≤ weeks × ⌊Σ backing/25⌋. R stays ONE release per publication.
+ * binds only on carried need (the backlog carry, when switched on): without a carry pay ≤ 2 × need = 2 × weeks × Σ⌊backing/50⌋ ≤ weeks × ⌊Σ backing/25⌋;
+ * a carry can raise W up to twice the week's need, and the bound then pays every wallet pro rata. R stays ONE release per publication.
  */
 export function budgetMaxOf(R: bigint, W: bigint, backingBound: bigint | null = null): bigint {
   if (W <= 0n) return 0n;
@@ -486,8 +536,9 @@ function checkPrev(prev: ExtraFileV1, epoch: number, base: EpochFileV3): void {
  * extra epoch), the snapshot S(n) and the pot reading. Pure and deterministic: the input order of records and
  * burns never changes the output. Throws on an input that breaks a recorded rule; never returns null (heartbeat).
  */
-export function computeExtraEpoch(base: EpochFileV3, prev: ExtraFileV1 | null | undefined, snapshot: ExtraSnapshot, pool: ExtraPoolInfo): ExtraBodyV1 {
+export function computeExtraEpoch(base: EpochFileV3, prev: ExtraFileV1 | null | undefined, snapshot: ExtraSnapshot, pool: ExtraPoolInfo, carryWeeks: number = EXTRA_BACKLOG_CARRY_WEEKS): ExtraBodyV1 {
   const pv = prev ?? null;
+  const cw = carryWeeksOf(carryWeeks);
   for (const [what, v] of [["snapshot", snapshot], ["pool", pool]] as const) {
     const proto = protoPath(v);
     if (proto) throw new Error(`${what} has a "__proto__" member at ${proto}`);
@@ -584,14 +635,18 @@ export function computeExtraEpoch(base: EpochFileV3, prev: ExtraFileV1 | null | 
     eligibleArtifacts++;
   }
 
-  // use: the uncovered market value of the week's burns, by X1 destination (A10.4)
+  // use: the uncovered market value of the week's burns, by X1 destination (A10.4); the backlog carry: the D-12 backlog part apart
   const use = new Map<string, bigint>();
+  const useBacklog = new Map<string, bigint>();
   for (const b of base.burns) {
     if (!byWallet.has(b.x1)) continue;
-    use.set(b.x1, (use.get(b.x1) ?? 0n) + uncovered(b));
+    const u = uncovered(b);
+    use.set(b.x1, (use.get(b.x1) ?? 0n) + u);
+    if ((b as { backlog?: unknown }).backlog === true) useBacklog.set(b.x1, (useBacklog.get(b.x1) ?? 0n) + u);
   }
+  const prevRows = new Map<string, ExtraWalletRow>((pv?.rows ?? []).map((r) => [r.wallet, r]));
 
-  // counted, release, pay (A10.5)
+  // counted, release, pay (A10.5); the backlog carry: each burn against the need of its own week
   const wallets = [...byWallet.keys()].sort(cmpStr);
   let W = 0n;
   let totalNeed = 0n;
@@ -599,22 +654,25 @@ export function computeExtraEpoch(base: EpochFileV3, prev: ExtraFileV1 | null | 
   const pre = wallets.map((wallet) => {
     const w = byWallet.get(wallet)!;
     const u = use.get(wallet) ?? 0n;
-    const counted = min(u, w.need);
+    const ub = cw > 0 ? useBacklog.get(wallet) ?? 0n : 0n;
+    const carry = cw > 0 ? carryOf(prevRows.get(wallet)) : 0n;
+    // backlog carry off (cw 0): counted = min(use, need), the rule of the first v3 rules version
+    const counted = cw > 0 ? min(u - ub, w.need) + min(ub, carry) : min(u, w.need);
     W += counted;
     totalNeed += w.need;
     totalUse += u;
-    return { wallet, w, u, counted };
+    return { wallet, w, u, ub, carry, counted };
   });
   // A13.3: one release per published base epoch; need (above) and the backing bound are `weeks` weeks' worth
   const R = releaseOf(open);
   const backingBound = backingBoundOf(eligibleBacking, weeks);
   const B = budgetMaxOf(R, W, backingBound);
   let budget = 0n;
-  const rows: ExtraWalletRow[] = pre.map(({ wallet, w, u, counted }) => {
+  const rows: ExtraWalletRow[] = pre.map(({ wallet, w, u, ub, carry, counted }) => {
     let pay = W > 0n ? (counted * B) / W : 0n;
     if (pay < MIN_PAY) pay = 0n;
     budget += pay;
-    return { wallet, artifacts: w.artifacts, need: w.need.toString(), use: u.toString(), counted: counted.toString(), pay: pay.toString() };
+    return { wallet, artifacts: w.artifacts, need: w.need.toString(), use: u.toString(), ...(cw > 0 ? { useBacklog: ub.toString(), carry: carry.toString() } : {}), counted: counted.toString(), pay: pay.toString() };
   });
 
   // bounds (A10.7, A13.3): structural, so a correct build never trips them
@@ -635,7 +693,7 @@ export function computeExtraEpoch(base: EpochFileV3, prev: ExtraFileV1 | null | 
     baseDataHash: base.dataHash,
     prevDataHash: pv ? pv.dataHash : null,
     window: { startTs, endTs, seasonAfter, weeks },
-    policy: policy(),
+    policy: policy(cw),
     pool: { open: open.toString(), lamports: lamports.toString(), slot: pool.slot, init },
     snapshot: snap,
     excluded,
@@ -649,8 +707,8 @@ export function computeExtraEpoch(base: EpochFileV3, prev: ExtraFileV1 | null | 
   };
 }
 
-export function buildExtraFile(base: EpochFileV3, prev: ExtraFileV1 | null | undefined, snapshot: ExtraSnapshot, pool: ExtraPoolInfo): ExtraFileV1 {
-  const body = computeExtraEpoch(base, prev, snapshot, pool);
+export function buildExtraFile(base: EpochFileV3, prev: ExtraFileV1 | null | undefined, snapshot: ExtraSnapshot, pool: ExtraPoolInfo, carryWeeks: number = EXTRA_BACKLOG_CARRY_WEEKS): ExtraFileV1 {
+  const body = computeExtraEpoch(base, prev, snapshot, pool, carryWeeks);
   return { ...body, dataHash: dataHashExtra(body), proofs: extraTree(body.epoch, body.leaves).proofs };
 }
 
@@ -672,7 +730,7 @@ export function skipReasonOf(v: unknown): string {
  *    Artifact is "new" there (a heartbeat) and extra n+2 compares two good snapshots again. One bad week therefore costs
  *    at most two weekly releases, which stay in the pot, and can never block the history.
  */
-export function skipExtraEpoch(base: EpochFileV3, prev: ExtraFileV1 | null | undefined, reason: string, pool: ExtraPoolInfo): ExtraBodyV1 {
+export function skipExtraEpoch(base: EpochFileV3, prev: ExtraFileV1 | null | undefined, reason: string, pool: ExtraPoolInfo, carryWeeks: number = EXTRA_BACKLOG_CARRY_WEEKS): ExtraBodyV1 {
   const pv = prev ?? null;
   const proto = protoPath(pool);
   if (proto) throw new Error(`pool has a "__proto__" member at ${proto}`);
@@ -713,7 +771,7 @@ export function skipExtraEpoch(base: EpochFileV3, prev: ExtraFileV1 | null | und
     baseDataHash: base.dataHash,
     prevDataHash: pv ? pv.dataHash : null,
     window: { startTs, endTs, seasonAfter: seasonAfterOf(startTs), weeks: needWeeksOf(startTs, endTs) },
-    policy: policy(),
+    policy: policy(carryWeeksOf(carryWeeks)),
     pool: { open: open.toString(), lamports: lamports.toString(), slot: pool.slot, init },
     snapshot: { slot, blockTime: endTs, records: [] },
     excluded: [],
@@ -741,8 +799,8 @@ export function baseSnapshotSkipReason(base: EpochFileV3): string {
   return skipReasonOf(`the base snapshot S(${base.epoch}) is unavailable (A13.9): ${baseSnapshotUnavailable(base) ?? "no"}`);
 }
 
-export function buildSkipExtraFile(base: EpochFileV3, prev: ExtraFileV1 | null | undefined, reason: string, pool: ExtraPoolInfo): ExtraFileV1 {
-  const body = skipExtraEpoch(base, prev, reason, pool);
+export function buildSkipExtraFile(base: EpochFileV3, prev: ExtraFileV1 | null | undefined, reason: string, pool: ExtraPoolInfo, carryWeeks: number = EXTRA_BACKLOG_CARRY_WEEKS): ExtraFileV1 {
+  const body = skipExtraEpoch(base, prev, reason, pool, carryWeeks);
   return { ...body, dataHash: dataHashExtra(body), proofs: {} };
 }
 
@@ -756,9 +814,10 @@ export function extraInputsOf(f: ExtraBodyV1): { snapshot: ExtraSnapshot; pool: 
  * Re-derives extra file n from base file n and extra file n−1 (null for the first extra epoch) and checks the
  * recorded bounds independently of the builder. Returns the mismatches (empty = OK).
  */
-export function verifyExtraFile(f: ExtraFileV1, base: EpochFileV3, prev?: ExtraFileV1 | null): string[] {
+export function verifyExtraFile(f: ExtraFileV1, base: EpochFileV3, prev?: ExtraFileV1 | null, carryWeeks: number = EXTRA_BACKLOG_CARRY_WEEKS): string[] {
   const errors: string[] = [];
   const pv = prev ?? null;
+  const cw = carryWeeksOf(carryWeeks);
   try {
     if (f.kind !== EXTRA_FORMAT || f.version !== EXTRA_VERSION) return [`not an extra file (kind ${String((f as { kind?: unknown }).kind)}, version ${String((f as { version?: unknown }).version)})`];
     const proto = protoPath(f);
@@ -790,7 +849,7 @@ export function verifyExtraFile(f: ExtraFileV1, base: EpochFileV3, prev?: ExtraF
     const skip = (f as { skip?: unknown }).skip;
     if (skip !== undefined && (!skip || typeof skip !== "object" || typeof (skip as { reason?: unknown }).reason !== "string")) return ["skip is not {reason: string}"];
     const { snapshot, pool } = extraInputsOf(f);
-    const body = skip !== undefined ? skipExtraEpoch(base, pv, (skip as { reason: string }).reason, pool) : computeExtraEpoch(base, pv, snapshot, pool);
+    const body = skip !== undefined ? skipExtraEpoch(base, pv, (skip as { reason: string }).reason, pool, cw) : computeExtraEpoch(base, pv, snapshot, pool, cw);
     const keys = new Set([...Object.keys(body), ...Object.keys(f)].filter((k) => k !== "dataHash" && k !== "proofs" && k !== "publish"));
     for (const k of [...keys].sort()) {
       if (canonicalJson((body as unknown as Record<string, unknown>)[k]) !== canonicalJson((f as unknown as Record<string, unknown>)[k])) errors.push(`${k} does not match the recomputation`);
@@ -823,7 +882,17 @@ export function verifyExtraFile(f: ExtraFileV1, base: EpochFileV3, prev?: ExtraF
     }
     for (const r of f.rows) {
       const counted = uint(r.counted, `row ${r.wallet} counted`, U64);
-      if (counted > uint(r.need, `row ${r.wallet} need`, U64) || counted > uint(r.use, `row ${r.wallet} use`, U64)) errors.push(`row ${r.wallet}: counted above need or use`);
+      const use = uint(r.use, `row ${r.wallet} use`, U64);
+      const need = uint(r.need, `row ${r.wallet} need`, U64);
+      if (cw > 0) {
+        // backlog carry on: the window's own burns within this week's need, the backlog within the carried need of last week
+        const ub = uint(r.useBacklog, `row ${r.wallet} useBacklog`, U64);
+        if (ub > use || counted > use || counted > min(use - ub, need) + min(ub, uint(r.carry, `row ${r.wallet} carry`, U64))) errors.push(`row ${r.wallet}: counted above need (own week, carried) or use`);
+        if (uint(r.carry, `row ${r.wallet} carry`, U64) !== carryOf(pv?.rows.find((x) => x.wallet === r.wallet))) errors.push(`row ${r.wallet}: carry is not the unused need of extra-${f.epoch - 1}.json`);
+      } else {
+        if (counted > need || counted > use) errors.push(`row ${r.wallet}: counted above need or use`);
+        if (r.useBacklog !== undefined || r.carry !== undefined) errors.push(`row ${r.wallet}: useBacklog / carry recorded while the backlog carry is off`);
+      }
       if (uint(r.pay, `row ${r.wallet} pay`) > (counted * RHO_MAX_BPS) / BPS) errors.push(`row ${r.wallet}: pay above ${Number(RHO_MAX_BPS) / 10_000}x the counted use`);
     }
     const t = extraTree(f.epoch, f.leaves);
