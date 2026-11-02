@@ -79,6 +79,6 @@ Moon Forge will never: announce a new program id, a migration, a token, a presal
 
 - Site: https://xen-moon-forge-protocol.github.io/Moon-Forge/
 - Source and issues: https://github.com/xen-moon-forge-protocol/Moon-Forge
-- X: https://x.com/MoonXenForge (announcements only; it never replies and never DMs)
+- X: https://x.com/MoonXenForge (no posts are planned; announcements are on the site and in this repository; it never replies and never DMs)
 
 That is the whole list. No Telegram, Discord or other group is official, and nobody from Moon Forge contacts anyone first, by any channel. Security reports go to the project mailbox ([SECURITY.md](../SECURITY.md#reporting-a-vulnerability)); GitHub's private advisory form is not enabled. Support is self-serve: the documentation, the Transparency page and GitHub issues, answered in batches; there is no live chat.

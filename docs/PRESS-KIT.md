@@ -38,7 +38,7 @@ Copy-paste material for anyone who wants to talk about Moon Forge. Every claim b
 
 - Site: https://xen-moon-forge-protocol.github.io/Moon-Forge/
 - Source and issues: https://github.com/xen-moon-forge-protocol/Moon-Forge
-- X: https://x.com/MoonXenForge (announcements only; it never replies and never DMs)
+- X: https://x.com/MoonXenForge (no posts are planned; announcements are on the site and in this repository; it never replies and never DMs)
 
 That is the whole list. No Telegram, Discord or other group is official; nobody from Moon Forge contacts anyone first, by any channel. Whitepaper: [WHITEPAPER.md](WHITEPAPER.md). Transparency page (live on-chain numbers, upgrade authority): https://xen-moon-forge-protocol.github.io/Moon-Forge/transparency
 

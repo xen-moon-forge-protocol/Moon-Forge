@@ -26,7 +26,7 @@ The four Artifact tiers (Metaplex Core NFTs on X1) are shown together in `assets
 
 - Site: https://xen-moon-forge-protocol.github.io/Moon-Forge/
 - Source and issues: https://github.com/xen-moon-forge-protocol/Moon-Forge
-- X: https://x.com/MoonXenForge (announcements only; it never replies and never DMs)
+- X: https://x.com/MoonXenForge (no posts are planned; announcements are on the site and in this repository; it never replies and never DMs)
 
 That is the whole list: no Telegram, Discord or other group is official, and nobody from Moon Forge contacts anyone first. The addresses that cannot be copied (program `57UE1U1t23ztg2noLp8pcpGW1B1Xw25rLH6ra9Mchea9`, portal `0x7b00f314aB48D223bee567181CA89c65126Bf6E9`, collection `7Re1n5DsnvyJnDTiaaZZ1f9G9REPRwb2Br7SYVYCfpzK`) are in the [verify block](../docs/SUPPORT.md#verify-you-are-on-the-real-moon-forge).
 

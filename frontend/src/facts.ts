@@ -250,7 +250,7 @@ export const oldBurns =
 export const never: readonly string[] = linksJson.never;
 /** "Nothing else is official" sentence, from public/links.json. */
 export const notOfficial: string = linksJson.notOfficial;
-/** The X account's note (announcements only; posts dated before 2026-10-01 are outdated), from public/links.json. */
+/** The X account's note (no posts planned; posts dated before 2026-10-01 are outdated), from public/links.json. */
 export const xNote: string = linksJson.official.find((l) => l.id === 'x')?.note ?? '';
 /** The facts that identify the real Moon Forge (X-064), from public/links.json. */
 export const verify = linksJson.verify;

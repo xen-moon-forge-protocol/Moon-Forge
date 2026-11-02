@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// S9, the freeze (SPEC-UPGRADE-v2 9.1 S9; signed by the offline DEPLOY_KEY): ONE transaction with
+// S9, the freeze (SPEC-UPGRADE-v2 9.1 S9; signed by the DEPLOY_KEY): ONE transaction with
 //   [0] anchor IDL SetAuthority(11111111111111111111111111111111)   = `anchor idl erase-authority`
 //   [1] loader SetAuthority(none)                                   = `solana program set-upgrade-authority --final`
 // so both powers end together or neither does. After it nothing can change the program or its IDL, ever.
@@ -26,7 +26,7 @@ import { applyPins } from './pins.mjs';
 const USAGE = `usage: node scripts/upgrade/s9.mjs --deploy-key <pubkey> --expect-deploy-slot <n> [options]   (dry run unless --send)
   --rpc <url>                default ${MAINNET_RPC}
   --deploy-key <pubkey>      OD-32 DEPLOY_KEY (the upgrade + IDL authority since S6)
-  --deploy-key-file <file>   its key file, from its offline medium (needed to send)
+  --deploy-key-file <file>   its key file, from its encrypted folder (needed to send)
   --expect-deploy-slot <n>   the S6 deploy slot (sign-off sheet "S6 completed")
   --elf <file> | --elf-sha <hex> --elf-bytes <n>   the S2 build (default: the UPGRADED_ELF pin of oracle/src/x1-v3.ts)
   --pin-file <file>          where to read the UPGRADED_ELF pin (default oracle/src/x1-v3.ts)
@@ -49,7 +49,7 @@ async function main() {
   const deployKey = pubkeyArg(args['deploy-key'], '--deploy-key');
   if (!deployKey) refuse('--deploy-key <pubkey> is required (OD-32, sign-off section 1)');
   const kp = matchKey(loadKeyFile(args['deploy-key-file'], '--deploy-key-file'), deployKey, '--deploy-key-file');
-  if (send && !kp) refuse('--send needs --deploy-key-file (the DEPLOY_KEY from its offline medium)');
+  if (send && !kp) refuse('--send needs --deploy-key-file (the DEPLOY_KEY file, from its encrypted folder)');
   const G = new Gates();
   console.log('\nchecks before the freeze (read-only)');
 

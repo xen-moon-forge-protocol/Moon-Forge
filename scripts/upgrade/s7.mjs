@@ -59,7 +59,7 @@ const USAGE = `usage: node scripts/upgrade/s7.mjs --payee <pubkey> [options]   (
   --deploy-key <pubkey>          OD-32 DEPLOY_KEY, the upgrade + IDL authority since S6 (checked, and pinned by the pins step);
                                  omit it with --arm-keeper after the freeze (there is no upgrade authority any more)
   --payee <pubkey>               OD-22 architect payee (sign-off section 1)
-  --payee-key <file>             its key file, from its offline medium (set-architect, lock-royalties)
+  --payee-key <file>             its key file, from its encrypted folder (set-architect, lock-royalties)
   --keeper <pubkey>              OD-25 INITIAL_KEEPER (sign-off section 1): at S7 only checked (compiled into the deployed
                                  binary, distinct from the other keys); it stays the only key that can ever create the seat
   --seat-cold <pubkey>           OD-16 SEAT_COLD_INITIAL: checked in the deployed ELF before init_seat, and in the seat after
@@ -131,7 +131,7 @@ async function main() {
   // S7 never touches a key it does not need: the deploy wallet and the payee only for the S7 steps, the keeper key only later
   const deployKp = later ? null : matchKey(loadKeyFile(args['deploy-wallet-key'], '--deploy-wallet-key'), deployWallet, '--deploy-wallet-key');
   const payeeKp = later ? null : matchKey(loadKeyFile(args['payee-key'], '--payee-key'), payee, '--payee-key');
-  if (later) for (const f of ['deploy-wallet-key', 'payee-key']) if (args[f]) refuse(`--${f} is not used by the later --arm-keeper run: leave that key on its medium`);
+  if (later) for (const f of ['deploy-wallet-key', 'payee-key']) if (args[f]) refuse(`--${f} is not used by the later --arm-keeper run: leave that key in its encrypted folder`);
   const keeperKp = later && keeper ? matchKey(loadKeyFile(args['keeper-key'], '--keeper-key'), keeper, '--keeper-key') : null;
   const deposit = lamportsArg(args.deposit ?? '20', '--deposit');
   if (deposit < KEEPER_BOND_MIN) refuse(`--deposit ${xnt(deposit)} is below KEEPER_BOND_MIN ${xnt(KEEPER_BOND_MIN)}`);
@@ -275,7 +275,7 @@ async function main() {
         if (!a.equals(deployWallet)) return { refuse: `Config.architect is ${a.toBase58()}, not the deploy wallet` };
         return { ixs: pre([setArchIx()], 50_000), notes: [`Config.architect ${a.toBase58()} -> ${payee.toBase58()} (the dev share, the house-edge slice and the market fees go to the payee from here on)`, 'fee payer: the deploy wallet; the payee only signs (it needs no balance)'] };
       },
-      payer: deployWallet, signers: () => [needKey(deployKp, '--deploy-wallet-key', 'set-architect'), needKey(payeeKp, '--payee-key (from its offline medium)', 'set-architect')],
+      payer: deployWallet, signers: () => [needKey(deployKp, '--deploy-wallet-key', 'set-architect'), needKey(payeeKp, '--payee-key (from its encrypted folder)', 'set-architect')],
       verify: async () => { const a = (await cfgNow()).architect; return { ok: a.equals(payee), detail: `Config.architect = ${a.toBase58()}` }; },
     });
     stop();
@@ -293,7 +293,7 @@ async function main() {
         const a = (await cfgNow()).architect;
         const roy = royaltiesOf(await collectionNow());
         // Core charges the collection's rent difference to the payer of the CPI, the payee (rehearsal 2026-10-25: 6,960
-        // lamports, one byte); a fresh offline payee holds nothing, so the deploy wallet tops it up to 0.001 XNT (the
+        // lamports, one byte); a fresh payee holds nothing, so the deploy wallet tops it up to 0.001 XNT (the
         // 890,880-lamport rent-exempt minimum of a wallet plus that difference) in the same transaction
         const pb = await balance(conn, payee);
         const fund = pb >= PAYEE_FLOAT ? [] : [(() => { const ix = SystemProgram.transfer({ fromPubkey: deployWallet, toPubkey: payee, lamports: PAYEE_FLOAT - pb }); ix.names = ['from', 'to']; ix.label = `system transfer ${xnt(PAYEE_FLOAT - pb)} from the deploy wallet to the payee`; return ix; })()];
@@ -305,7 +305,7 @@ async function main() {
         // dry run before set_architect: simulate both in one transaction to show the pair works from the current state
         return { ixs: pre([...fund, lockIx()], 300_000), simIxs: pre([setArchIx(), ...fund, lockIx()], 350_000), simWith: 'set_architect, which has not run yet', notes };
       },
-      payer: deployWallet, signers: () => [needKey(deployKp, '--deploy-wallet-key', 'lock-royalties'), needKey(payeeKp, '--payee-key (from its offline medium)', 'lock-royalties')],
+      payer: deployWallet, signers: () => [needKey(deployKp, '--deploy-wallet-key', 'lock-royalties'), needKey(payeeKp, '--payee-key (from its encrypted folder)', 'lock-royalties')],
       verify: async () => {
         const roy = royaltiesOf(await collectionNow()); const r = roy?.royalties;
         const ok = !!r && roy.authority === 'None' && r.bps === 500 && r.creators.length === 1 && r.creators[0].address.equals(payee) && r.creators[0].percentage === 100 && r.ruleSet === 'None';

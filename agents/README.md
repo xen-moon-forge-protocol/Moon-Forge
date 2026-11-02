@@ -50,7 +50,7 @@ House games carry a fixed 2% edge and are not a way to make money: over time, pl
 | EVM portal | `0x7b00f314aB48D223bee567181CA89c65126Bf6E9` on Base, Optimism, Polygon, BSC and Avalanche |
 | Artifact collection | `7Re1n5DsnvyJnDTiaaZZ1f9G9REPRwb2Br7SYVYCfpzK` |
 
-Official channels: the site, the repository and X `@MoonXenForge` (announcements only; it never replies or DMs). No group is official; nobody from Moon Forge contacts anyone first.
+Official channels: the site, the repository and X `@MoonXenForge` (no posts are planned; announcements are on the site and in this repository; it never replies or DMs). No group is official; nobody from Moon Forge contacts anyone first.
 
 ## Quick start
 ```bash

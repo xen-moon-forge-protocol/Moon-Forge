@@ -42,7 +42,7 @@ solana program set-upgrade-authority 57UE1U1t23ztg2noLp8pcpGW1B1Xw25rLH6ra9Mchea
 
 Until then, treat the program as upgradeable: whoever holds that key can replace the code, including fees and vault logic. The Transparency page reads the current authority directly from the chain.
 
-**Custody.** The upgrade key is held by the anonymous operator: it is never stored in GitHub secrets or on any machine the automation uses, it is used only to sign the announced final upgrade and the freeze, and from the final upgrade to the freeze it is kept offline. If it were lost before the freeze, nobody could upgrade or burn the authority: the program would stay as deployed, with an authority nobody holds. The oracle and keeper keys are separate hot keys kept as repository secrets; they can be rotated (two-step `propose-oracle` / `accept-oracle` for the oracle; the keeper is permissionless).
+**Custody.** The upgrade key is held by the anonymous operator: it is never stored in GitHub or in its secrets, so no scheduled run ever sees it; it is used only to sign the announced final upgrade and the freeze; and from the final upgrade to the freeze the authority is a new deploy key, generated on the project computer and kept there in an encrypted folder, never in GitHub (an encrypted offline copy on USB sticks is optional). If it were lost before the freeze, nobody could upgrade or burn the authority: the program would stay as deployed, with an authority nobody holds. The oracle and keeper keys are separate hot keys kept as repository secrets; they can be rotated (two-step `propose-oracle` / `accept-oracle` for the oracle; the keeper is permissionless).
 
 ## What depends on GitHub
 

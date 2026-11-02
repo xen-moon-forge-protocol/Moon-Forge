@@ -25,9 +25,9 @@ signed. It holds no secret: keypair files are named by path, and only public key
 | On-chain IDL account | `CCt3yKzEbfZ1tV9cBVqsryGGSXGojMCtJZhYKHRfxszP`, 16,258 B (16,214 B usable) | measured 2026-10-23 |
 | OD-32 DEPLOY_KEY (new upgrade + IDL authority from S6 to S9), public key | ____ | S0 |
 | OD-25 INITIAL_KEEPER, public key (K-4 default of 2026-10-25: today's keeper key, the one in the `KEEPER_PRIVATE_KEY` repository secret; never the oracle, deploy, cold or payee key; a new key only if the S0 decision sheet records one). It is compiled into the S2 binary and stays the only key that can ever create the keeper seat, so it is named at S0 even though it is **not armed at S7** (F1-b, owner answer of 2026-10-25): no keeper bond is posted, because while no keeper runs anyone could place house bets that nobody anchors, have each refunded in full and make the bond pay the edge and forfeit the stake, so a posted bond could be drained at no cost. The seat is armed later, by `s7.mjs --arm-keeper` (section 5, "Later"), only once a keeper has run continuously with this key for at least 24 hours, as an always-on loop outside GitHub Actions (SPEC 9.5); house games and the Jackpot stay hidden on the site until that keeper has met the published service levels for a week (D-39). keeper.yml keeps running with this key without a seat (role "no-seat"), so the R-1 hand-over risk of a seat held by keeper.yml does not arise | ____ | S0 |
-| OD-16 SEAT_COLD_INITIAL (cold key, generated offline), public key | ____ | S0 |
+| OD-16 SEAT_COLD_INITIAL (cold key, generated on the project computer, kept in an encrypted folder there), public key | ____ | S0 |
 | OD-20 SEAT_REFUND_INITIAL, public key | ____ | S0 |
-| OD-22 architect payee (generated offline), public key | ____ | S0 |
+| OD-22 architect payee (generated on the project computer, kept in an encrypted folder there), public key | ____ | S0 |
 
 ## 2. The binary and the IDL
 
@@ -125,7 +125,7 @@ SO=target/deploy/moon_forge.so               # the S2 binary, built from the S2 
 S2_SHA=____                                  # section 2
 NEW=$(stat -c %s "$SO")                      # must equal section 2
 DEPLOY_KEY=____                              # OD-32 public key (section 1)
-DEPLOY_KEY_FILE=____                         # the offline key, mounted from its offline medium for steps 9-10 only
+DEPLOY_KEY_FILE=____                         # a copy of the deploy key file in RAM only (/dev/shm in WSL), made from its encrypted folder for steps 9-10; never on a disk
 ```
 
 | # | Command | Check before the step | Check after the step |
@@ -140,7 +140,7 @@ DEPLOY_KEY_FILE=____                         # the offline key, mounted from its
 | 7 | `anchor idl upgrade --filepath target/idl/moon_forge.json "$PROGRAM" --provider.cluster "$RPC" --provider.wallet "$WALLET"` then `anchor idl fetch "$PROGRAM" --provider.cluster "$RPC" > /tmp/idl.json` | the IDL file sha256 = section 2 | `/tmp/idl.json` equals the file as JSON (the rehearsal compares them the same way) |
 | 8 | `anchor idl set-authority --program-id "$PROGRAM" --new-authority "$DEPLOY_KEY" --provider.cluster "$RPC" --provider.wallet "$WALLET"`; `anchor idl authority "$PROGRAM" --provider.cluster "$RPC"` | step 7 green | the IDL authority = `$DEPLOY_KEY` |
 | 9 | `solana program set-upgrade-authority "$PROGRAM" --upgrade-authority "$WALLET" --new-upgrade-authority "$DEPLOY_KEY_FILE" -u "$RPC"` (the new key signs, so a typo cannot hand the program to an unknown key; never use `--skip-new-upgrade-authority-signer-check`) | steps 5-8 green | `solana program show`: authority = `$DEPLOY_KEY` |
-| 10 | Unmount the offline medium. `solana program show "$PROGRAM" -u "$RPC"`; `anchor idl authority "$PROGRAM" --provider.cluster "$RPC"` | | both authorities = `$DEPLOY_KEY`; the hot wallet 7PuG8… holds no upgrade or IDL power from here to S9 (it stays the architect payee until `set_architect` runs at S7) |
+| 10 | Delete the session copy of the deploy key file (`rm -f "$DEPLOY_KEY_FILE"`; it lived in /dev/shm, so it never reached a disk). `solana program show "$PROGRAM" -u "$RPC"`; `anchor idl authority "$PROGRAM" --provider.cluster "$RPC"` | | both authorities = `$DEPLOY_KEY`; the hot wallet 7PuG8… holds no upgrade or IDL power from here to S9 (it stays the architect payee until `set_architect` runs at S7) |
 | 11 | Update `health-pins.json` (the expected upgrade and IDL authority = `$DEPLOY_KEY`) with `node scripts/upgrade/pins.mjs --stage s6 --deploy-key "$DEPLOY_KEY"`, then the same with `--write`, in the same session and a reviewed commit; then `node scripts/upgrade/census.mjs --stage s6 --deploy-key "$DEPLOY_KEY" --keeper-wallet <OD-25> --seat-cold <OD-16> --expect-deploy-slot <new slot>` | step 10 green | the next health run shows the pin rows OK, so the stable-days streak does not restart |
 
 Then S7 starts, the same day (operator; SPEC 6.3 steps 3-10 in that order except step 8, `arm_keeper`, which F1-b
@@ -150,8 +150,8 @@ signatures, `lock_collection_royalties` by the OD-22 payee (the client refuses u
 OD-22 key of section 1), `init_seat`, `init_extra` before any forge is announced, releases, announcement; **no
 `arm_keeper` and no `take_keeper`: the house keeper is not armed at S7 and no keeper bond is posted**, F1-b, owner answer
 of 2026-10-25). **S7 needs two signatures:** `set_architect` is signed by the deploy
-wallet 7PuG8… and the new OD-22 payee together, and `lock_collection_royalties` by the OD-22 payee; the payee key comes
-from its offline medium for these two transactions only. The S7 mainnet client is `scripts/upgrade/s7.mjs`:
+wallet 7PuG8… and the new OD-22 payee together, and `lock_collection_royalties` by the OD-22 payee; the payee key file is
+copied from its encrypted folder for these two transactions only. The S7 mainnet client is `scripts/upgrade/s7.mjs`:
 SPEC 6.3 steps 3-7, one transaction each (`refresh_collection_uri`; `set_architect`; `lock_collection_royalties`, which
 also tops the payee up to 0.001 XNT from the deploy wallet, because Metaplex Core charges the collection's rent
 difference to the payee; `init_seat`; `init_extra`, whose transaction and block time it prints as the OD-9 boundary),
@@ -163,7 +163,7 @@ it: `scripts/upgrade/census.mjs` (the S5, S6, S7 and S9 censuses; at S7 and S9 i
 transaction that erases the IDL authority and removes the upgrade authority, so both go together or neither does).
 Each is a dry run by default, sends only with `--send` (and `--mainnet` on X1 mainnet), refuses any key file whose
 public key differs from section 1, and skips a step already done, so a re-run resumes. All of them were rehearsed on
-localnet with the upgrade-day key layout (the DEPLOY_KEY and the payee fresh keys on a separate medium, the payee at
+localnet with the upgrade-day key layout (the DEPLOY_KEY and the payee fresh keys in a separate key folder, the payee at
 0 XNT): `tests/run-upgrade-tooling.sh`, 64 checks green twice on 2026-10-25 with the arm at S7, and again in round 6
 (2026-10-26) with the F1-b steps and the later arm after the freeze (section 8). The command of each stage is in
 `scripts/upgrade/README.md`. S7 command: `node scripts/upgrade/s7.mjs --payee <OD-22> --keeper <OD-25> --seat-cold

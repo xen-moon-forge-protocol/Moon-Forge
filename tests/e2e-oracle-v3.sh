@@ -101,7 +101,7 @@ oracle() {
     node -r "$PRELOAD" src/index.ts "$@") >"$log" 2>&1
   local rc=$?
   sed "s/^/    | /" "$log" | cut -c1-260
-  LAST_LOG="$log"; return $rc
+  LAST_LOG="$log"; LAST_RC=$rc; return $rc
 }
 # drv <tag> <idl live|v3> <command...>: the players / owner steps / checks (driver.ts), from the worktree's oracle
 drv() {
@@ -115,6 +115,12 @@ drv() {
 drvq() { local tag=$1 idl=$2; shift 2; (cd "$ROOT/oracle" && env $(oracle_env "$tag") E2E_ORACLE_DIR="$ROOT/oracle" E2E_IDL="$idl" node -r "$PRELOAD" "$DRIVER" "$@") >/dev/null 2>&1; }
 expect() { # expect <pattern> <message>: in the last oracle log
   if grep -qE -- "$1" "$LAST_LOG"; then ok "$2"; else bad "$2 (no /$1/ in $(basename "$LAST_LOG"))"; fi
+}
+# expect_verified <message>: the last `verify` run exited 0 AND said "verified", with no INCOMPLETE or FAILED verdict
+# (a per-chain run can print an agreeing chain and still end INCOMPLETE, exit 2)
+expect_verified() {
+  if [ "${LAST_RC:-1}" -eq 0 ] && grep -qE -- "verified" "$LAST_LOG" && ! grep -qE -- "INCOMPLETE|VERIFICATION FAILED" "$LAST_LOG"; then ok "$1"
+  else bad "$1 (exit ${LAST_RC:-?}; see $(basename "$LAST_LOG"))"; fi
 }
 push() { mkdir -p "$WORK/pushed-$1/epochs"; cp "$WORK/$1/epochs/"*.json "$WORK/pushed-$1/epochs/" 2>/dev/null; true; } # oracle.yml: commit + push
 # epoch_step <tag> <name>: the weekly `epoch` run of the worktree's oracle with the oracle key. A run the anomaly gate
@@ -194,6 +200,10 @@ v2_run() { # $1 tag, $2 oracle dir
   oracle "$tag" "$dir" payer init init; expect "initialize_v2:" "[$tag] init: initialize_v2"; expect "init_artifacts:" "[$tag] init: init_artifacts"
   drv "$tag" live v2-setup $PORTAL && drv "$tag" live save-lottery
   E2E_BURN_TS=$BURN_TS drv "$tag" live burns v2 "40,25,60:1,12"
+  # the epoch's Artifact snapshot reads the slot and the asset accounts at "finalized" (x1.ts artifactSnapshot): wait
+  # until the v2-setup forge is final, so main's run and this run always list the same holders (a localnet lags about
+  # 32 slots; without the wait one run in four or so saw the forge and the other did not)
+  drvq "$tag" live wait-final || sleep 20
   oracle "$tag" "$dir" oracle epoch epoch; expect "published:" "[$tag] v2 epoch 1 published"; expect "auto-claimed" "[$tag] v2 auto-claims ran"
   oracle "$tag" "$dir" oracle keeper keeper --once; [ $? -eq 0 ] && ok "[$tag] v2 keeper --once pass" || bad "[$tag] v2 keeper pass exited non-zero"
   drv "$tag" live summary "$WORK/$tag/summary.json"
@@ -337,7 +347,7 @@ if has v3; then
   drv $T v3 d47 $S pre$S
   push $T   # oracle.yml commits and pushes; its publish-extra step "fails" here: the next run publishes extra-$S as pending
   drv $T v3 wait-final >/dev/null
-  oracle $T "$ROOT/oracle" - verify$S verify "$EP/epoch-$S.json" --full; expect "verified" "verify --full epoch-$S.json"
+  oracle $T "$ROOT/oracle" - verify$S verify "$EP/epoch-$S.json" --full; expect_verified "verify --full epoch-$S.json"
   # the D-47 reserve stopped the oracle's own claims (0.05 XNT reserve + one claim): the seat holder claims, with the tip rule
   K2 keeper-claims$S keeper --once
   drv $T v3 base-claims $S keeper2
@@ -370,7 +380,7 @@ if has v3; then
   # adds its own seconds), so any multi-week window counts
   if [ "${W:-0}" -ge 2 ] 2>/dev/null; then ok "extra-$((S+1)) carries a multi-week window (k = $W >= 2)"; else echo "  note extra-$((S+1)) window weeks = $W (the e2e aims at 2: the run's start time sets it)"; fi
   drv $T v3 wait-final >/dev/null
-  for f in epoch-$((S+1)) extra-$S extra-$((S+1)); do oracle $T "$ROOT/oracle" - verify-$f verify "$EP/$f.json" --full; expect "verified" "verify --full $f.json"; done
+  for f in epoch-$((S+1)) extra-$S extra-$((S+1)); do oracle $T "$ROOT/oracle" - verify-$f verify "$EP/$f.json" --full; expect_verified "verify --full $f.json"; done
   # the oracle key as the keeper (keeper.yml's default key): it claims without the tip; the D-47 reserve now allows it
   drv $T v3 extra-snap $((S+1))
   HELP keeper-claims$((S+1)) keeper --once
@@ -393,7 +403,7 @@ if has v3; then
   drv $T v3 wait-final >/dev/null
   publish_extra_step $T publish-extra$H $H; expect "extra epoch $H (is already )?published" "publish-extra: the heartbeat's extra-$H published once pushed"
   drv $T v3 wait-final >/dev/null
-  for f in epoch-$H extra-$H; do oracle $T "$ROOT/oracle" - verify-$f verify "$EP/$f.json" --full; expect "verified" "verify --full $f.json"; done
+  for f in epoch-$H extra-$H; do oracle $T "$ROOT/oracle" - verify-$f verify "$EP/$f.json" --full; expect_verified "verify --full $f.json"; done
   # the seat client prices a stranger's void of a heartbeat at SEAT_BOND_MIN (review r4 finding 3; a dry run as keeper2's
   # public key: nothing is signed or sent)
   K2PUB=$(node -e 'console.log(require(process.argv[1]).keeper2)' "$WORK/$T/driver/keys.json")
@@ -419,7 +429,7 @@ if has v3; then
   drv $T v3 wait-final >/dev/null
   publish_extra_step $T publish-extra$P $P; expect "extra epoch $P (is already )?published" "publish-extra: the heartbeat extra-$P published (the program accepts its 13 weeks)"
   drv $T v3 wait-final >/dev/null
-  for f in epoch-$P extra-$P; do oracle $T "$ROOT/oracle" - verify-$f verify "$EP/$f.json" --full; expect "verified" "verify --full $f.json"; done
+  for f in epoch-$P extra-$P; do oracle $T "$ROOT/oracle" - verify-$f verify "$EP/$f.json" --full; expect_verified "verify --full $f.json"; done
   K2 keeper-final keeper --once >/dev/null
   stage "health against the local state"
   # the keeper workflow writes the feed of the window that opened with epoch $P: the site serves it with the epochs

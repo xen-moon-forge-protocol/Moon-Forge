@@ -5,7 +5,7 @@
 # localnet Config.architect and the IDL authority, as 7PuG8… is on mainnet); then S5 census, S6 by the CLI commands of
 # deployments/upgrade-v3-signoff.md section 5 (extend, write-buffer, byte check, deploy, IDL upgrade, both authorities
 # to the DEPLOY_KEY), the pin helper, S6 / S7 census, S7 first run, S9 freeze, then the LATER house-keeper arm after the
-# freeze. Key layout as on upgrade day: the DEPLOY_KEY and the payee are fresh keys on an "offline medium" directory, passed
+# freeze. Key layout as on upgrade day: the DEPLOY_KEY and the payee are fresh keys in a separate key folder (the encrypted folder on upgrade day), passed
 # by path; the INITIAL_KEEPER is the localnet's compiled-in test keeper; the payee holds no lamports. Every dry run is
 # checked to leave every account untouched. F1-b (owner answer of 2026-10-25): S7 does not arm the house keeper and posts no
 # keeper bond; the S7 and S9 censuses expect no HouseKeeper; `s7.mjs --arm-keeper` (the later day, after the freeze here) arms
@@ -67,7 +67,7 @@ fi
 node tests/fork-rehearsal.mjs guard "$WORK/old.so" >/dev/null 2>&1 && { echo "old.so carries mainnet keys: the rehearsal needs the --features localnet twin" >&2; exit 1; }
 echo "old.so $(stat -c %s "$WORK/old.so") B, new $(stat -c %s "$NEW_SO") B sha256 $(sha256sum "$NEW_SO" | cut -d' ' -f1)"
 
-# --- keys: the deploy wallet twin, the offline medium (DEPLOY_KEY, payee), the compiled-in keeper and seat keys ------
+# --- keys: the deploy wallet twin, the separate key folder (DEPLOY_KEY, payee), the compiled-in keeper and seat keys ------
 ARCH=tests/fixtures/test-architect.json; ARCH_PUB=$(solana-keygen pubkey "$ARCH")
 KEEPER=tests/fixtures/test-keeper.json; KEEPER_PUB=$(solana-keygen pubkey "$KEEPER")
 COLD_PUB=$(solana-keygen pubkey tests/fixtures/test-cold.json)
