@@ -6,6 +6,8 @@
  * reproduce the exact Merkle root and data hash published on X1.
  */
 import * as dotenv from "dotenv";
+import * as fs from "fs";
+import * as path from "path";
 dotenv.config();
 
 export const PROGRAM_ID = process.env.X1_PROGRAM_ID || "57UE1U1t23ztg2noLp8pcpGW1B1Xw25rLH6ra9Mchea9";
@@ -50,19 +52,54 @@ const env = (k: string, d = "") => process.env[k] || d;
 /** Comma-separated RPC list from the environment (or the default list). */
 const rpcList = (k: string, d: string) => env(k, d).split(",").map((u) => u.trim()).filter(Boolean);
 
+/**
+ * The deployed portals (deployments/portals.json) are the default of PORTAL_<X> / START_<X>, so a verifier, a seat
+ * taker or a fork with no repository variables reads the same five chains as the project's workflows. A variable that
+ * is UNSET takes this default; a variable set to "" skips the chain (tests/e2e-oracle-v3.sh does that). START_<X>
+ * defaults to the deploy block only when the portal is the deployed one; with a portal from the environment it stays 0.
+ */
+function deployedPortals(): Map<number, { address: string; deployBlock: number }> {
+  const out = new Map<number, { address: string; deployBlock: number }>();
+  try {
+    const j = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "..", "deployments", "portals.json"), "utf8"));
+    for (const p of j?.portals ?? []) {
+      if (/^0x[0-9a-fA-F]{40}$/.test(String(p.address)) && Number.isSafeInteger(Number(p.deployBlock))) {
+        out.set(Number(p.chainId), { address: String(p.address), deployBlock: Number(p.deployBlock) });
+      }
+    }
+  } catch {
+    // not a full checkout (no deployments/): no default, as before
+  }
+  return out;
+}
+export const DEPLOYED_PORTALS = deployedPortals();
+
+/** Pure; tested: a chain's portal and start block from the environment `e`, else from the deployed portals. */
+export function portalSetting(
+  portalVar: string, startVar: string, chainId: number,
+  e: Record<string, string | undefined> = process.env, deployed: Map<number, { address: string; deployBlock: number }> = DEPLOYED_PORTALS,
+): { portal: string; startBlock: number } {
+  const fromFile = e[portalVar] === undefined;
+  const portal = fromFile ? deployed.get(chainId)?.address ?? "" : e[portalVar]!;
+  const startBlock = Number(e[startVar] || (fromFile ? deployed.get(chainId)?.deployBlock ?? 0 : 0));
+  return { portal, startBlock };
+}
+const portalOf = (k: string, chainId: number) => portalSetting(k, k.replace(/^PORTAL_/, "START_"), chainId).portal;
+const startOf = (k: string, portalVar: string, chainId: number) => portalSetting(portalVar, k, chainId).startBlock;
+
 // RPC lists: endpoints checked on 2026-10-12 to serve eth_getLogs over week-old blocks without an API key
 // (publicnode now refuses those "archive" requests without a personal token). Override with e.g. BASE_RPC_URL=a,b
-// D-53 (round 4): the five chains with a portal only; Ethereum, PulseChain and Moonbeam are removed (no portal, none
-// planned: XEN Prime takes Ethereum's XEN, PulseChain and Moonbeam have no priced market). A chain added later is a new,
-// reviewed entry here with its portal.
+// D-53 (round 4): the five chains with a portal only; Ethereum, PulseChain and Moonbeam have no entry (no portal: Moon
+// Forge launches with side-chain XEN, Ethereum XEN has its own path, PulseChain and Moonbeam have no priced market). A
+// chain added later is a new, reviewed entry here with its portal.
 // O-22 / T1-10: the BSC entry that carries a shared public NodeReal key (published in many places, rate-limited for
 // everyone using it) is the LAST resort, never the primary; the keyless endpoints come first.
 const RAW_CHAINS: Omit<ChainConfig, "rpc">[] = [
-  { chainId: 10, name: "Optimism", rpcs: rpcList("OP_RPC_URL", "https://mainnet.optimism.io,https://optimism.gateway.tenderly.co,https://optimism-rpc.publicnode.com"), portal: env("PORTAL_OP"), startBlock: Number(env("START_OP", "0")), confirmations: 120, logChunk: 10_000, xen: "0xeB585163DEbB1E637c6D617de3bEF99347cd75c8", gecko: "optimism" },
-  { chainId: 56, name: "BSC", rpcs: rpcList("BSC_RPC_URL", "https://bsc.rpc.blxrbdn.com,https://bsc-rpc.publicnode.com,https://bsc-mainnet.nodereal.io/v1/64a9df0874fb4a93b9d0a3849de012d3"), portal: env("PORTAL_BSC"), startBlock: Number(env("START_BSC", "0")), confirmations: 30, logChunk: 5_000, xen: "0x2AB0e9e4eE70FFf1fB9D67031E44F6410170d00e", gecko: "bsc" },
-  { chainId: 137, name: "Polygon", rpcs: rpcList("POLYGON_RPC_URL", "https://polygon.gateway.tenderly.co,https://polygon-bor-rpc.publicnode.com"), portal: env("PORTAL_POLYGON"), startBlock: Number(env("START_POLYGON", "0")), confirmations: 256, logChunk: 3_000, xen: "0x2AB0e9e4eE70FFf1fB9D67031E44F6410170d00e", gecko: "polygon_pos" },
-  { chainId: 43114, name: "Avalanche", rpcs: rpcList("AVAX_RPC_URL", "https://api.avax.network/ext/bc/C/rpc,https://avalanche-c-chain-rpc.publicnode.com"), portal: env("PORTAL_AVAX"), startBlock: Number(env("START_AVAX", "0")), confirmations: 30, logChunk: 2_000, xen: "0xC0C5AA69Dbe4d6DDdfBc89c0957686ec60F24389", gecko: "avax" },
-  { chainId: 8453, name: "Base", rpcs: rpcList("BASE_RPC_URL", "https://base.gateway.tenderly.co,https://mainnet.base.org,https://base-rpc.publicnode.com"), portal: env("PORTAL_BASE"), startBlock: Number(env("START_BASE", "0")), confirmations: 120, logChunk: 1_000, xen: "0xffcbF84650cE02DaFE96926B37a0ac5E34932fa5", gecko: "base" },
+  { chainId: 10, name: "Optimism", rpcs: rpcList("OP_RPC_URL", "https://mainnet.optimism.io,https://optimism.gateway.tenderly.co,https://optimism-rpc.publicnode.com"), portal: portalOf("PORTAL_OP", 10), startBlock: startOf("START_OP", "PORTAL_OP", 10), confirmations: 120, logChunk: 10_000, xen: "0xeB585163DEbB1E637c6D617de3bEF99347cd75c8", gecko: "optimism" },
+  { chainId: 56, name: "BSC", rpcs: rpcList("BSC_RPC_URL", "https://bsc.rpc.blxrbdn.com,https://bsc-rpc.publicnode.com,https://bsc-mainnet.nodereal.io/v1/64a9df0874fb4a93b9d0a3849de012d3"), portal: portalOf("PORTAL_BSC", 56), startBlock: startOf("START_BSC", "PORTAL_BSC", 56), confirmations: 30, logChunk: 5_000, xen: "0x2AB0e9e4eE70FFf1fB9D67031E44F6410170d00e", gecko: "bsc" },
+  { chainId: 137, name: "Polygon", rpcs: rpcList("POLYGON_RPC_URL", "https://polygon.gateway.tenderly.co,https://polygon-bor-rpc.publicnode.com"), portal: portalOf("PORTAL_POLYGON", 137), startBlock: startOf("START_POLYGON", "PORTAL_POLYGON", 137), confirmations: 256, logChunk: 3_000, xen: "0x2AB0e9e4eE70FFf1fB9D67031E44F6410170d00e", gecko: "polygon_pos" },
+  { chainId: 43114, name: "Avalanche", rpcs: rpcList("AVAX_RPC_URL", "https://api.avax.network/ext/bc/C/rpc,https://avalanche-c-chain-rpc.publicnode.com"), portal: portalOf("PORTAL_AVAX", 43114), startBlock: startOf("START_AVAX", "PORTAL_AVAX", 43114), confirmations: 30, logChunk: 2_000, xen: "0xC0C5AA69Dbe4d6DDdfBc89c0957686ec60F24389", gecko: "avax" },
+  { chainId: 8453, name: "Base", rpcs: rpcList("BASE_RPC_URL", "https://base.gateway.tenderly.co,https://mainnet.base.org,https://base-rpc.publicnode.com"), portal: portalOf("PORTAL_BASE", 8453), startBlock: startOf("START_BASE", "PORTAL_BASE", 8453), confirmations: 120, logChunk: 1_000, xen: "0xffcbF84650cE02DaFE96926B37a0ac5E34932fa5", gecko: "base" },
 ];
 export const CHAINS: ChainConfig[] = RAW_CHAINS.map((c) => ({ ...c, rpc: c.rpcs[0] }));
 

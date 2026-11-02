@@ -181,6 +181,7 @@ async function runEpoch(dry: boolean) {
     if (!c.portal) continue;
     const prevChain = prev?.chains.find((x) => x.chainId === c.chainId);
     const from = prevChain ? prevChain.toBlock : Math.max(0, c.startBlock - 1);
+    const startedMs = Date.now(); // the run log shows how long each chain's read took
     const to = await finalHead(c);
     if (to <= from) {
       // nothing new on this chain: carry the cursor and market reference forward
@@ -206,7 +207,7 @@ async function runEpoch(dry: boolean) {
       burn.clamped = !!p.clamped;
     }
     const totalSupply = await xenTotalSupply(c, to).catch(() => "0");
-    console.log(`  ${c.name}: blocks ${from + 1}..${to}, ${b.length} burns, XEN spot $${spot.usd}, liquidity $${Math.round(market.liquidityUsd)}`);
+    console.log(`  ${c.name}: blocks ${from + 1}..${to}, ${b.length} burns, XEN spot $${spot.usd}, liquidity $${Math.round(market.liquidityUsd)}, read in ${Math.round((Date.now() - startedMs) / 1000)} s`);
     burns.push(...b);
     chains.push({
       chainId: c.chainId, name: c.name, portal: c.portal, fromBlockExclusive: from, toBlock: to,

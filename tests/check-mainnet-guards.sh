@@ -30,6 +30,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT="$PWD"
+# the error lines are parsed below: no colour codes in the build logs (program-tests.yml sets CARGO_TERM_COLOR=always)
+export CARGO_TERM_COLOR=never
 MODE="${1:-full}"
 case "$MODE" in full|--quick|--final) ;; *) echo "usage: $0 [--quick|--final]" >&2; exit 2 ;; esac
 
@@ -43,7 +45,7 @@ LOGDIR="${MF_GUARD_LOGDIR:-$ROOT/target/guard-check}"
 mkdir -p "$LOGDIR"
 
 # rustc error lines of a build log, except the final "could not compile" summary
-errors_of() { grep -E '^error(\[E[0-9]+\])?:' "$1" | grep -vE '^error: could not compile' || true; }
+errors_of() { sed -E 's/\x1b\[[0-9;]*m//g' "$1" | grep -E '^error(\[E[0-9]+\])?:' | grep -vE '^error: could not compile' || true; }
 
 # --- step 1: in-place mainnet build ------------------------------------------------------------------------------
 LOG1="$LOGDIR/mainnet-inplace.log"

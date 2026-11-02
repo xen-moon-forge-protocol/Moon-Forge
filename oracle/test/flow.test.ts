@@ -626,6 +626,23 @@ async function main() {
     assert(verifyChainSetV3({ ...f2, chains: f2.chains.map((c) => (c.chainId === 369 ? { ...c, fromBlockExclusive: 25_000_500 } : c)) }, epoch1, more.filter((c) => c.portal)).some((e) => /start block/.test(e)));
   });
 
+  await test("portals: unset variables read deployments/portals.json (a verifier needs no repository variable); an empty one skips the chain", async () => {
+    const { portalSetting, DEPLOYED_PORTALS } = require("../src/config");
+    const P = "0x7b00f314aB48D223bee567181CA89c65126Bf6E9";
+    const deployed = DEPLOYED_PORTALS as Map<number, { address: string; deployBlock: number }>;
+    assert.deepStrictEqual([...deployed.keys()].sort((a, b) => a - b), [10, 56, 137, 8453, 43114]);
+    assert([...deployed.values()].every((d) => d.address === P), "the same portal address on the five chains");
+    // the five deploy blocks equal the repository variables START_<X> the workflows used (read on 2026-11-02)
+    assert.deepStrictEqual([10, 56, 137, 8453, 43114].map((id) => deployed.get(id)!.deployBlock), [157_898_892, 126_311_331, 95_131_060, 52_302_281, 96_979_937]);
+    assert.deepStrictEqual(portalSetting("PORTAL_BSC", "START_BSC", 56, {}), { portal: P, startBlock: 126_311_331 });
+    assert.deepStrictEqual(portalSetting("PORTAL_BSC", "START_BSC", 56, { PORTAL_BSC: "" }), { portal: "", startBlock: 0 }, "set to empty: the chain is skipped");
+    const local = "0x0000000000000000000000000000000000000001";
+    assert.deepStrictEqual(portalSetting("PORTAL_BASE", "START_BASE", 8453, { PORTAL_BASE: local }), { portal: local, startBlock: 0 }, "a portal from the environment never takes the mainnet deploy block");
+    assert.deepStrictEqual(portalSetting("PORTAL_BASE", "START_BASE", 8453, { PORTAL_BASE: local, START_BASE: "1001" }), { portal: local, startBlock: 1001 });
+    assert.deepStrictEqual(portalSetting("PORTAL_OP", "START_OP", 10, { START_OP: "158000000" }), { portal: P, startBlock: 158_000_000 });
+    assert.deepStrictEqual(portalSetting("PORTAL_ETH", "START_ETH", 1, {}), { portal: "", startBlock: 0 }, "no Ethereum portal");
+  });
+
   await test("A11.3: a silent log omission (mission-id gap, duplicate, counter mismatch) skips the chain instead of moving its cursor", async () => {
     const r = rec();
     const key = "10:158343717:158646117";

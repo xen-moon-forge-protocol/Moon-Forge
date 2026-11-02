@@ -216,7 +216,7 @@ v2_run() { # $1 tag, $2 oracle dir
 # is checked by `verify` instead (by both oracles)
 norm_epoch() { node -e 'const f=JSON.parse(require("fs").readFileSync(process.argv[1]));delete f.createdAt;delete f.dataHash;if(f.publish){delete f.publish.tx;delete f.publish.slot}if(f.artifacts)delete f.artifacts.slot;console.log(JSON.stringify(f,null,1))' "$1"; }
 # Forge Drop lines aside: the drop seed is a block hash after the publication (a different draw on every run)
-norm_log() { grep -v "Forge Drop" "$1" | sed -E 's/[1-9A-HJ-NP-Za-km-z]{64,90}/<sig>/g; s/[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z/<time>/g; s/slot [0-9]+/slot <n>/g'; }
+norm_log() { grep -v "Forge Drop" "$1" | sed -E 's/[1-9A-HJ-NP-Za-km-z]{64,90}/<sig>/g; s/[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z/<time>/g; s/slot [0-9]+/slot <n>/g; s/, read in [0-9]+ s//g'; }
 
 if has v2; then
   if [ "${E2E_V2_COMPARE:-1}" = 1 ]; then

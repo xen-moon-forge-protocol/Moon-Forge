@@ -720,6 +720,16 @@ t("a publication that can never be read turns red after 3 runs in a row and 72 h
   // a day with no process started (the run's budget was spent) carries the streak unchanged
   const carried = unreadableTrack(prev, null, false, day(4));
   assert.deepEqual([carried.unreadableSince, carried.unreadableRuns], [day(0), 4]);
+  // a process killed by its time limit (or crashed) before printing a verdict line read nothing: the run carries the
+  // streak unchanged instead of ending it; next to a process that did read the data, only that one counts
+  const { decisiveRuns } = require("../src/health-verify");
+  const killed = { status: "error", output: "Building…\n(killed: timed out after 25 min)" };
+  assert.deepEqual(decisiveRuns([killed]), []);
+  assert.deepEqual(decisiveRuns([killed, missed]), [missed]);
+  assert.deepEqual(decisiveRuns([{ status: "ok", output: "✅ epoch 9 (v3) verified" }]).length, 1);
+  const quiet = decisiveRuns([killed]);
+  const kept = unreadableTrack(prev, runUnreadable(quiet), quiet.length > 0, day(4));
+  assert.deepEqual([kept.unreadableSince, kept.unreadableRuns], [day(0), 4], "a killed run neither ends nor extends the streak");
   // one run that reads the publication ends the streak: back to warn (a chain RPC failure), never red
   const after = withUnreadable({ ...base, at: day(4), detail: "could not finish on chain 137" }, unreadableTrack(prev, runUnreadable([read]), true, day(4)));
   assert.equal(after.unreadableSince, undefined);

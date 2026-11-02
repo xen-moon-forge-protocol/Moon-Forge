@@ -43,12 +43,25 @@ async function withRetry<T>(fn: () => Promise<T>, what: string, tries = 6): Prom
   throw new Error(`${what} failed after ${tries} tries: ${String(err)}`);
 }
 
+/**
+ * The limit of one EVM RPC request. ethers' default (5 minutes) let a stalled connection hold one chunk for up to 20
+ * minutes (4 tries) before the next RPC was asked; a chunk read takes seconds (BSC, the slowest: about 4 s).
+ */
+export const EVM_RPC_TIMEOUT_MS = 60_000;
+
+/** A provider for one RPC of `chain`, with the request limit above. */
+export function evmProvider(rpc: string, chainId: number): ethers.JsonRpcProvider {
+  const req = new ethers.FetchRequest(rpc);
+  req.timeout = EVM_RPC_TIMEOUT_MS;
+  return new ethers.JsonRpcProvider(req, chainId, { staticNetwork: true });
+}
+
 /** Runs `fn` against each of the chain's RPCs in order until one succeeds (a whole read restarts on the next RPC). */
 export async function withFailover<T>(chain: ChainConfig, what: string, fn: (p: ethers.JsonRpcProvider, rpc: string) => Promise<T>): Promise<T> {
   const errors: string[] = [];
   for (const rpc of chain.rpcs) {
     try {
-      return await fn(new ethers.JsonRpcProvider(rpc, chain.chainId, { staticNetwork: true }), rpc);
+      return await fn(evmProvider(rpc, chain.chainId), rpc);
     } catch (e) {
       errors.push(`${new URL(rpc).host}: ${String(e).slice(0, 200)}`);
     }
@@ -156,7 +169,7 @@ export async function readChainV3(chain: ChainConfig, fromBlockExclusive: number
     const totalBurned: bigint = await withRetry(() => portal.totalBurned({ blockTag: toBlock }), `${chain.name} totalBurned@${toBlock}`, 3);
     // the logs: this RPC first, the chain's other RPCs (in order) as per-chunk fallbacks
     const order = [rpc, ...chain.rpcs.filter((r) => r !== rpc)];
-    const providers = order.map((u, i) => (i === 0 ? p : new ethers.JsonRpcProvider(u, chain.chainId, { staticNetwork: true })));
+    const providers = order.map((u, i) => (i === 0 ? p : evmProvider(u, chain.chainId)));
     const headOk = new Map<number, boolean>([[0, true]]);
     const read = await chunkedLogsV3(fromBlockExclusive, toBlock, chain.logChunk, providers.length, async (i, start, end) => {
       if (!headOk.has(i)) {

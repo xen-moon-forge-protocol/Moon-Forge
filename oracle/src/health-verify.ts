@@ -124,6 +124,16 @@ export function runUnreadable(runs: { status: VerificationEntry["status"]; outpu
 }
 
 /**
+ * Pure; tested: the processes of one run that reached a verdict on the publication data: a green exit, a VERIFY-CHAINS
+ * line or a VERIFY-UNREADABLE line. A process killed by its time limit (or one that crashed) before printing either
+ * line read nothing either way, so it neither counts a miss nor ends the streak: with no other process, the run
+ * carries the previous streak unchanged (unreadableTrack with ran = false).
+ */
+export function decisiveRuns<T extends { status: VerificationEntry["status"]; output: string }>(runs: T[]): T[] {
+  return runs.filter((r) => r.status === "ok" || parseUnreadableLine(r.output) !== null || parseChainLine(r.output) !== null);
+}
+
+/**
  * Pure; tested: the streak fields of the new entry. A miss continues the previous entry's streak on the same
  * file and data hash (or starts one at `at`); a run that read the data ends it; a run that started no process carries
  * the previous streak unchanged.
@@ -204,7 +214,8 @@ function main() {
         console.log(`${f.file} chain ${id}: ${o.chain.status} (${o.chain.detail})`);
       }
       const at = new Date().toISOString();
-      const e = withUnreadable(chainsEntry({ file: f.file, kind: f.kind, epoch: f.epoch, dataHash: f.dataHash, at }, chains, fileFailure, prevEntry?.fileFailure ?? null), unreadableTrack(prevEntry, runUnreadable(runs), runs.length > 0, at));
+      const decisive = decisiveRuns(runs);
+      const e = withUnreadable(chainsEntry({ file: f.file, kind: f.kind, epoch: f.epoch, dataHash: f.dataHash, at }, chains, fileFailure, prevEntry?.fileFailure ?? null), unreadableTrack(prevEntry, runUnreadable(decisive), decisive.length > 0, at));
       results.push(e);
       console.log(`${f.file}: ${e.status} (${e.detail})`);
       continue;
@@ -213,7 +224,8 @@ function main() {
     const r = runVerify(f.file, null, Math.max(MIN_RUN_MS, Math.min(TIMEOUT_MS, deadline - Date.now())));
     const at = new Date().toISOString();
     const prevWhole = prev?.results.find((x) => x.file === f.file && x.dataHash === f.dataHash);
-    results.push(withUnreadable({ file: f.file, kind: f.kind, epoch: f.epoch, dataHash: f.dataHash, status: r.status, detail: r.detail, at }, unreadableTrack(prevWhole, runUnreadable([r]), true, at)));
+    const decisive = decisiveRuns([r]);
+    results.push(withUnreadable({ file: f.file, kind: f.kind, epoch: f.epoch, dataHash: f.dataHash, status: r.status, detail: r.detail, at }, unreadableTrack(prevWhole, runUnreadable(decisive), decisive.length > 0, at)));
     console.log(`${f.file}: ${r.status}${r.detail ? ` (${r.detail})` : ""}`);
   }
   const out: VerificationFile = { at: new Date().toISOString(), results };

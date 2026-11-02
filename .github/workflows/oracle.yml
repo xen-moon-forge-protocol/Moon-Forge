@@ -55,7 +55,10 @@ jobs:
     # A job timeout is a cancellation on GitHub, which would skip the rescue steps below and lose the only
     # copy of an epoch that is already on-chain; so the job limit is generous and the long step has its own
     # limit (a step timeout is a plain failure, after which the rescue steps still run).
-    timeout-minutes: 180
+    # A week without a valued burn publishes nothing on the v2 program, so the next read spans several weeks: on
+    # 2026-11-01 BSC alone (2.7 million blocks, two weeks) took 38 minutes and a second run hit the old 60-minute
+    # step limit. The step now has 150 minutes and the job 240 (90 minutes left for the rescue steps).
+    timeout-minutes: 240
     permissions:
       contents: write # commit the epoch files
       actions: write # start the site deploy
@@ -79,7 +82,7 @@ jobs:
       - name: Build / publish epoch
         id: epoch
         working-directory: oracle
-        timeout-minutes: 60
+        timeout-minutes: 150
         env:
           ORACLE_PRIVATE_KEY: ${{ secrets.ORACLE_PRIVATE_KEY }}
           EPOCHS_DIR: ../frontend/public/epochs

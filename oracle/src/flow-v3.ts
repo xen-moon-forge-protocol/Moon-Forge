@@ -500,6 +500,7 @@ export async function assembleInputsV3(
     if (!c.portal) continue;
     const pc = prevCursor(prev, c.chainId);
     const from = pc !== undefined ? pc : Math.max(0, c.startBlock - 1);
+    const startedMs = Date.now(); // the run log shows how long each chain's read took
     try {
       const to = await s.finalHead(c);
       if (to <= from) throw new SkipChain(`no new final block (final head ${to}, cursor ${from})`);
@@ -618,7 +619,7 @@ export async function assembleInputsV3(
       });
       if (depth?.route) routes.set(c.chainId, depth.route);
       if (depth) depths.set(c.chainId, depth);
-      log(`  ${c.name}: blocks ${from + 1}..${to}, ${burns.length} burns (missions up to ${read.totalMissions}), XEN spot $${m.spotUsd}, liquidity $${Math.round(m.liquidityUsd)}${depth?.micro ? ` (on-chain $${Math.round(Number(depth.micro) / 1e6)})` : ""}${samples ? `, ${samples.length} hourly samples` : ""}`);
+      log(`  ${c.name}: blocks ${from + 1}..${to}, ${burns.length} burns (missions up to ${read.totalMissions}), XEN spot $${m.spotUsd}, liquidity $${Math.round(m.liquidityUsd)}${depth?.micro ? ` (on-chain $${Math.round(Number(depth.micro) / 1e6)})` : ""}${samples ? `, ${samples.length} hourly samples` : ""}, read in ${Math.round((Date.now() - startedMs) / 1000)} s`);
     } catch (e) {
       const reason = e instanceof SkipChain ? e.message : `${String((e as Error)?.message ?? e).slice(0, 300)}`;
       skipped.push({ chainId: c.chainId, name: c.name, reason });
