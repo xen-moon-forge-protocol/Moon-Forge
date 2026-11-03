@@ -169,12 +169,36 @@ export function pubkey(v, what) {
 }
 
 /**
+ * Legacy Pilot (oracle/src/legacy.ts): the one optional member of a rules block, with every parameter pinned and the
+ * snapshot's sha256 named (2026-11-01T00:00:00Z cutoff, Ethereum and the five Moon Forge chains, +50% of the first
+ * burn's base payout from at most 25% of the week's leftover in mission order, 20% of the first Artifact's price). It
+ * never changes a quote: the top-ups are paid after every normal claim, from what the week left.
+ */
+export const LEGACY_PILOT_V3 = Object.freeze({
+  cutoffTs: 1_793_491_200, sourceChains: Object.freeze([1, 10, 56, 137, 8453, 43114]), burnTopUpBps: 5_000, leftoverBps: 2_500, order: 'mission-order', artifactRebateBps: 2_000,
+});
+const LEGACY_PILOT_KEYS = ['artifactRebateBps', 'burnTopUpBps', 'cutoffTs', 'leftoverBps', 'order', 'snapshotSha256', 'sourceChains'];
+
+/** The Legacy Pilot member as the engine checks it (legacy.ts legacyPilotRulesOf), or a throw. */
+export function legacyPilotRulesOf(v) {
+  const o = exactKeys(v, LEGACY_PILOT_KEYS, 'rulesBlock.legacyPilot');
+  if (typeof o.snapshotSha256 !== 'string' || !/^[0-9a-f]{64}$/.test(o.snapshotSha256)) throw new Error(`rulesBlock.legacyPilot.snapshotSha256 ${JSON.stringify(o.snapshotSha256)} is not a lowercase sha256 hex`);
+  const want = { ...LEGACY_PILOT_V3, sourceChains: [...LEGACY_PILOT_V3.sourceChains], snapshotSha256: o.snapshotSha256 };
+  if (sortedJson(o) !== sortedJson(want)) throw new Error(`rulesBlock.legacyPilot ${String(sortedJson(o)).slice(0, 200)} is not the Legacy Pilot rule this kit implements`);
+  return want;
+}
+
+/**
  * The rules block `v` as the engine uses it, or a throw naming what is wrong (rewards.ts rulesBlockOf): programRules 3,
  * tipMin 0.2 XNT, autoClaimMin "0", the D-14 tie-break, the D-12 backlog rule, the D-18 rank-last rule and the price
- * rules are pinned; read from it: dustRule.vestMinEnt and the operator wallets with their dated exceptions.
+ * rules are pinned; read from it: dustRule.vestMinEnt and the operator wallets with their dated exceptions. The one
+ * optional member, legacyPilot, is checked and kept (it changes no quote).
  */
 export function rulesBlockOf(v) {
-  const o = exactKeys(v, ['autoClaimMin', 'backlogRule', 'dustRule', 'operatorWallets', 'priceRules', 'programHash', 'programRules', 'rulesId', 'tieBreak', 'tipMin'], 'rulesBlock');
+  const withLegacy = !!v && typeof v === 'object' && !Array.isArray(v) && Object.prototype.hasOwnProperty.call(v, 'legacyPilot');
+  const keys = ['autoClaimMin', 'backlogRule', 'dustRule', 'operatorWallets', 'priceRules', 'programHash', 'programRules', 'rulesId', 'tieBreak', 'tipMin'];
+  const o = exactKeys(v, withLegacy ? [...keys, 'legacyPilot'] : keys, 'rulesBlock');
+  const legacyPilot = withLegacy ? legacyPilotRulesOf(o.legacyPilot) : null;
   if (o.programRules !== 3) throw new Error(`rulesBlock.programRules ${JSON.stringify(o.programRules)}: a v3 file is published only on the upgraded program (3)`);
   if (o.programHash !== null && (typeof o.programHash !== 'string' || !/^[0-9a-f]{64}$/.test(o.programHash))) throw new Error(`rulesBlock.programHash ${JSON.stringify(o.programHash)} is not null or a lowercase sha256 hex`);
   if (typeof o.rulesId !== 'number' || !Number.isSafeInteger(o.rulesId) || o.rulesId < 1) throw new Error(`rulesBlock.rulesId ${JSON.stringify(o.rulesId)} is not a version number (1, 2, …)`);
@@ -224,6 +248,7 @@ export function rulesBlockOf(v) {
   return {
     programRules: 3, programHash: o.programHash, rulesId: o.rulesId, tipMin: o.tipMin, autoClaimMin: o.autoClaimMin, dustRule: { vestMinEnt: dust.vestMinEnt },
     tieBreak: TIE_BREAK_V3, backlogRule: BACKLOG_RULE_V3, operatorWallets: { rule: OPERATOR_RULE_V3, wallets, exceptions }, priceRules: JSON.parse(JSON.stringify(PRICE_RULES_V3)),
+    ...(legacyPilot ? { legacyPilot } : {}),
   };
 }
 

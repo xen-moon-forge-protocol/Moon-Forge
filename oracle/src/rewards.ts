@@ -77,6 +77,13 @@
  *    CLOCK_SKEW_MAX). So no backlog or operator burn ever lowers what a burn of the window is paid at its arrival, and
  *    no operator burn lowers anything any other burn is paid. Valuation stays by time: a backlog or operator burn
  *    enters its chain's curve memory at its own hour.
+ *  Legacy Pilot (legacy.ts, only under a rules block that carries `legacyPilot`): after ALL of the above, the first burn
+ *    of each listed EVM address (the snapshot of XEN burns before 2026-11-01) that no earlier file paid, in the arrival
+ *    order, operator burns excluded, receives ⌊alloc × 50%⌋ on its tier-0 leaf, the week's top-ups together capped at
+ *    25% of capacity.left (0 in a shortfall week) and served in mission order (whole, one partial, then 0; a 0 keeps the
+ *    address eligible), each through the build limit like a leftover top-up. They are the week's last claims: no burn's
+ *    record, no capacity number and no normal target is ever different for them (LEGACY-1), and the anomaly gate reads
+ *    the plan without them. The paid addresses are carried file to file (legacy.used).
  */
 import { createHash } from "crypto";
 import { keccak_256 } from "@noble/hashes/sha3";
@@ -84,6 +91,7 @@ import { PublicKey } from "@solana/web3.js";
 import { TIER_MULTIPLIER } from "./config";
 import { Burn } from "./evm";
 import { buildTree, dataHash as dataHashV2, EpochFile, Leaf, verifyEpochFile } from "./epoch";
+import { addressListOf, bpsOf, evmAddressOf, LegacyListingV3, LegacyPilotRulesV3, legacyPilotRulesOf } from "./legacy";
 
 // ── policy constants (v3) ──────────────────────────────────────────────────────────────────────
 export const BPS = 10_000n;
@@ -390,6 +398,12 @@ export interface RulesBlockV3 {
   operatorWallets: OperatorWalletsV3;
   /** D-13, D-22 (a, c), D-17: the price, liquidity and gate parameters (pinned to PRICE_RULES_V3) */
   priceRules: PriceRulesV3;
+  /**
+   * Legacy Pilot (legacy.ts, owner item 19): present only in a block that carries the rule (its parameters pinned, the
+   * snapshot's sha256 named). Absent = no Legacy Pilot rule: the file has no `legacy` member and is exactly a file of the
+   * rules without it.
+   */
+  legacyPilot?: LegacyPilotRulesV3;
 }
 
 /** The rules block of this engine with nothing pinned and no operator wallet listed (rules-v3.ts fills the values in force). */
@@ -427,7 +441,10 @@ const strictlyAscending = (xs: string[], what: string) => {
  * operator wallets with their exceptions.
  */
 export function rulesBlockOf(v: unknown): RulesBlockV3 {
-  const o = exactKeys(v, RULES_KEYS, "rulesBlock");
+  // Legacy Pilot: the one optional member (legacy.ts); every other member is required
+  const withLegacy = !!v && typeof v === "object" && !Array.isArray(v) && Object.prototype.hasOwnProperty.call(v, "legacyPilot");
+  const o = exactKeys(v, withLegacy ? [...RULES_KEYS, "legacyPilot"] : RULES_KEYS, "rulesBlock");
+  const legacyPilot = withLegacy ? legacyPilotRulesOf(o.legacyPilot) : null;
   if (o.programRules !== 3) throw new Error(`rulesBlock.programRules ${JSON.stringify(o.programRules)}: a v3 file is published only on the upgraded program (3)`);
   if (o.programHash !== null && (typeof o.programHash !== "string" || !/^[0-9a-f]{64}$/.test(o.programHash))) throw new Error(`rulesBlock.programHash ${JSON.stringify(o.programHash)} is not null or a lowercase sha256 hex`);
   if (typeof o.rulesId !== "number" || !Number.isSafeInteger(o.rulesId) || o.rulesId < 1) throw new Error(`rulesBlock.rulesId ${JSON.stringify(o.rulesId)} is not a version number (1, 2, …)`);
@@ -481,6 +498,7 @@ export function rulesBlockOf(v: unknown): RulesBlockV3 {
     dustRule: { vestMinEnt: dust.vestMinEnt as string }, tieBreak: TIE_BREAK_V3, backlogRule: BACKLOG_RULE_V3,
     operatorWallets: { rule: OPERATOR_RULE_V3, wallets, exceptions },
     priceRules: JSON.parse(JSON.stringify(PRICE_RULES_V3)) as PriceRulesV3,
+    ...(legacyPilot ? { legacyPilot } : {}),
   };
 }
 
@@ -702,6 +720,11 @@ export interface EpochInputsV3 {
   noMarket?: number[];
   /** D-22 (b): the TVL (µUSD, 2 × the USDC.X side) of every candidate XNT/USD pool at this build; absent = not read */
   xntPools?: { pool: string; tvlMicro: string }[];
+  /**
+   * Legacy Pilot (legacy.ts): the window's burn pilots the snapshot lists (legacyPilotInputsV3), required by a build under
+   * a rules block that carries the rule, refused without it. The week-so-far feed may leave it out (nobody listed).
+   */
+  legacyPilot?: LegacyListingV3 | null;
 }
 
 /**
@@ -864,6 +887,41 @@ export interface CapacityV3 {
   shortfall: { stage: "arrival" | "leftover"; kept: number; wanted: string; claim: string; planned: string } | null;
 }
 
+/** Legacy Pilot, benefit 1: one candidate burn (the first burn of a listed, unused address in the arrival order). */
+export interface LegacyTopUpV3 {
+  /** index into burns (the arrival order) */
+  burn: number;
+  /** the burn's EVM address (lowercase) */
+  pilot: string;
+  /** the X1 wallet whose Launchpad (tier-0) leaf carries the top-up */
+  x1: string;
+  /** ⌊alloc × burnTopUpBps / 10^4⌋: the whole top-up */
+  want: string;
+  /** what is paid: want, a part of it (the cap ran out, or the build limit), or 0 */
+  paid: string;
+}
+
+/**
+ * Legacy Pilot, benefit 1 (legacy.ts): present only on a file built under a rules block that carries the rule. Nothing
+ * else in the file depends on it: burns, capacity and every normal target are those of the rules without it; the targets
+ * (so the leaves) add the paid top-ups on the burners' tier-0 leaves.
+ */
+export interface LegacyEpochV3 {
+  /** the input: the window's pilots the snapshot lists (or why it was unavailable) */
+  listing: LegacyListingV3;
+  /** capacity.left: what every normal claim of the week (the operator burns' included) left of C */
+  leftover: string;
+  /** ⌊leftover × leftoverBps / 10^4⌋; 0 in a shortfall week (the build limit already cut a normal claim) */
+  cap: string;
+  /** Σ want and Σ paid of the candidates */
+  wanted: string;
+  paid: string;
+  /** every candidate, in the arrival order: the earlier ones whole, then at most one partial, then 0 */
+  topUps: LegacyTopUpV3[];
+  /** every address paid a top-up so far, this file included (lowercase, ascending): carried to the next file */
+  used: string[];
+}
+
 export interface EpochBodyV3 {
   version: 3;
   programId: string;
@@ -921,6 +979,8 @@ export interface EpochBodyV3 {
    * never a previous file or an extra base (provisionalError).
    */
   provisional?: { reason: string; publishable: false };
+  /** Legacy Pilot (LegacyEpochV3): present only when the rules block carries the rule */
+  legacy?: LegacyEpochV3;
 }
 
 export interface EpochFileV3 extends EpochBodyV3 {
@@ -2172,7 +2232,11 @@ export function computeEpochV3SkippingUnpriced(inputs: EpochInputsV3, prev?: Any
       skipped.push(e.chainId);
       // D-21: a burn without a XEN price is a skip for lack of an eligible market (for a chain the previous file carries)
       const carried = !!prev && prev.chains.some((c) => c.chainId === e.chainId);
-      current = { ...current, chains: current.chains.filter((c) => c.chainId !== e.chainId), ...(carried ? { noMarket: [...(current.noMarket ?? []), e.chainId] } : {}) };
+      const chains = current.chains.filter((c) => c.chainId !== e.chainId);
+      // Legacy Pilot: the listing names only pilots of the burns left in the window (the skipped chain's wait with them)
+      const left = new Set(chains.flatMap((c) => c.burns.map((b) => String(b.pilot).toLowerCase())));
+      const lp = current.legacyPilot ? { legacyPilot: { ...current.legacyPilot, listed: current.legacyPilot.listed.filter((a) => left.has(a)) } } : {};
+      current = { ...current, chains, ...lp, ...(carried ? { noMarket: [...(current.noMarket ?? []), e.chainId] } : {}) };
     }
   }
 }
@@ -2267,6 +2331,92 @@ export interface WindowStateV3 {
   alloc: ReturnType<typeof allocateBurns>;
   shortfall: CapacityV3["shortfall"];
   provisional: string | null;
+  /**
+   * Legacy Pilot (legacy.ts): the week's top-ups, made after every normal claim through the same build limit; null when
+   * the rules block does not carry the rule, or (the week-so-far feed only) when the inputs record no listing
+   */
+  legacy: LegacyEpochV3 | null;
+  /** the rule of the block (null: none); with legacy null under a rule, the inputs recorded no listing */
+  legacyRule: LegacyPilotRulesV3 | null;
+}
+
+/** Legacy Pilot: a recorded listing, checked against the rule and the window's burn pilots (null: none recorded). */
+function checkedLegacyListing(rule: LegacyPilotRulesV3 | null, v: unknown, pilots: Set<string>): LegacyListingV3 | null {
+  if (!rule) {
+    if (v !== undefined && v !== null) throw new Error("legacyPilot: a Legacy Pilot listing is recorded only under a rules block that carries the rule");
+    return null;
+  }
+  if (v === undefined || v === null) return null;
+  const has = typeof v === "object" && !Array.isArray(v) && Object.prototype.hasOwnProperty.call(v, "unavailable");
+  const o = exactKeys(v, has ? ["listed", "snapshotSha256", "unavailable"] : ["listed", "snapshotSha256"], "legacyPilot");
+  if (o.snapshotSha256 !== rule.snapshotSha256) throw new Error(`legacyPilot.snapshotSha256 ${JSON.stringify(o.snapshotSha256)} is not the rule's ${rule.snapshotSha256}`);
+  const listed = addressListOf(o.listed, "legacyPilot.listed");
+  for (const a of listed) if (!pilots.has(a)) throw new Error(`legacyPilot.listed: ${a} is not the pilot of a burn of the window`);
+  if (!has) return { snapshotSha256: rule.snapshotSha256, listed };
+  const u = exactKeys(o.unavailable, ["reason"], "legacyPilot.unavailable");
+  if (typeof u.reason !== "string" || u.reason !== reasonLineOf(u.reason)) throw new Error("legacyPilot.unavailable.reason must be one trimmed line of at most 500 characters");
+  if (listed.length) throw new Error("legacyPilot: an unavailable listing lists nobody");
+  return { snapshotSha256: rule.snapshotSha256, listed, unavailable: { reason: u.reason } };
+}
+
+/** Legacy Pilot: the addresses the previous file records as paid a top-up (none without a v3 previous file carrying the rule). */
+function legacyUsedOf(pv: AnyEpochFile | null): Set<string> {
+  if (!pv || pv.version !== 3) return new Set();
+  const l = (pv as { legacy?: unknown }).legacy;
+  if (l === undefined) return new Set();
+  if (!l || typeof l !== "object") throw new Error(`epoch-${pv.epoch}.json legacy is not an object`);
+  return new Set(addressListOf((l as { used?: unknown }).used, `epoch-${pv.epoch}.json legacy.used`));
+}
+
+/**
+ * Legacy Pilot, benefit 1 (legacy.ts): the week's top-ups, made AFTER every normal claim of every stage (the operator
+ * burns' included) and before nothing, so no normal claim can be lowered by them. Candidates: in the arrival order, the
+ * first burn of each address the listing names that no earlier file paid (`usedBefore`), operator burns excluded. Each
+ * wants ⌊alloc × burnTopUpBps / 10^4⌋ (alloc = the burn's base payout, unchanged); the week's cap is ⌊left ×
+ * leftoverBps / 10^4⌋ of what every normal claim left of C (`left`), 0 after a shortfall cut (`cut`). Mission order:
+ * each candidate takes min(want, what the cap still holds), so the earlier ones are whole, one is partial and the rest
+ * are 0. With a `gate` (the build limit, after every normal claim was booked on it) each top-up is booked on the
+ * burner's tier-0 leaf like a leftover top-up: one that does not fit with its spare keeper tip is cut to what fits
+ * (fitClaim) and every later one is 0, so Σ score + keeper tips stays within the limit and the normal plan is untouched.
+ * An address is used only by a top-up above 0. `paid[i]` is what candidate i was paid (indices into topUps).
+ */
+export function legacyPassV3(
+  rule: LegacyPilotRulesV3, listing: LegacyListingV3, usedBefore: ReadonlySet<string>,
+  ws: { b: { pilot: string; x1: string }; operator: boolean; basePaid: bigint; bandPaid: bigint }[], left: bigint, cut: boolean, gate?: ClaimGate,
+): LegacyEpochV3 {
+  const listed = new Set(listing.listed);
+  const cap = cut || left <= 0n ? 0n : bpsOf(left, rule.leftoverBps);
+  let remaining = cap;
+  let stopped = false;
+  let wanted = 0n;
+  let paid = 0n;
+  const seen = new Set<string>();
+  const used = new Set(usedBefore);
+  const topUps: LegacyTopUpV3[] = [];
+  ws.forEach((w, i) => {
+    if (w.operator) return;
+    const pilot = evmAddressOf(w.b.pilot, `burn ${i} pilot`);
+    if (!listed.has(pilot) || usedBefore.has(pilot) || seen.has(pilot)) return;
+    seen.add(pilot);
+    const want = bpsOf(w.basePaid + w.bandPaid, rule.burnTopUpBps);
+    let give = stopped ? 0n : min(want, remaining);
+    if (gate && give > 0n) {
+      const room = gate.room();
+      const t0 = gate.launchpad(i);
+      const th = t0 < KEEPER_TIP_MIN_CLAIM ? [KEEPER_TIP_MIN_CLAIM - t0] : [];
+      if (give + KEEPER_TIP * spareTips(give, th) > room) {
+        give = fitClaim(room, th);
+        stopped = true;
+      }
+      gate.add(i, 0, 0n, give);
+    }
+    remaining -= give;
+    wanted += want;
+    paid += give;
+    if (give > 0n) used.add(pilot);
+    topUps.push({ burn: i, pilot, x1: w.b.x1, want: want.toString(), paid: give.toString() });
+  });
+  return { listing, leftover: left.toString(), cap: cap.toString(), wanted: wanted.toString(), paid: paid.toString(), topUps, used: [...used].sort() };
 }
 
 export function windowStateV3(inputs: EpochInputsV3, prev?: AnyEpochFile | null, opts: WindowOptsV3 = {}): WindowStateV3 {
@@ -2500,7 +2650,8 @@ export function windowStateV3(inputs: EpochInputsV3, prev?: AnyEpochFile | null,
   // takes the room left and every later claim is 0. C itself and every daily tranche stay as quoted, so no later burn,
   // of any tier, can lower what an earlier burn is paid at its arrival.
   const limit = buildLimit(Fbuild);
-  const a = allocateBurns(works, C, minVestEnt, opts.limit === false ? undefined : limitGate(limit, (i) => works[i].b.x1), plan);
+  const gate = opts.limit === false ? undefined : limitGate(limit, (i) => works[i].b.x1);
+  const a = allocateBurns(works, C, minVestEnt, gate, plan);
   /** what FCFS at C would pay with nothing cut (the plan), recorded with a cut: Σ alloc is what is paid */
   const planned = () => {
     const shadow = works.map((w) => allocItem(w.tier, w.day, w.lp, w.band));
@@ -2510,10 +2661,16 @@ export function windowStateV3(inputs: EpochInputsV3, prev?: AnyEpochFile | null,
   const shortfall: CapacityV3["shortfall"] =
     a.cut === null ? null : { stage: a.cut.stage, kept: a.cut.kept, wanted: a.cut.wanted.toString(), claim: a.cut.claim.toString(), planned: planned().toString() };
   const seniorAhead = works.reduce((s, w) => (rankClassV3(w) === 0 ? s + w.senior : s), 0n);
+  // Legacy Pilot (legacy.ts): the one-time top-ups, after every normal claim was made and booked (nothing above reads them)
+  const legacyRule = rulesBlock.legacyPilot ?? null;
+  const pilotsOf = () => new Set(works.map((w) => evmAddressOf(w.b.pilot, `burn ${w.b.chainId}:${w.b.txHash}:${w.b.logIndex} pilot`)));
+  const listing = checkedLegacyListing(legacyRule, inputs.legacyPilot, legacyRule ? pilotsOf() : new Set());
+  const legacy = legacyRule && listing ? legacyPassV3(legacyRule, listing, legacyUsedOf(pv), works, a.left, a.cut !== null, gate) : null;
   return {
     epoch, v3FirstEpoch, prevDataHash: p.dataHash, startTs, endTs, days, twap, api, xBuild, xFloor, prevX: p.x, xRef, switchRefs, rulesBlock, chains, works,
     plan, seniorAhead, snapshot, unavailable, Fbuild, open, Fref, planCash, trancheCap, C, peg,
     xdex: { atBuild: xdexAtBuild, capReserve: p.capReserve === null ? null : p.capReserve.toString() }, xntPool: xntPoolRecordV3(p.xntPool, inputs.xntPools), limit, alloc: a, shortfall, provisional,
+    legacy, legacyRule,
   };
 }
 
@@ -2533,9 +2690,12 @@ export function computeEpochV3(inputs: EpochInputsV3, prev?: AnyEpochFile | null
   // the build always consults the build limit, whatever the caller passes
   const {
     epoch, v3FirstEpoch, prevDataHash, startTs, endTs, days, twap, api, xBuild, xFloor, prevX, xRef, switchRefs, rulesBlock, chains, works,
-    snapshot, unavailable, Fbuild, open, Fref, planCash, trancheCap, C, peg, xdex, xntPool, limit, alloc: a, shortfall, provisional,
+    snapshot, unavailable, Fbuild, open, Fref, planCash, trancheCap, C, peg, xdex, xntPool, limit, alloc: a, shortfall, provisional, legacy, legacyRule,
   } = windowStateV3(inputs, prev, { provisional: opts.provisional ?? null, limit: true });
-  // targets: the locked piece on the burn's tier, the Launchpad piece on tier 0; nothing else is added to any leaf (A13.1)
+  // Legacy Pilot: a build under the rule records its listing (legacyPilotInputsV3), so verify reproduces who was listed
+  if (legacyRule && !legacy) throw new Error("a build under the Legacy Pilot rule records its listing (inputs.legacyPilot, legacy.ts legacyPilotInputsV3)");
+  // targets: the locked piece on the burn's tier, the Launchpad piece on tier 0; no Artifact term is added to any leaf
+  // (A13.1); the only addition is a Legacy Pilot top-up, on the burner's tier-0 leaf, after every normal claim
   const sums = new Map<string, bigint>();
   const add = (player: string, tier: number, v: bigint) => {
     if (v > 0n) sums.set(leafKey(player, tier), (sums.get(leafKey(player, tier)) ?? 0n) + v);
@@ -2544,6 +2704,8 @@ export function computeEpochV3(inputs: EpochInputsV3, prev?: AnyEpochFile | null
     add(w.b.x1, w.leafTier, w.lockedLp + w.bandPaid);
     add(w.b.x1, 0, w.basePaid - w.lockedLp);
   }
+  const legacyPaid = legacy ? BigInt(legacy.paid) : 0n;
+  for (const t of legacy?.topUps ?? []) add(t.x1, 0, BigInt(t.paid));
   const targets: TargetV3[] = [...sums.entries()]
     .map(([k, v]) => {
       const i = k.lastIndexOf(":");
@@ -2561,8 +2723,9 @@ export function computeEpochV3(inputs: EpochInputsV3, prev?: AnyEpochFile | null
   for (const w of works) {
     if (w.value < 0n || w.value > w.spot || w.basePaid < 0n || w.bandPaid < 0n) throw new Error(`burn ${w.b.chainId}:${w.b.txHash}:${w.b.logIndex}: allocation out of bounds`);
   }
-  if (paidFromC > C) throw new Error("burners received more than the cash capacity");
-  if (enc.T !== paidFromC) throw new Error("targets are not exactly the burners' allocations");
+  if (paidFromC + legacyPaid > C) throw new Error("burners received more than the cash capacity");
+  if (legacy && legacyPaid > BigInt(legacy.cap)) throw new Error("the Legacy Pilot top-ups exceed their cap");
+  if (enc.T !== paidFromC + legacyPaid) throw new Error("targets are not exactly the burners' allocations (and the Legacy Pilot top-ups)");
   if (plannedOutflow(enc.leaves.map((l) => BigInt(l.score)), enc.totalScore) > limit) throw new Error("cannot fit the epoch within the build limit");
   // a heartbeat has no tree: forge.rs epoch_shape wants the all-zero root, total 0 and rate cap 0
   const tree = heartbeat ? { root: HEARTBEAT_ROOT, totalScore: "0" } : buildTree(epoch, enc.leaves);
@@ -2615,6 +2778,7 @@ export function computeEpochV3(inputs: EpochInputsV3, prev?: AnyEpochFile | null
     rateCap: heartbeat ? "0" : "1",
     ...(heartbeat ? { heartbeat: true as const } : {}),
     ...(provisional !== null ? { provisional: { reason: provisional, publishable: false as const } } : {}),
+    ...(legacy ? { legacy } : {}),
   };
 }
 
@@ -2685,6 +2849,8 @@ export function inputsOf(f: EpochBodyV3): EpochInputsV3 {
     noMarket: f.noMarket ?? [],
     // D-22 (b): the candidates' TVL readings of this build
     xntPools: f.xntPoolReadings ?? [],
+    // Legacy Pilot: the listing the build recorded (absent without the rule)
+    ...(f.legacy !== undefined ? { legacyPilot: f.legacy?.listing ?? null } : {}),
   };
 }
 
@@ -2746,6 +2912,8 @@ export function verifyEpochV3(f: EpochFileV3, prev?: AnyEpochFile | null): strin
       }
     }
     if (BigInt(f.capacity.cash) > (BigInt(f.freePool.ref) * PLAN_BPS) / BPS) errors.push("capacity above 8% of F_ref");
+    // Legacy Pilot, checked on the recorded numbers independently of the recomputation: leftover-only, capped, once each
+    if (f.legacy !== undefined) errors.push(...legacyRecordErrorsV3(f));
     // I1 and I9 checked on the published numbers, independently of the encoder
     const TS = BigInt(f.totalScore);
     const scores = f.leaves.map((l) => BigInt(l.score));
@@ -2780,6 +2948,65 @@ export function verifyEpochV3(f: EpochFileV3, prev?: AnyEpochFile | null): strin
   return errors;
 }
 
+/**
+ * Legacy Pilot: the recorded section against the recorded numbers (no recomputation): the rule is in the block, the
+ * leftover is capacity.left, the cap at most leftoverBps of it, each top-up at most its want = ⌊alloc × burnTopUpBps /
+ * 10^4⌋ of a non-operator burn of the listed pilot, once per address and never for an address the file says was used
+ * before it, Σ paid ≤ cap, and Σ alloc + Σ paid ≤ C.
+ */
+export function legacyRecordErrorsV3(f: EpochBodyV3): string[] {
+  const out: string[] = [];
+  const L = f.legacy;
+  if (!L) return out;
+  try {
+    const rule = rulesBlockOf(f.rulesBlock).legacyPilot;
+    if (!rule) return ["a Legacy Pilot section without the rule in the rules block"];
+    const left = uint(f.capacity.left, "capacity.left");
+    if (L.leftover !== f.capacity.left) out.push(`legacy.leftover ${L.leftover} is not capacity.left ${f.capacity.left}`);
+    const cap = uint(L.cap, "legacy.cap");
+    if (cap > bpsOf(left, rule.leftoverBps)) out.push(`legacy.cap ${L.cap} above ${rule.leftoverBps / 100}% of the leftover`);
+    if (f.capacity.shortfall !== null && cap !== 0n) out.push("a Legacy Pilot cap above 0 in a shortfall week");
+    const listed = new Set(addressListOf(L.listing.listed, "legacy.listing.listed"));
+    const used = new Set(addressListOf(L.used, "legacy.used"));
+    const seen = new Set<string>();
+    let paid = 0n;
+    let wanted = 0n;
+    for (const [k, t] of L.topUps.entries()) {
+      const b = f.burns[t.burn];
+      const want = uint(t.want, `legacy.topUps[${k}].want`);
+      const give = uint(t.paid, `legacy.topUps[${k}].paid`);
+      if (!b) {
+        out.push(`legacy.topUps[${k}]: no burn ${t.burn}`);
+        continue;
+      }
+      if (b.operator) out.push(`legacy.topUps[${k}]: an operator burn`);
+      if (t.pilot !== evmAddressOf(b.pilot, "burn pilot") || t.x1 !== b.x1) out.push(`legacy.topUps[${k}]: pilot or x1 is not burn ${t.burn}'s`);
+      if (!listed.has(t.pilot)) out.push(`legacy.topUps[${k}]: ${t.pilot} is not listed`);
+      if (seen.has(t.pilot)) out.push(`legacy.topUps[${k}]: ${t.pilot} twice`);
+      seen.add(t.pilot);
+      if (want !== bpsOf(BigInt(b.alloc), rule.burnTopUpBps)) out.push(`legacy.topUps[${k}]: want ${t.want} is not ${rule.burnTopUpBps / 100}% of the burn's base payout ${b.alloc}`);
+      if (give > want) out.push(`legacy.topUps[${k}]: paid above want`);
+      if (give > 0n && !used.has(t.pilot)) out.push(`legacy.topUps[${k}]: ${t.pilot} paid but not recorded as used`);
+      paid += give;
+      wanted += want;
+    }
+    if (paid !== uint(L.paid, "legacy.paid") || wanted !== uint(L.wanted, "legacy.wanted")) out.push("legacy.paid / wanted are not the sums of the top-ups");
+    if (paid > cap) out.push(`legacy.paid ${paid} above the cap ${cap}`);
+    const alloc = f.burns.reduce((s, b) => s + BigInt(b.alloc), 0n);
+    if (alloc + paid > uint(f.capacity.cash, "capacity.cash")) out.push("Σ alloc + the Legacy Pilot top-ups above the week's capacity C");
+  } catch (e) {
+    out.push(`legacy: ${(e as Error).message}`);
+  }
+  return out;
+}
+
+/** Legacy Pilot: the top-ups paid per X1 wallet (on its tier-0 leaf), empty without the rule. */
+export function legacyByWalletV3(f: { legacy?: LegacyEpochV3 }): Map<string, bigint> {
+  const m = new Map<string, bigint>();
+  for (const t of f.legacy?.topUps ?? []) if (t.paid !== "0") m.set(t.x1, (m.get(t.x1) ?? 0n) + BigInt(t.paid));
+  return m;
+}
+
 // ── D-17: the anomaly gate (published thresholds: rulesBlock.priceRules.gate) ─────────────────────────────
 /** One reason the gate holds an epoch: a stable code and the numbers behind it. */
 export interface GateReasonV3 {
@@ -2804,21 +3031,31 @@ export interface GateReasonV3 {
 export function anomalyGateV3(f: EpochBodyV3, prev: AnyEpochFile | null, history: AnyEpochFile[]): GateReasonV3[] {
   const out: GateReasonV3[] = [];
   const C = BigInt(f.capacity.cash);
+  // Legacy Pilot: the gate reads the NORMAL plan only (every Legacy Pilot top-up taken out of the targets, the leaf count
+  // and the total score, here and in the history), so the rule can never hold, and so delay, anyone's epoch
+  const normal = (h: { targets?: TargetV3[]; leaves: Leaf[]; totalScore: string; legacy?: LegacyEpochV3 }) => {
+    const extra = legacyByWalletV3(h);
+    const legacyPaid = [...extra.values()].reduce((s, x) => s + x, 0n);
+    const leaves = extra.size === 0 ? h.leaves.length : h.leaves.filter((l) => l.tier !== 0 || BigInt(l.score) > (extra.get(l.player) ?? 0n)).length;
+    return { extra, leaves: BigInt(leaves), score: BigInt(h.totalScore) - legacyPaid };
+  };
+  const mine = normal(f);
   const byWallet = new Map<string, bigint>();
   for (const t of f.targets) byWallet.set(t.player, (byWallet.get(t.player) ?? 0n) + BigInt(t.target));
+  for (const [w, x] of mine.extra) byWallet.set(w, (byWallet.get(w) ?? 0n) - x);
   for (const [w, v] of [...byWallet.entries()].sort((a, b) => cmpStr(a[0], b[0]))) {
     if (C > 0n && v * BPS > C * BigInt(GATE_WALLET_SHARE_BPS)) out.push({ code: "wallet-share", text: `wallet ${w} takes ${v} of the capacity ${C} lamports (more than ${GATE_WALLET_SHARE_BPS / 100}%)` });
   }
   const recent = history.slice(0, GATE_HISTORY_EPOCHS);
-  const leafCounts = recent.map((h) => BigInt(h.leaves.length)).filter((x) => x > 0n);
+  const leafCounts = recent.map((h) => (h.version === 3 ? normal(h).leaves : BigInt(h.leaves.length))).filter((x) => x > 0n);
   if (leafCounts.length) {
     const m = medianWithZeros(leafCounts);
-    if (BigInt(f.leaves.length) > BigInt(GATE_LEAF_COUNT_X) * m) out.push({ code: "leaf-count", text: `${f.leaves.length} leaves, more than ${GATE_LEAF_COUNT_X}× the median ${m} of the last ${leafCounts.length} epochs` });
+    if (mine.leaves > BigInt(GATE_LEAF_COUNT_X) * m) out.push({ code: "leaf-count", text: `${mine.leaves} leaves, more than ${GATE_LEAF_COUNT_X}× the median ${m} of the last ${leafCounts.length} epochs` });
   }
-  const scores = recent.filter((h) => h.version === 3).map((h) => BigInt(h.totalScore)).filter((x) => x > 0n);
+  const scores = recent.filter((h) => h.version === 3).map((h) => normal(h as EpochFileV3).score).filter((x) => x > 0n);
   if (scores.length) {
     const m = medianWithZeros(scores);
-    if (BigInt(f.totalScore) > BigInt(GATE_SCORE_X) * m) out.push({ code: "score-jump", text: `total score ${f.totalScore}, more than ${GATE_SCORE_X}× the median ${m} of the last ${scores.length} v3 epochs` });
+    if (mine.score > BigInt(GATE_SCORE_X) * m) out.push({ code: "score-jump", text: `total score ${mine.score}, more than ${GATE_SCORE_X}× the median ${m} of the last ${scores.length} v3 epochs` });
   }
   if (f.burns.length) {
     const fb = f.burns.filter((b) => b.priceRule === "cap" || b.priceRule === "spot" || b.xntRule === "floor" || b.xntRule === "build").length;

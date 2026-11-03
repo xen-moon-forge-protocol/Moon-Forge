@@ -532,6 +532,18 @@ export function houseDepositGuard({ amount, unreserved, reserved, totalShares, s
   return { minted, fair, haircutBps, minShares, refuse };
 }
 
+/** The upgradeable BPF loader and Metaplex Core's ProgramData account under it (program constants.rs). */
+export const LOADER_V3 = new PublicKey('BPFLoaderUpgradeab1e11111111111111111111111');
+export const MPL_CORE_PROGRAMDATA = new PublicKey('9ZC25KLUrfgSoFVgjE1rrydZBbZns58UXi8A8ZhTdGfr');
+/**
+ * The final program's Core-closed floor hatch (artifacts.rs core_is_closed): true only when Metaplex Core's program
+ * account (coreInfo) is still owned by the upgradeable loader AND its ProgramData account (programDataInfo) is gone or no
+ * longer owned by that loader, i.e. Core was closed. A working Core, or a Core moved to another loader, gives false.
+ */
+export function coreClosed(coreInfo, programDataInfo) {
+  return !!coreInfo && coreInfo.owner.equals(LOADER_V3) && (!programDataInfo || !programDataInfo.owner.equals(LOADER_V3));
+}
+
 /** Owner of a live Metaplex Core asset of the Moon Forge collection, or null. */
 export function coreOwner(info, collection = PDA.collection()) {
   const d = info?.data;
@@ -1204,7 +1216,8 @@ export class MoonForge {
   }
   /**
    * Recycles (burns) an Artifact you hold and returns its floor to your wallet. Prints the eligibility notice once:
-   * the floor is all that comes back, and the current rules (ticket, boost, chips) are being replaced.
+   * the floor is all that comes back, and the current rules (ticket, boost, chips) are being replaced. Under the v3
+   * rules, if Metaplex Core was closed (coreClosed()), it uses the final program's floor hatch (result: coreHatch true).
    */
   async recycleArtifact(asset) {
     asset = new PublicKey(asset);
@@ -1215,11 +1228,21 @@ export class MoonForge {
     if (!holder.equals(this.me)) throw new Error(`recycleArtifact: ${asset.toBase58()} is held by ${holder.toBase58()}, not by this wallet`);
     this.warn('recycle');
     // the upgraded program's recycle also takes the extra_state account (resolved from the upgraded IDL)
-    if ((await this.requireLiveCall('recycleArtifact')) === 3) await this.requireV3('recycleArtifact', 'init_extra');
-    const signature = await this.send(this.program.methods.recycleArtifact().accountsPartial({
+    const rules = await this.requireLiveCall('recycleArtifact');
+    if (rules === 3) await this.requireV3('recycleArtifact', 'init_extra');
+    // the final program's Core-closed hatch: only if Metaplex Core was closed (read both accounts first), Core's
+    // ProgramData account goes as the one remaining account and the floor is paid without the (impossible) burn
+    let coreHatch = false;
+    if (rules === 3) {
+      const [core, programData] = await this.connection.getMultipleAccountsInfo([MPL_CORE, MPL_CORE_PROGRAMDATA], 'confirmed');
+      coreHatch = coreClosed(core, programData);
+    }
+    const builder = this.program.methods.recycleArtifact().accountsPartial({
       config: PDA.config(), asset, record: PDA.artifact(asset), collection: PDA.collection(), owner: this.me, coreProgram: MPL_CORE, systemProgram: SystemProgram.programId,
-    }), 'recycleArtifact');
-    return { signature, floorXnt: Number(record.backing) / XNT, tier: record.tier, origin: record.origin };
+    });
+    if (coreHatch) builder.remainingAccounts([{ pubkey: MPL_CORE_PROGRAMDATA, isSigner: false, isWritable: false }]);
+    const signature = await this.send(builder, 'recycleArtifact');
+    return { signature, floorXnt: Number(record.backing) / XNT, tier: record.tier, origin: record.origin, coreHatch };
   }
   async ticket() { return (await this.myArtifacts())[0]?.asset ?? null; }
 

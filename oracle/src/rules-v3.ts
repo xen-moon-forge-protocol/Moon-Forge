@@ -20,6 +20,7 @@
  * wallet today: none is listed until the operator publishes one (and the epoch-1 burn is never attributed to anyone).
  */
 import { DEFAULT_RULES_V3, rulesBlockOf, RulesBlockV3, RULES_ID_RETIRED_V3 } from "./rewards";
+import { legacyRulesPatch } from "./legacy";
 
 /**
  * The rulesId of the first version, the rules of the first v3 epoch: 2. F5 (the D-13 "carried" rule, owner approval
@@ -37,11 +38,17 @@ export interface RulesVersionV3 {
   rules: Omit<RulesBlockV3, "programHash">;
 }
 
-const { programHash: _ph, ...RULES_1 } = DEFAULT_RULES_V3;
+const { programHash: _ph, ...RULES_0 } = DEFAULT_RULES_V3;
+/**
+ * Legacy Pilot (legacy.ts, owner decision 2026-11-02: live from the first v3 epoch): the rule joins the rules of the first
+ * v3 epoch once its snapshot is pinned (LEGACY_SNAPSHOT_SHA256); until then the block is exactly the one above. Pin it
+ * before the first v3 epoch is built: afterwards the rule can only come in as a new version appended below.
+ */
+const RULES_1: Omit<RulesBlockV3, "programHash"> = { ...RULES_0, ...legacyRulesPatch() };
 
 /**
  * Append-only. rulesId 2: the rules of the first v3 epoch (tip minimum 0.2 XNT final, every leaf claimed, no operator
- * wallet yet, the D-13 "carried" rule of F5).
+ * wallet yet, the D-13 "carried" rule of F5, the Legacy Pilot once its snapshot is pinned).
  */
 export const RULES_V3_VERSIONS: readonly RulesVersionV3[] = Object.freeze([{ fromEpoch: null, announced: null, rules: RULES_1 }]);
 

@@ -850,6 +850,45 @@ t("no Telegram channel, ever: no Telegram code, secret or channel wording in the
   }
 });
 
+t("r9 (e): the upgraded program's bankroll limits: −3% a UTC day counting open bets as won, −15% over the 7-day window; the v2 row is unchanged", () => {
+  const R9 = require("../src/health-rules");
+  const X = 1e9;
+  const now = 1_800_000_000 + 3_600, day = Math.floor(now / 86_400);
+  // 1,000 XNT at day start; 980 now with 5 XNT of open payouts: 975 counted, −2.5%: ok
+  assert.equal(R9.bankrollDayVerdictV3(980 * X, 5 * X, 1_000 * X, day, now).state, "ok");
+  const tripped = R9.bankrollDayVerdictV3(980 * X, 11 * X, 1_000 * X, day, now);
+  assert.equal(tripped.state, "warn", "969 of 1,000: past −3% counting open bets as won");
+  assert.match(tripped.detail, /daily limit \(−3%\) is reached: new house bets are refused until 00:00 UTC/);
+  assert.equal(R9.bankrollDayVerdictV3(970 * X, 0, 1_000 * X, day, now).state, "ok", "exactly −3%: still allowed (OD-1)");
+  assert.equal(R9.bankrollDayVerdictV3(790 * X, 0, 1_000 * X, day, now).state, "fail");
+  assert.equal(R9.bankrollDayVerdictV3(500 * X, 0, 1_000 * X, day - 1, now).state, "ok", "no bet today");
+  // the v2 row keeps its own 10% breaker wording
+  assert.match(R9.bankrollDayVerdict(880 * X, 1_000 * X, day, now).detail, /circuit breaker tripped/);
+  // 7 days: realized net loss + open payouts against 15% of week_base
+  const w = (loss: number) => ({ weekStartTs: now - 2 * 86_400, weekStartBankroll: BigInt(1_000 * X), weekNetLoss: BigInt(loss * X) });
+  assert.equal(R9.weekBaseV3(1_000n, 900n, 50n), 950n, "an LP exit lowers the base");
+  assert.equal(R9.weekBaseV3(1_000n, 1_200n, 0n), 1_000n, "a deposit never raises it");
+  assert.equal(R9.bankrollWeekVerdictV3(w(100), BigInt(900 * X), BigInt(40 * X), now).state, "ok", "140 of 1,000: 14%");
+  const full = R9.bankrollWeekVerdictV3(w(100), BigInt(900 * X), BigInt(60 * X), now);
+  assert.equal(full.state, "warn");
+  assert.match(full.detail, /16\.00% of the window base .*weekly limit is reached/);
+  assert.equal(R9.bankrollWeekVerdictV3({ ...w(500), weekStartTs: now - 8 * 86_400 }, BigInt(500 * X), 0n, now).state, "ok", "the window ended: the next bet opens a new one");
+  assert.equal(R9.bankrollWeekVerdictV3(null, 0n, 0n, now).state, "ok", "no keeper seat");
+});
+
+t("r9 (d): the architect payee wallet: a warning under rent exemption + 0.01 XNT (its cuts would go to the pool), information otherwise", () => {
+  const R9 = require("../src/health-rules");
+  const rent = 890_880, vault = "V", payee = "P";
+  assert.equal(R9.payeeWalletVerdict(payee, vault, rent + 10_000_000, rent).state, "ok");
+  const low = R9.payeeWalletVerdict(payee, vault, rent + 9_999_999, rent);
+  assert.equal(low.state, "warn");
+  assert.match(low.detail, /goes to the reward pool/);
+  assert.equal(R9.payeeWalletVerdict(payee, vault, 0, rent).state, "warn");
+  assert.equal(R9.payeeWalletVerdict(payee, vault, null, rent).state, "warn");
+  assert.match(R9.payeeWalletVerdict(vault, vault, 0, rent).detail, /renounced/);
+  assert.equal(R9.payeeWalletVerdict(vault, vault, 0, rent).state, "ok");
+});
+
 Promise.all([...pendingR10, ...pendingT331]).then(() => console.log(`health rules: ${n} tests passed`), (e) => {
   console.error(e);
   process.exit(1);

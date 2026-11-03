@@ -109,6 +109,13 @@ jobs:
           VERIFY_TIMEOUT_MS: '2400000'
           VERIFY_CHAIN_TIMEOUT_MS: '1200000'
           X1_RPC_URLS: ${{ vars.X1_RPC_URLS }}
+          X1_RPC_URL: ${{ vars.X1_RPC_URL }} # the default X1 endpoint (empty = the built-in one, oracle/src/config.ts)
+          # `verify --full` re-reads every chain's logs: the same optional EVM endpoint lists as the oracle (empty = the defaults)
+          OP_RPC_URL: ${{ vars.OP_RPC_URL }}
+          BSC_RPC_URL: ${{ vars.BSC_RPC_URL }}
+          POLYGON_RPC_URL: ${{ vars.POLYGON_RPC_URL }}
+          AVAX_RPC_URL: ${{ vars.AVAX_RPC_URL }}
+          BASE_RPC_URL: ${{ vars.BASE_RPC_URL }}
         run: npm run health-verify
       - name: Keep it
         if: ${{ always() }}
@@ -170,10 +177,12 @@ jobs:
           # the oracle's D-17 GATE_BLOCK (oracle.yml, keeper.yml): amber while it is set (review r4 finding 12)
           GATE_BLOCK: ${{ vars.GATE_BLOCK }}
           # optional overrides, same names the oracle and keeper understand (empty = the defaults in config.ts):
-          # X1_RPC_URLS (comma list) is tried before the default X1 endpoint, and each listed one is probed. The same
-          # variable, and only it, is passed to the oracle (oracle.yml) and the keeper (keeper.yml), so this row
-          # probes exactly the endpoints they use.
+          # X1_RPC_URLS (comma list) is tried before the default X1 endpoint, and each listed one is probed; X1_RPC_URL
+          # replaces the default endpoint itself (a dead default needs no code edit), and <CHAIN>_RPC_URL replaces a
+          # chain's EVM list. The same values are passed to the oracle (oracle.yml) and the keeper (keeper.yml), so
+          # these rows probe exactly the endpoints they use.
           X1_RPC_URLS: ${{ vars.X1_RPC_URLS }}
+          X1_RPC_URL: ${{ vars.X1_RPC_URL }} # the default X1 endpoint (empty = the built-in one, oracle/src/config.ts)
           ORACLE_PUBKEY: ${{ vars.ORACLE_PUBKEY }}
           KEEPER_PUBKEY: ${{ vars.KEEPER_PUBKEY }}
           EPOCHS_DIR: ../frontend/public/epochs
@@ -183,14 +192,12 @@ jobs:
           # the NFT metadata record and the program source this checkout holds (the defaults, written out)
           NFT_RECORD: ../deployments/nft-arweave-final.json
           METADATA_CONSTANTS: ../programs/moon-forge/src/constants.rs
-          PORTAL_ETH: ${{ vars.PORTAL_ETH }}
-          PORTAL_OP: ${{ vars.PORTAL_OP }}
-          PORTAL_BSC: ${{ vars.PORTAL_BSC }}
-          PORTAL_POLYGON: ${{ vars.PORTAL_POLYGON }}
-          PORTAL_AVAX: ${{ vars.PORTAL_AVAX }}
-          PORTAL_BASE: ${{ vars.PORTAL_BASE }}
-          PORTAL_PULSE: ${{ vars.PORTAL_PULSE }}
-          PORTAL_MOONBEAM: ${{ vars.PORTAL_MOONBEAM }}
+          # optional EVM endpoint lists per chain (comma-separated; empty = the defaults in oracle/src/config.ts)
+          OP_RPC_URL: ${{ vars.OP_RPC_URL }}
+          BSC_RPC_URL: ${{ vars.BSC_RPC_URL }}
+          POLYGON_RPC_URL: ${{ vars.POLYGON_RPC_URL }}
+          AVAX_RPC_URL: ${{ vars.AVAX_RPC_URL }}
+          BASE_RPC_URL: ${{ vars.BASE_RPC_URL }}
         run: npm run health
       - name: Keep the snapshot
         # public like the rest of the run; the next run reads it, and anyone can download it from the run page

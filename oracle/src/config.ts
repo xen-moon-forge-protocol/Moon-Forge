@@ -11,7 +11,10 @@ import * as path from "path";
 dotenv.config();
 
 export const PROGRAM_ID = process.env.X1_PROGRAM_ID || "57UE1U1t23ztg2noLp8pcpGW1B1Xw25rLH6ra9Mchea9";
-export const X1_RPC = process.env.X1_RPC_URL || "https://rpc.mainnet.x1.xyz";
+/** The default X1 endpoint, used before the built-in one when X1_RPC_URL is set (the workflows pass the repository variable; empty or blank = unset). */
+export const X1_RPC_DEFAULT = "https://rpc.mainnet.x1.xyz";
+export const x1RpcOf = (v: string | undefined): string => (v ?? "").trim() || X1_RPC_DEFAULT;
+export const X1_RPC = x1RpcOf(process.env.X1_RPC_URL);
 /** Directory with epoch JSON files (served by GitHub Pages for the frontend). */
 export const EPOCHS_DIR = process.env.EPOCHS_DIR || "../frontend/public/epochs";
 
@@ -48,9 +51,16 @@ export interface ChainConfig {
   gecko: string;
 }
 
-const env = (k: string, d = "") => process.env[k] || d;
-/** Comma-separated RPC list from the environment (or the default list). */
-const rpcList = (k: string, d: string) => env(k, d).split(",").map((u) => u.trim()).filter(Boolean);
+/**
+ * Comma-separated RPC list from the environment (or the default list). The workflows pass `<CHAIN>_RPC_URL` from the
+ * repository variable of that name, so an unset variable arrives as "": that, or a value with no entry at all (blanks,
+ * commas), means the default list, never an empty one (pure; tested).
+ */
+export function rpcListOf(v: string | undefined, d: string): string[] {
+  const list = (v ?? "").split(",").map((u) => u.trim()).filter(Boolean);
+  return list.length ? list : d.split(",").map((u) => u.trim()).filter(Boolean);
+}
+const rpcList = (k: string, d: string) => rpcListOf(process.env[k], d);
 
 /**
  * The deployed portals (deployments/portals.json) are the default of PORTAL_<X> / START_<X>, so a verifier, a seat

@@ -206,6 +206,69 @@ export function bankrollDayVerdict(valueNow: number, dayStart: number, bankrollD
   return { check: "bankroll today", state: "ok", detail };
 }
 
+/** v3 limits (constants.rs): −3% per UTC day counting every open bet as won; −15% over the keeper seat's 7-day window */
+export const V3_DAILY_LOSS_BPS = 300;
+export const V3_WEEKLY_LOSS_BPS = 1_500;
+const V3_WEEK = 7 * 86_400;
+
+/**
+ * "bankroll today" on the upgraded program (games.rs bet_limits / within_daily_loss): the bankroll above rent minus every
+ * pending payout (open bets counted as won) against the day's start. At −3% the program refuses new house bets until the
+ * next UTC day: a warning (the breaker works). Red only past −20%, which the limits should never let happen.
+ */
+export function bankrollDayVerdictV3(valueAboveRent: number, reserved: number, dayStart: number, bankrollDay: number, now: number): Row {
+  const check = "bankroll today";
+  const today = Math.floor(now / 86_400);
+  if (bankrollDay !== today || dayStart <= 0) return { check, state: "ok", detail: `no house bet today (day reference ${bankrollDay ? new Date(bankrollDay * 86_400_000).toISOString().slice(0, 10) : "unset"})` };
+  const value = Math.max(0, valueAboveRent - reserved);
+  const ratio = value / dayStart;
+  const detail = `${xnt(value)} counting ${xnt(reserved)} of open bets as won, vs ${xnt(dayStart)} at day start (${pct(ratio - 1)})`;
+  if (ratio < 0.8) return { check, state: "fail", detail: `${detail}: more than 20% lost today, beyond what the program's limits allow` };
+  if (ratio * 10_000 < 10_000 - V3_DAILY_LOSS_BPS) return { check, state: "warn", detail: `${detail}: the daily limit (−3%) is reached: new house bets are refused until 00:00 UTC` };
+  return { check, state: "ok", detail };
+}
+
+/** keeper.rs week_base: the window-start bankroll, lowered by what left the bankroll since without being a v2 bet result. */
+export function weekBaseV3(weekStart: bigint, vault: bigint, weekNetLoss: bigint): bigint {
+  const flow = vault + weekNetLoss > 0n ? vault + weekNetLoss : 0n;
+  return weekStart < flow ? weekStart : flow;
+}
+
+/**
+ * "bankroll 7 days" (upgraded program only; games.rs bet_limits): the keeper seat's realized net loss in its 7-day window
+ * plus every pending payout, against 15% of the window base. At the limit new house bets are refused until the window
+ * rolls: a warning. No seat or no open window: ok.
+ */
+export function bankrollWeekVerdictV3(seat: { weekStartTs: number; weekStartBankroll: bigint; weekNetLoss: bigint } | null, vaultAboveRent: bigint, reserved: bigint, now: number): Row {
+  const check = "bankroll 7 days";
+  if (!seat || seat.weekStartTs <= 0 || now >= seat.weekStartTs + V3_WEEK) return { check, state: "ok", detail: "no 7-day loss window open (the next house bet opens one)" };
+  const base = weekBaseV3(seat.weekStartBankroll, vaultAboveRent, seat.weekNetLoss);
+  const used = seat.weekNetLoss + reserved;
+  const limit = (base * BigInt(V3_WEEKLY_LOSS_BPS)) / 10_000n;
+  const share = base > 0n ? Number((used * 10_000n) / base) / 100 : 0;
+  const ends = new Date((seat.weekStartTs + V3_WEEK) * 1000).toISOString().slice(0, 16).replace("T", " ");
+  const detail = `net loss ${xnt(Number(seat.weekNetLoss))} + open payouts ${xnt(Number(reserved))} = ${share.toFixed(2)}% of the window base ${xnt(Number(base))} (limit 15%, window ends ${ends} UTC)`;
+  if (used > limit) return { check, state: "warn", detail: `${detail}: the weekly limit is reached: new house bets are refused until the window ends` };
+  return { check, state: "ok", detail };
+}
+
+/** the margin above rent exemption the architect payee wallet should keep (0.01 XNT) */
+export const PAYEE_MARGIN_LAMPORTS = 10_000_000;
+
+/**
+ * "payee wallet" (utils.rs architect_or_pool): a cut that would leave the architect payee under rent exemption goes to the
+ * reward pool instead. A warning when the wallet holds less than rent exemption + PAYEE_MARGIN_LAMPORTS (small cuts may
+ * then go to the pool); information otherwise. A payee set to the reward vault is the renounce: always ok.
+ */
+export function payeeWalletVerdict(payee: string, rewardVault: string, lamports: number | null, rentMin: number): Row {
+  const check = "payee wallet";
+  if (payee === rewardVault) return { check, state: "ok", detail: "the payee is the reward vault (renounced): every architect cut goes to the reward pool" };
+  if (lamports === null) return { check, state: "warn", detail: `the payee wallet ${payee} could not be read` };
+  const detail = `${payee} holds ${xnt(lamports)} (rent exemption ${xnt(rentMin)})`;
+  if (lamports < rentMin + PAYEE_MARGIN_LAMPORTS) return { check, state: "warn", detail: `${detail}: under rent exemption + ${xnt(PAYEE_MARGIN_LAMPORTS)}, a cut that does not lift it above rent goes to the reward pool (fund it with a little XNT to keep receiving them)` };
+  return { check, state: "ok", detail };
+}
+
 // ── Prices ───────────────────────────────────────────────────────────────────
 
 export function median(xs: number[]): number {
@@ -234,6 +297,53 @@ export function priceVerdict(sources: Record<string, number | null>, maxPct = 5)
   const detail = `${list}; max deviation from median ${pct(d)}${downNote}`;
   if (d * 100 > maxPct) return { check: "XNT price sources", state: "fail", detail: `${detail} (limit ${maxPct}%)` };
   return { check: "XNT price sources", state: "ok", detail };
+}
+
+// ── XEN price sources (FEATURE-MATRIX gap 3) ─────────────────────────────────
+
+/** One live chain today: GeckoTerminal answered, or only the on-chain fallback (xen-onchain-v3.ts), or neither. */
+export interface XenPriceProbe { chainId: number; chain: string; source: "gecko" | "on-chain" | "none"; detail: string }
+/** per chain id, since when no source has priced it (null: one does) */
+export type XenPriceHistory = Record<string, { noneSince: number | null }>;
+/** the weekly oracle run: Sundays 00:00 UTC (oracle.yml cron) */
+const SUNDAY_EPOCH = Date.UTC(2026, 0, 4) / 1000;
+
+/** How many weekly oracle runs (Sundays 00:00 UTC) fell in (from, to] (pure). */
+export function weeklyRunsBetween(from: number, to: number): number {
+  if (!(to > from)) return 0;
+  const k = (t: number) => Math.floor((t - SUNDAY_EPOCH) / (7 * 86_400));
+  return k(to) - k(from);
+}
+
+/** The next history: a chain with no source keeps (or starts) its noneSince; one with a source clears it. */
+export function xenPriceHistoryNext(prev: XenPriceHistory | null | undefined, probes: XenPriceProbe[], now: number): XenPriceHistory {
+  const next: XenPriceHistory = {};
+  for (const p of probes) next[String(p.chainId)] = p.source === "none" ? { noneSince: prev?.[String(p.chainId)]?.noneSince ?? now } : { noneSince: null };
+  return next;
+}
+
+/**
+ * "XEN price sources": ok when GeckoTerminal prices every live chain; WARN when a chain is priced only from its pools
+ * on-chain (the fallback is in use, or the newest epoch file used it), or when no source prices a chain yet; RED only when
+ * no source has priced a chain through 2 weekly runs (its burns wait: the oracle skips it with its cursor kept).
+ */
+export function xenPriceVerdict(probes: XenPriceProbe[], history: XenPriceHistory, now: number, newestOnChain: string[] = []): Row {
+  const check = "XEN price sources";
+  if (!probes.length) return { check, state: "ok", detail: "no live chain" };
+  const parts = probes.map((p) => `${p.chain}: ${p.source === "gecko" ? "GeckoTerminal" : p.source === "on-chain" ? "on-chain pools only" : "NO SOURCE"}`);
+  const fileNote = newestOnChain.length ? `; the newest epoch priced ${newestOnChain.join(", ")} from on-chain pools` : "";
+  const none = probes.filter((p) => p.source === "none");
+  const stuck = none.filter((p) => {
+    const since = history[String(p.chainId)]?.noneSince ?? now;
+    return weeklyRunsBetween(since, now) >= 2;
+  });
+  const why = none.map((p) => `${p.chain}: ${p.detail}`).join("; ").slice(0, 300);
+  if (stuck.length) return { check, state: "fail", detail: `${parts.join(", ")}${fileNote}; no source for ${stuck.map((p) => p.chain).join(", ")} through 2 weekly runs: its burns wait (${why}). Fix the GeckoTerminal client or the chain's RPC list (OPERATORS.md)` };
+  if (none.length) return { check, state: "warn", detail: `${parts.join(", ")}${fileNote}; ${why}` };
+  if (probes.some((p) => p.source === "on-chain") || newestOnChain.length) {
+    return { check, state: "warn", detail: `${parts.join(", ")}${fileNote} (GeckoTerminal unavailable: those burns are priced at the build spot, under the cap)` };
+  }
+  return { check, state: "ok", detail: parts.join(", ") };
 }
 
 // ── EVM RPCs ─────────────────────────────────────────────────────────────────

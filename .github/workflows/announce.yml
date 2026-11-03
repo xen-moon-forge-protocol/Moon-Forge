@@ -50,13 +50,15 @@ jobs:
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
           X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
-          PORTAL_ETH: ${{ vars.PORTAL_ETH }}
-          PORTAL_OP: ${{ vars.PORTAL_OP }}
-          PORTAL_BSC: ${{ vars.PORTAL_BSC }}
-          PORTAL_POLYGON: ${{ vars.PORTAL_POLYGON }}
-          PORTAL_AVAX: ${{ vars.PORTAL_AVAX }}
-          PORTAL_BASE: ${{ vars.PORTAL_BASE }}
-          PORTAL_PULSE: ${{ vars.PORTAL_PULSE }}
+          # the post reads X1 and the chains: the same optional endpoints as the oracle (empty = the defaults in config.ts)
+          X1_RPC_URLS: ${{ vars.X1_RPC_URLS }}
+          X1_RPC_URL: ${{ vars.X1_RPC_URL }}
+          # optional EVM endpoint lists per chain (comma-separated; empty = the defaults in oracle/src/config.ts)
+          OP_RPC_URL: ${{ vars.OP_RPC_URL }}
+          BSC_RPC_URL: ${{ vars.BSC_RPC_URL }}
+          POLYGON_RPC_URL: ${{ vars.POLYGON_RPC_URL }}
+          AVAX_RPC_URL: ${{ vars.AVAX_RPC_URL }}
+          BASE_RPC_URL: ${{ vars.BASE_RPC_URL }}
           KIND: ${{ inputs.kind || 'weekly' }} # empty on the schedule: the weekly post
           DRY: ${{ inputs.dry }}
         run: |

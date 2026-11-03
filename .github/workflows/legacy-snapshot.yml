@@ -1,0 +1,146 @@
+name: Legacy Pilot snapshot
+
+# Builds deployments/legacy-burners.json for the Legacy Pilot rule (oracle/src/legacy.ts): every EVM address that burned
+# XEN before 2026-11-01T00:00:00Z, read from XEN's own contracts (Transfer to 0x0) on Ethereum and the five Moon Forge
+# chains, through public RPCs. It runs on GitHub, never on a personal machine. Manual only, no secret, a read-only token.
+# One job per chain (each well inside the 6-hour job limit; a failed chain is re-run alone with "Re-run failed jobs"),
+# then a merge job that checks the file with the script and with the oracle's own validator and uploads it as an
+# artifact. The same reads give the same bytes. Pin its sha256 (printed in the run summary) in oracle/src/legacy.ts
+# LEGACY_SNAPSHOT_SHA256, in one reviewed commit with the file, before the first v3 epoch is built.
+# Actions pinned to commit SHAs (version in the comment), runner image pinned, Node 22, like ci.yml.
+
+on:
+  workflow_dispatch:
+    inputs:
+      eth_rpc:
+        description: 'Ethereum RPC list (comma-separated public URLs, never a keyed one: inputs are logged); empty = the script default'
+        required: false
+        default: ''
+      op_rpc:
+        description: 'Optimism RPC list; empty = the script default'
+        required: false
+        default: ''
+      bsc_rpc:
+        description: 'BSC RPC list; empty = the script default'
+        required: false
+        default: ''
+      polygon_rpc:
+        description: 'Polygon RPC list; empty = the script default'
+        required: false
+        default: ''
+      base_rpc:
+        description: 'Base RPC list; empty = the script default'
+        required: false
+        default: ''
+      avax_rpc:
+        description: 'Avalanche RPC list; empty = the script default'
+        required: false
+        default: ''
+      from_blocks:
+        description: 'optional scan starts as chainId=block pairs, comma-separated (each a block at or before XEN''s deployment there); empty = the time bound 2022-10-01'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: legacy-snapshot
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    name: Scan chain ${{ matrix.chain }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - chain: 1
+            rpc: ${{ inputs.eth_rpc }}
+          - chain: 10
+            rpc: ${{ inputs.op_rpc }}
+          - chain: 56
+            rpc: ${{ inputs.bsc_rpc }}
+          - chain: 137
+            rpc: ${{ inputs.polygon_rpc }}
+          - chain: 8453
+            rpc: ${{ inputs.base_rpc }}
+          - chain: 43114
+            rpc: ${{ inputs.avax_rpc }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+      - name: Scan XEN burns before the cutoff
+        env:
+          CHAIN: ${{ matrix.chain }}
+          RPC: ${{ matrix.rpc }}
+          FROM_BLOCKS: ${{ inputs.from_blocks }}
+        run: |
+          set -euo pipefail
+          FROM="$(printf '%s' "$FROM_BLOCKS" | tr ',' '\n' | sed -n "s/^ *${CHAIN}=\([0-9][0-9]*\) *$/\1/p" | head -n 1)"
+          set -- scan --chain "$CHAIN" --out "parts/part-$CHAIN.json"
+          if [ -n "$RPC" ]; then set -- "$@" --rpc "$RPC"; fi
+          if [ -n "$FROM" ]; then set -- "$@" --from "$FROM"; fi
+          node scripts/legacy/build-snapshot.mjs "$@"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: legacy-part-${{ matrix.chain }}
+          path: parts/part-${{ matrix.chain }}.json
+          if-no-files-found: error
+          retention-days: 30
+
+  merge:
+    name: Merge and check
+    needs: scan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: oracle/package-lock.json
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: legacy-part-*
+          path: parts
+          merge-multiple: true
+      - name: Merge the six chains
+        run: node scripts/legacy/build-snapshot.mjs merge --out deployments/legacy-burners.json parts/part-*.json
+      - name: Check with the script
+        run: node scripts/legacy/build-snapshot.mjs check deployments/legacy-burners.json
+      - name: Check with the oracle's validator
+        working-directory: oracle
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npx ts-node -e '
+            const l = require("./src/legacy");
+            const d = JSON.parse(require("fs").readFileSync("../deployments/legacy-burners.json", "utf8"));
+            const bad = l.legacySnapshotError(d);
+            if (bad) { console.error(bad); process.exit(1); }
+            console.log(`${d.addresses.length} addresses, sha256 ${d.sha256}`);
+          '
+      - name: Summary
+        run: |
+          node -e '
+            const d = JSON.parse(require("fs").readFileSync("deployments/legacy-burners.json", "utf8"));
+            const rows = d.chains.map((c) => `| ${c.chainId} | ${c.fromBlock} | ${c.toBlock} | ${c.events} | ${c.addresses} |`);
+            const out = ["### Legacy Pilot snapshot", "", `cutoff ${new Date(d.cutoff * 1000).toISOString()}, ${d.addresses.length} addresses`, "", `sha256 \`${d.sha256}\``, "",
+              "| chain | fromBlock | toBlock | burn events | addresses |", "|---|---|---|---|---|", ...rows, ""];
+            require("fs").appendFileSync(process.env.GITHUB_STEP_SUMMARY, out.join("\n"));
+          '
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: legacy-burners
+          path: deployments/legacy-burners.json
+          if-no-files-found: error
+          retention-days: 90

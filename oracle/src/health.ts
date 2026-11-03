@@ -33,9 +33,9 @@ import * as anchor from "@coral-xyz/anchor";
 import { ethers } from "ethers";
 import { Connection, Keypair, PublicKey } from "@solana/web3.js";
 import { CHAINS, EPOCHS_DIR } from "./config";
-import { withFailover } from "./evm";
+import { finalHead, withFailover } from "./evm";
 import { WALLETS } from "./heartbeat";
-import { xntTwapOnChain } from "./pricing";
+import { xenMarketV3, xntTwapOnChain } from "./pricing";
 import { ARCHITECT, connect, fetchConfig, PDA, programId } from "./x1";
 import { PDA_V3, programV3, readUpgradeProbeV3, upgradeVerdictV3 } from "./x1-v3";
 import { allAs, BET_ANCHORED, BET_KEEPER, betUnpack, decodeAs, readOracleSeatLivenessV3, seatOf } from "./keeper-v3";
@@ -43,8 +43,9 @@ import { openPublicationsV3, voidedPublicationsV3 } from "./seat-v3";
 import { rpcHost, x1Connection, x1RpcIgnored, x1RpcList, x1RpcWithPath, X1_MAINNET_GENESIS } from "./x1-rpc";
 import PINS from "./health-pins.json";
 import { FEED_PATH } from "./feed-v3";
-import { rewardsVersionGatedV3, v2ClosedV3 } from "./flow-v3";
+import { rewardsVersionGatedV3, rpcOrderV3, v2ClosedV3 } from "./flow-v3";
 import * as R from "./health-rules";
+import { isOnChainSourceV3, onChainPriorOfV3, publishedEpochFilesOf, xenMarketOnChainV3 } from "./xen-onchain-v3";
 import { gatewayTargets, httpFetcher, probeTarget, readGatewayInputs } from "./health-gateway";
 
 const SITE = "https://xen-moon-forge-protocol.github.io/Moon-Forge/";
@@ -84,6 +85,8 @@ interface Snapshot {
   k5?: R.K5History | null;
   /** per metadata manifest, the runs in a row with a path lost on every gateway, and since when */
   gateway?: R.GatewayHistory;
+  /** FEATURE-MATRIX gap 3: per chain, since when no XEN price source answered */
+  xenPrice?: R.XenPriceHistory;
 }
 const next: Snapshot = { at: Math.floor(Date.now() / 1000) };
 /** Inputs of the weekly-epoch verdict, judged after both the X1 and the GitHub groups have run (see main). */
@@ -191,6 +194,12 @@ async function x1Checks(prev: Snapshot | null) {
     push(R.oracleWalletVerdict(bal, costs, FALLBACK_EPOCH_COST));
   });
   await step("keeper wallet", async () => push(R.keeperWalletVerdict(await c.getBalance(new PublicKey(KEEPER_PUBKEY)))));
+  // r9 (d): a cut that would leave the architect payee under rent exemption goes to the reward pool (utils.rs architect_or_pool)
+  await step("payee wallet", async () => {
+    const payee = (cfg.architect as PublicKey).toBase58();
+    const [bal, rentMin] = await Promise.all([c.getBalance(new PublicKey(payee), "confirmed").catch(() => null), c.getMinimumBalanceForRentExemption(0)]);
+    push(R.payeeWalletVerdict(payee, PDA.rewardVault().toBase58(), bal, rentMin));
+  });
   // A12 (P11): the last v3 epoch's actual claims (failed ones, and the dust claims the oracle pays rent for)
   const lastV3 = [...files].reverse().find((f) => f.version === 3);
   if (lastV3) push(R.claimsVerdict(lastV3.epoch, lastV3.publish?.claims));
@@ -209,7 +218,14 @@ async function x1Checks(prev: Snapshot | null) {
       closed: !!e.account.closed, budget: big(e.account.budget), claimed: big(e.account.claimed),
       dropReserve: big(e.account.dropReserve), dropPaid: big(e.account.dropPaid), dropState: Number(e.account.dropState),
     })))));
-    push(R.bankrollDayVerdict(Math.max(0, lam[1] - rents[1]), num(cfg.bankrollDayStart), num(cfg.bankrollDay), now));
+    // r9 (e): under the upgraded program, its own limits: −3% a UTC day counting open bets as won, −15% over 7 days
+    if (upgraded()) {
+      const above = Math.max(0, lam[1] - rents[1]);
+      push(R.bankrollDayVerdictV3(above, num(cfg.bankrollReserved), num(cfg.bankrollDayStart), num(cfg.bankrollDay), now));
+      const seatInfo = await c.getAccountInfo(PDA_V3.houseKeeper(), "confirmed").catch(() => null);
+      const s = seatInfo ? decodeAs(v3, "HouseKeeper", Buffer.from(seatInfo.data)) : null;
+      push(R.bankrollWeekVerdictV3(s ? { weekStartTs: num(s.weekStartTs), weekStartBankroll: big(s.weekStartBankroll), weekNetLoss: big(s.weekNetLoss) } : null, BigInt(above), big(cfg.bankrollReserved), now));
+    } else push(R.bankrollDayVerdict(Math.max(0, lam[1] - rents[1]), num(cfg.bankrollDayStart), num(cfg.bankrollDay), now));
     // since yesterday's snapshot, net of what the lifetime counters explain (claims, drops, tips, prizes, LP exits)
     const stats: R.Counters = {};
     for (const [k, v] of Object.entries(cfg.stats ?? {})) stats[k] = String(v);
@@ -599,6 +615,49 @@ async function priceChecks() {
   push(R.priceVerdict(sources, 5));
 }
 
+// ── XEN price sources (FEATURE-MATRIX gap 3) ─────────────────────────────────
+
+/**
+ * Per live chain: GeckoTerminal's market read (the oracle's first source); when it fails, the oracle's on-chain fallback
+ * (xen-onchain-v3.ts: the last valued record's pools re-read at the chain's final head). The history of the chains no
+ * source prices is carried in the snapshot: red only after 2 weekly runs without any (R.xenPriceVerdict).
+ */
+async function xenPriceChecks(prev: Snapshot | null) {
+  next.xenPrice = prev?.xenPrice ?? {}; // kept as it was if this group cannot finish
+  const files = publishedEpochFilesOf(EPOCHS_DIR);
+  const probes: R.XenPriceProbe[] = [];
+  // one chain after the other: GeckoTerminal allows 30 requests a minute (pricing.ts paces them)
+  for (const chain of CHAINS.filter((c) => c.portal)) {
+    const base = { chainId: chain.chainId, chain: chain.name };
+    let gecko: string;
+    try {
+      await withTimeout(xenMarketV3(chain), 90_000, "GeckoTerminal");
+      probes.push({ ...base, source: "gecko", detail: "" });
+      continue;
+    } catch (e) {
+      gecko = short(e, 100);
+    }
+    const prior = onChainPriorOfV3(files, chain.chainId);
+    if (!prior) {
+      probes.push({ ...base, source: "none", detail: `GeckoTerminal: ${gecko}; no published v3 record to re-read pools from` });
+      continue;
+    }
+    try {
+      const head = await withTimeout(finalHead(chain), 60_000, "final head");
+      const m = await withTimeout(xenMarketOnChainV3({ ...chain, rpcs: rpcOrderV3(chain.rpcs) }, prior, head), 120_000, "on-chain pools");
+      probes.push({ ...base, source: "on-chain", detail: `${m.pools.length} pool(s) at block ${head}` });
+    } catch (f) {
+      probes.push({ ...base, source: "none", detail: `GeckoTerminal: ${gecko}; on-chain: ${short(f, 100)}` });
+    }
+  }
+  const v3 = (files as { version?: unknown; epoch?: unknown; chains?: { name?: unknown; market?: { priceSource?: unknown } | null }[] }[])
+    .filter((f) => f.version === 3 && typeof f.epoch === "number")
+    .sort((a, b) => (b.epoch as number) - (a.epoch as number));
+  const newestOnChain = (v3[0]?.chains ?? []).filter((c) => isOnChainSourceV3(c?.market?.priceSource)).map((c) => String(c.name));
+  next.xenPrice = R.xenPriceHistoryNext(prev?.xenPrice, probes, next.at);
+  push(R.xenPriceVerdict(probes, next.xenPrice, next.at, newestOnChain));
+}
+
 // ── EVM RPCs ─────────────────────────────────────────────────────────────────
 
 /** Every RPC of every live chain: head age and the portal's code; the verdict names the fallback in use. */
@@ -766,6 +825,7 @@ async function main() {
     group("X1 checks", () => x1Checks(prev), "fail"),
     group("GitHub checks", githubChecks),
     group("XNT price sources", priceChecks),
+    group("XEN price sources", () => xenPriceChecks(prev), "warn", 900_000),
     group("EVM RPCs", rpcChecks),
     group("X1 RPCs", x1RpcChecks),
     group("site", webChecks),

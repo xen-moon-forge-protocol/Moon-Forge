@@ -27,6 +27,11 @@
  *  Heartbeat: one extra file per base epoch, every week, with budget "0" when nothing is paid. A week that cannot be
  *            built is published as a SKIP heartbeat (A13.6: budget 0, empty snapshot, the reason recorded), so one bad
  *            week never blocks the history. A base whose snapshot is unavailable (A13.9) has only that skip.
+ *  Legacy Pilot (legacy.ts, only on a base whose rules block carries the rule): after every row above is paid, the first
+ *            new Artifact of an X1 wallet linked to a listed address claims 20% of its forge price, once per wallet and
+ *            per address; the claims are paid oldest first from min(R, weeks × 4% of the live forged backing) less the
+ *            rows' pays, what is not paid stays owed to the next weeks. Every row is exactly the row without the rule
+ *            (LEGACY-2); totals.budget (the on-chain total) then includes the payments, added to their wallets' leaves.
  *
  * On-chain publishing (publish_extra_epoch / claim_extra) comes with the final program upgrade: see the block at the
  * end. The instruction builders live in x1-v3.ts (v3 IDL, moon_forge.v3.json); `npm run publish-extra` sends
@@ -37,6 +42,7 @@ import bs58 from "bs58";
 import { PublicKey } from "@solana/web3.js";
 import { keccak, MerkleTree } from "./merkle";
 import { BPS, dataHashV3, EpochFileV3, isoSeconds, MAX_PUBLISH_LAG, nat, ORIGIN_DROP, ORIGIN_FORGED, ORIGIN_GENESIS, protoPath, provisionalError, pubkey, retiredBaseTerms, SnapshotRecord, uint, WEEK } from "./rewards";
+import { addressListOf, bpsOf, evmAddressOf, LegacyPilotRulesV3, legacyPilotRulesOf } from "./legacy";
 
 // ── policy constants (oracle, versioned forward-only; A10.1) ───────────────────────────────────
 /** weekly need: 1% of the price paid */
@@ -212,6 +218,53 @@ export interface ExtraPolicy {
   preUpgradeExcluded: boolean;
   /** The backlog carry: EXTRA_BACKLOG_CARRY_WEEKS when above 0 (a backlog burn counts against the unused need of the previous extra week); absent when off */
   backlogCarryWeeks?: number;
+  /** Legacy Pilot (legacy.ts, benefit 2): the rebate in bps of the forge price, present only when the base file carries the rule */
+  legacyRebateBps?: number;
+}
+
+/**
+ * Legacy Pilot, benefit 2: a rebate claim, established once (the first new Artifact of a linked, unused X1 wallet, at the
+ * extra epoch of its first snapshot) and paid from the release the holder rebates leave, this week and, for what the
+ * room could not pay, the next weeks, oldest claim first, until paid in full (a rest below MIN_PAY is closed and stays in
+ * the pot).
+ */
+export interface ExtraLegacyClaim {
+  asset: string;
+  /** the Artifact's owner at its first snapshot (the forger, unless it moved within the week) */
+  wallet: string;
+  /** the listed EVM address the wallet is linked to (the lowest unused one) */
+  pilot: string;
+  forgedAt: number;
+  /** 2 × backing: the forge price */
+  pricePaid: string;
+  /** ⌊pricePaid × artifactRebateBps / 10^4⌋: the whole rebate */
+  want: string;
+  /** what is still owed after this week's payment */
+  left: string;
+}
+
+/**
+ * Legacy Pilot, benefit 2 (legacy.ts): present only on an extra file whose base file carries the rule. The holder rows
+ * are untouched (row pay is the holder rebate, exactly as without the rule); a payment is added to its wallet's leaf.
+ */
+export interface ExtraLegacyV1 {
+  /** X1 wallet → listed address links (a burn of the address naming the wallet as x1) whose wallet and address are both unused, sorted */
+  linked: { wallet: string; pilot: string }[];
+  /** Σ backing of the FORGED, post-upgrade Artifacts of S(n): every one is in the program's live forged backing (+ out since publish) */
+  boundBacking: string;
+  /** what the rebates may use: min(R, weeks × ⌊boundBacking × 4%⌋) − the holder rebates (0 when nothing is left) */
+  room: string;
+  /** the claims established this week (their wallet and address are used from now on), by (forgedAt, asset) */
+  claims: ExtraLegacyClaim[];
+  /** this week's payments, oldest claim first: the earlier ones whole, then at most one partial, then none */
+  payments: { asset: string; wallet: string; paid: string }[];
+  /** Σ payments */
+  paid: string;
+  /** every claim not yet paid in full after this week (left > 0), by (forgedAt, asset): carried to the next file */
+  owed: ExtraLegacyClaim[];
+  /** every X1 wallet and every listed address with a claim so far, this file included (sorted): carried to the next file */
+  usedWallets: string[];
+  usedPilots: string[];
 }
 
 export interface ExtraTotals {
@@ -267,6 +320,13 @@ export interface ExtraBodyV1 {
    * rebuilt, A13.7) by the next base run: budget 0, no rows, an empty snapshot, and why. The history goes on from it.
    */
   skip?: { reason: string };
+  /** Legacy Pilot, benefit 2 (ExtraLegacyV1): present only when the base file carries the rule; totals.budget then includes `paid` */
+  legacy?: ExtraLegacyV1;
+}
+
+/** Options of the extra build. `legacy: false` builds as if the base file carried no Legacy Pilot rule (the LEGACY-2 counterfactual). */
+export interface ExtraOptsV1 {
+  legacy?: boolean;
 }
 
 export interface ExtraFileV1 extends ExtraBodyV1 {
@@ -530,13 +590,216 @@ function checkPrev(prev: ExtraFileV1, epoch: number, base: EpochFileV3): void {
   if (prev.baseDataHash !== base.prevDataHash) throw new Error(`extra-${prev.epoch}.json was built on a base file other than epoch-${prev.epoch}.json (prevDataHash of the base)`);
 }
 
+// ── Legacy Pilot, benefit 2 (legacy.ts) ─────────────────────────────────────────────────────────
+/** The Legacy Pilot rule base file `base` was built under (null: none). */
+export function legacyRuleOfBase(base: EpochFileV3): LegacyPilotRulesV3 | null {
+  const rb = (base as { rulesBlock?: { legacyPilot?: unknown } }).rulesBlock;
+  return rb && rb.legacyPilot !== undefined ? legacyPilotRulesOf(rb.legacyPilot) : null;
+}
+
+interface LegacyStateV1 {
+  /** wallet → its linked addresses */
+  pairs: Map<string, Set<string>>;
+  usedWallets: Set<string>;
+  usedPilots: Set<string>;
+  /** the claims extra file n−1 left owed */
+  owed: ExtraLegacyClaim[];
+}
+
+const claimOrder = (a: { forgedAt: number; asset: string }, b: { forgedAt: number; asset: string }) => a.forgedAt - b.forgedAt || cmpStr(a.asset, b.asset);
+
+const strictlySorted = (xs: string[], what: string) => {
+  for (let i = 1; i < xs.length; i++) if (!(cmpStr(xs[i - 1], xs[i]) < 0)) throw new Error(`${what} must be strictly ascending: ${xs[i - 1]} before ${xs[i]}`);
+  return xs;
+};
+
+/**
+ * The carried Legacy Pilot state of extra epoch n: extra file n−1's links and used sets (none without one, or for one
+ * written without the rule), plus the links base file n adds: every non-operator burn of a listed address links its x1
+ * wallet to that address. Links whose wallet or address is used are dropped (each is paid at most once).
+ */
+function legacyStateOf(pv: ExtraFileV1 | null, base: EpochFileV3): LegacyStateV1 {
+  const s: LegacyStateV1 = { pairs: new Map(), usedWallets: new Set(), usedPilots: new Set(), owed: [] };
+  const link = (wallet: string, pilot: string) => {
+    const set = s.pairs.get(wallet) ?? new Set<string>();
+    set.add(pilot);
+    s.pairs.set(wallet, set);
+  };
+  const l = pv?.legacy;
+  if (l !== undefined) {
+    const what = `extra-${pv!.epoch}.json legacy`;
+    if (!l || typeof l !== "object" || !Array.isArray(l.linked)) throw new Error(`${what} is not a Legacy Pilot record`);
+    for (const w of strictlySorted(l.usedWallets.map((x, i) => pubkey(x, `${what}.usedWallets[${i}]`)), `${what}.usedWallets`)) s.usedWallets.add(w);
+    for (const p of addressListOf(l.usedPilots, `${what}.usedPilots`)) s.usedPilots.add(p);
+    l.linked.forEach((x, i) => link(pubkey(x.wallet, `${what}.linked[${i}].wallet`), evmAddressOf(x.pilot, `${what}.linked[${i}].pilot`)));
+    if (!Array.isArray(l.owed)) throw new Error(`${what}.owed is not an array`);
+    s.owed = l.owed.map((c, i) => {
+      const w = `${what}.owed[${i}]`;
+      const left = uint(c.left, `${w}.left`, U64);
+      const want = uint(c.want, `${w}.want`, U64);
+      if (left <= 0n || left > want) throw new Error(`${w}: left ${c.left} is not in (0, want]`);
+      return {
+        asset: pubkey(c.asset, `${w}.asset`), wallet: pubkey(c.wallet, `${w}.wallet`), pilot: evmAddressOf(c.pilot, `${w}.pilot`), forgedAt: nat(c.forgedAt, `${w}.forgedAt`),
+        pricePaid: uint(c.pricePaid, `${w}.pricePaid`, U64).toString(), want: want.toString(), left: left.toString(),
+      };
+    });
+    for (let i = 1; i < s.owed.length; i++) if (!(claimOrder(s.owed[i - 1], s.owed[i]) < 0)) throw new Error(`${what}.owed must be strictly ordered by (forgedAt, asset)`);
+  }
+  const listed = new Set(base.legacy?.listing?.listed ?? []);
+  for (const b of base.burns) {
+    if (b.operator) continue;
+    const pilot = evmAddressOf(b.pilot, `base burn ${b.chainId}:${b.txHash}:${b.logIndex} pilot`);
+    if (listed.has(pilot)) link(b.x1, pilot);
+  }
+  return s;
+}
+
+/** The links of `s` whose wallet and address are both unused, sorted by wallet then address. */
+function linkedOf(s: LegacyStateV1): { wallet: string; pilot: string }[] {
+  const out: { wallet: string; pilot: string }[] = [];
+  for (const wallet of [...s.pairs.keys()].sort(cmpStr)) {
+    if (s.usedWallets.has(wallet)) continue;
+    for (const pilot of [...s.pairs.get(wallet)!].sort()) if (!s.usedPilots.has(pilot)) out.push({ wallet, pilot });
+  }
+  return out;
+}
+
+/**
+ * Legacy Pilot, benefit 2: the week's claims and payments, from what the holder rebates left of the release, within every
+ * bound of the extra pot. New claims, by (forgedAt, asset): the FORGED post-upgrade Artifacts of S(n) that are new this
+ * week (not in S(n−1) and forged after its block time), each wallet's first one only, when the owner is a linked, unused
+ * wallet with an unused linked address (the lowest): the claim wants ⌊pricePaid × artifactRebateBps / 10^4⌋ and uses
+ * the wallet and the address at once. Payments: every owed claim (extra file n−1's, then this week's), oldest first,
+ * takes min(left, what the room still holds); a payment below MIN_PAY is not made and ends the week's payments (mission
+ * order), and so does one that would add a leaf beyond EXTRA_MAX_LEAVES; a rest below MIN_PAY is closed (it stays in the
+ * pot). `room` = min(R, weeks × ⌊boundBacking × 4%⌋) − the holder rebates, floored at 0.
+ */
+function legacyRebatesV1(
+  rule: LegacyPilotRulesV3, state: LegacyStateV1, snap: ExtraSnapshot, pv: ExtraFileV1 | null, init: ExtraInitMark | null,
+  payOf: Map<string, bigint>, R: bigint, weeks: number, normal: bigint, leaves: number,
+): ExtraLegacyV1 {
+  const prevAssets = new Set(pv ? pv.snapshot.records.map((r) => r.asset) : []);
+  const after = pv ? pv.snapshot.blockTime : null;
+  let boundBacking = 0n;
+  for (const r of snap.records) if (r.origin === ORIGIN_FORGED && !isPreUpgrade(r.forgedAt, init)) boundBacking += BigInt(r.backing);
+  const top = min(R, backingBoundOf(boundBacking, weeks));
+  const room = top > normal ? top - normal : 0n;
+  // this week's new claims
+  const owedAssets = new Set(state.owed.map((c) => c.asset));
+  const done = new Set<string>();
+  const claims: ExtraLegacyClaim[] = [];
+  const candidates = snap.records
+    .filter((r) => r.origin === ORIGIN_FORGED && !isPreUpgrade(r.forgedAt, init) && !prevAssets.has(r.asset) && !owedAssets.has(r.asset) && (after === null || r.forgedAt > after))
+    .sort(claimOrder);
+  for (const r of candidates) {
+    const wallet = r.owner;
+    if (state.usedWallets.has(wallet) || done.has(wallet)) continue;
+    const pilot = [...(state.pairs.get(wallet) ?? [])].filter((p) => !state.usedPilots.has(p)).sort()[0];
+    if (pilot === undefined) continue;
+    done.add(wallet);
+    state.usedWallets.add(wallet);
+    state.usedPilots.add(pilot);
+    const price = pricePaid(r);
+    const want = bpsOf(price, rule.artifactRebateBps);
+    claims.push({ asset: r.asset, wallet, pilot, forgedAt: r.forgedAt, pricePaid: price.toString(), want: want.toString(), left: want.toString() });
+  }
+  // payments, oldest claim first
+  const queue = [...state.owed.map((c) => ({ ...c })), ...claims.map((c) => ({ ...c }))].sort(claimOrder);
+  let remaining = room;
+  let paid = 0n;
+  let leafCount = leaves;
+  let stopped = false;
+  const payments: { asset: string; wallet: string; paid: string }[] = [];
+  const paidTo = new Map<string, bigint>();
+  for (const c of queue) {
+    let left = BigInt(c.left);
+    if (!stopped) {
+      const give = min(left, remaining);
+      const newLeaf = (payOf.get(c.wallet) ?? 0n) === 0n && !paidTo.has(c.wallet);
+      if (give < MIN_PAY || (newLeaf && leafCount + 1 > EXTRA_MAX_LEAVES)) stopped = true;
+      else {
+        remaining -= give;
+        paid += give;
+        left -= give;
+        if (newLeaf) leafCount++;
+        paidTo.set(c.wallet, (paidTo.get(c.wallet) ?? 0n) + give);
+        payments.push({ asset: c.asset, wallet: c.wallet, paid: give.toString() });
+      }
+    }
+    // a rest below MIN_PAY can never be paid on its own: closed, it stays in the pot
+    c.left = (left < MIN_PAY ? 0n : left).toString();
+  }
+  return {
+    linked: linkedOf(state), boundBacking: boundBacking.toString(), room: room.toString(), claims, payments, paid: paid.toString(),
+    owed: queue.filter((c) => c.left !== "0"), usedWallets: [...state.usedWallets].sort(cmpStr), usedPilots: [...state.usedPilots].sort(),
+  };
+}
+
+/**
+ * Legacy Pilot, benefit 2, on the recorded numbers (no recomputation): the rule's rate in the policy, each new claim
+ * ⌊pricePaid × rate⌋ of an Artifact of S(n) held by its wallet, once per wallet and per address and recorded as used, each
+ * payment at least MIN_PAY and at most its claim's want, every owed rest in [MIN_PAY, want], Σ paid ≤ room, the whole
+ * budget ≤ weeks × 4% of the live forged backing recorded, which is at most the Σ backing of S(n)'s FORGED Artifacts.
+ */
+export function legacyRecordErrorsV1(f: ExtraBodyV1): string[] {
+  const out: string[] = [];
+  const L = f.legacy;
+  if (!L) return out;
+  try {
+    const bps = f.policy.legacyRebateBps;
+    if (bps === undefined) return ["a Legacy Pilot section without policy.legacyRebateBps"];
+    const records = new Map(f.snapshot.records.map((r) => [r.asset, r]));
+    const usedW = new Set(L.usedWallets);
+    const usedP = new Set(L.usedPilots);
+    const wallets = new Set<string>();
+    const pilots = new Set<string>();
+    for (const [k, c] of L.claims.entries()) {
+      const r = records.get(c.asset);
+      if (!r || r.origin !== ORIGIN_FORGED || r.owner !== c.wallet) out.push(`legacy.claims[${k}]: ${c.asset} is not a FORGED Artifact of ${c.wallet} in S(${f.epoch})`);
+      else if (c.pricePaid !== pricePaid(r).toString()) out.push(`legacy.claims[${k}]: pricePaid is not 2 × the backing`);
+      if (uint(c.want, `legacy.claims[${k}].want`, U64) !== bpsOf(uint(c.pricePaid, `legacy.claims[${k}].pricePaid`, U64), bps)) out.push(`legacy.claims[${k}]: want is not ${bps / 100}% of the price`);
+      if (wallets.has(c.wallet) || pilots.has(c.pilot)) out.push(`legacy.claims[${k}]: a wallet or an address claims twice`);
+      wallets.add(c.wallet);
+      pilots.add(c.pilot);
+      if (!usedW.has(c.wallet) || !usedP.has(c.pilot)) out.push(`legacy.claims[${k}]: the wallet or the address is not recorded as used`);
+    }
+    let paid = 0n;
+    const owedNow = new Map(L.owed.map((c) => [c.asset, c]));
+    for (const [k, x] of L.payments.entries()) {
+      const give = uint(x.paid, `legacy.payments[${k}].paid`, U64);
+      if (give < MIN_PAY) out.push(`legacy.payments[${k}]: below MIN_PAY`);
+      const c = L.claims.find((y) => y.asset === x.asset) ?? owedNow.get(x.asset);
+      if (c && give > BigInt(c.want)) out.push(`legacy.payments[${k}]: above the claim's ${c.want}`);
+      paid += give;
+    }
+    for (const c of L.owed) if (BigInt(c.left) > BigInt(c.want) || BigInt(c.left) < MIN_PAY) out.push(`legacy.owed ${c.asset}: left ${c.left} is not in [MIN_PAY, want]`);
+    if (paid !== uint(L.paid, "legacy.paid", U64)) out.push("legacy.paid is not the sum of the payments");
+    if (paid > uint(L.room, "legacy.room", U64)) out.push("legacy.paid above legacy.room");
+    const forged = f.snapshot.records.filter((r) => r.origin === ORIGIN_FORGED).reduce((s, r) => s + BigInt(r.backing), 0n);
+    const bound = uint(L.boundBacking, "legacy.boundBacking", U64);
+    if (f.skip === undefined && bound > forged) out.push("legacy.boundBacking above the backing of S(n)'s FORGED Artifacts");
+    if (uint(f.totals.budget, "totals.budget", U64) > backingBoundOf(bound, nat(f.window.weeks, "window.weeks"))) out.push("budget (the Legacy Pilot rebates included) above window.weeks × 4% of the live forged backing");
+  } catch (e) {
+    out.push(`legacy: ${(e as Error).message}`);
+  }
+  return out;
+}
+
+/** The leaves of the week: each wallet's holder rebate (rows, ≥ MIN_PAY) plus its Legacy Pilot payments, sorted by wallet. */
+function leavesOf(rows: ExtraWalletRow[], legacy: ExtraLegacyV1 | null): ExtraLeaf[] {
+  const amounts = new Map<string, bigint>();
+  for (const r of rows) if (r.pay !== "0") amounts.set(r.wallet, BigInt(r.pay));
+  for (const x of legacy?.payments ?? []) amounts.set(x.wallet, (amounts.get(x.wallet) ?? 0n) + BigInt(x.paid));
+  return [...amounts.keys()].sort(cmpStr).map((wallet, index) => ({ index, wallet, amount: amounts.get(wallet)!.toString() }));
+}
+
 // ── construction ───────────────────────────────────────────────────────────────────────────────
 /**
  * Builds extra epoch n (the body, without dataHash and proofs) from base file n, extra file n−1 (null for the first
  * extra epoch), the snapshot S(n) and the pot reading. Pure and deterministic: the input order of records and
  * burns never changes the output. Throws on an input that breaks a recorded rule; never returns null (heartbeat).
  */
-export function computeExtraEpoch(base: EpochFileV3, prev: ExtraFileV1 | null | undefined, snapshot: ExtraSnapshot, pool: ExtraPoolInfo, carryWeeks: number = EXTRA_BACKLOG_CARRY_WEEKS): ExtraBodyV1 {
+export function computeExtraEpoch(base: EpochFileV3, prev: ExtraFileV1 | null | undefined, snapshot: ExtraSnapshot, pool: ExtraPoolInfo, carryWeeks: number = EXTRA_BACKLOG_CARRY_WEEKS, opts: ExtraOptsV1 = {}): ExtraBodyV1 {
   const pv = prev ?? null;
   const cw = carryWeeksOf(carryWeeks);
   for (const [what, v] of [["snapshot", snapshot], ["pool", pool]] as const) {
@@ -678,8 +941,15 @@ export function computeExtraEpoch(base: EpochFileV3, prev: ExtraFileV1 | null | 
   // bounds (A10.7, A13.3): structural, so a correct build never trips them
   if (budget > R) throw new Error(`budget ${budget} above the release ${R}`);
   if (budget > backingBound) throw new Error(`budget ${budget} above ${weeks} week(s) of 4% of the eligible backing (${backingBound})`);
-  const leaves: ExtraLeaf[] = [];
-  for (const r of rows) if (r.pay !== "0") leaves.push({ index: leaves.length, wallet: r.wallet, amount: r.pay });
+  // Legacy Pilot, benefit 2: only from what the holder rebates left of the release, after every row was paid (nothing
+  // above reads it, so every row is exactly the row of the rules without it)
+  const rule = opts.legacy === false ? null : legacyRuleOfBase(base);
+  const payOf = new Map(rows.map((r) => [r.wallet, BigInt(r.pay)]));
+  const legacy = rule ? legacyRebatesV1(rule, legacyStateOf(pv, base), snap, pv, init, payOf, R, weeks, budget, rows.filter((r) => r.pay !== "0").length) : null;
+  const total = budget + (legacy ? BigInt(legacy.paid) : 0n);
+  if (legacy && total > R) throw new Error(`budget ${total} (the Legacy Pilot rebates included) above the release ${R}`);
+  if (legacy && total > backingBoundOf(BigInt(legacy.boundBacking), weeks)) throw new Error(`budget ${total} (the Legacy Pilot rebates included) above ${weeks} week(s) of 4% of the live forged backing`);
+  const leaves = leavesOf(rows, legacy);
   if (leaves.length > EXTRA_MAX_LEAVES) throw new Error(`${leaves.length} leaves: above EXTRA_MAX_LEAVES (${EXTRA_MAX_LEAVES})`);
   const tree = extraTree(epoch, leaves);
 
@@ -693,22 +963,23 @@ export function computeExtraEpoch(base: EpochFileV3, prev: ExtraFileV1 | null | 
     baseDataHash: base.dataHash,
     prevDataHash: pv ? pv.dataHash : null,
     window: { startTs, endTs, seasonAfter, weeks },
-    policy: policy(cw),
+    policy: { ...policy(cw), ...(rule ? { legacyRebateBps: rule.artifactRebateBps } : {}) },
     pool: { open: open.toString(), lamports: lamports.toString(), slot: pool.slot, init },
     snapshot: snap,
     excluded,
     rows,
     totals: {
-      need: totalNeed.toString(), use: totalUse.toString(), counted: W.toString(), release: R.toString(), budgetMax: B.toString(), budget: budget.toString(),
-      unpaid: (R - budget).toString(), eligibleBacking: eligibleBacking.toString(), backingBound: backingBound.toString(), eligibleArtifacts, leaves: leaves.length,
+      need: totalNeed.toString(), use: totalUse.toString(), counted: W.toString(), release: R.toString(), budgetMax: B.toString(), budget: total.toString(),
+      unpaid: (R - total).toString(), eligibleBacking: eligibleBacking.toString(), backingBound: backingBound.toString(), eligibleArtifacts, leaves: leaves.length,
     },
     leaves,
     root: tree.root,
+    ...(legacy ? { legacy } : {}),
   };
 }
 
-export function buildExtraFile(base: EpochFileV3, prev: ExtraFileV1 | null | undefined, snapshot: ExtraSnapshot, pool: ExtraPoolInfo, carryWeeks: number = EXTRA_BACKLOG_CARRY_WEEKS): ExtraFileV1 {
-  const body = computeExtraEpoch(base, prev, snapshot, pool, carryWeeks);
+export function buildExtraFile(base: EpochFileV3, prev: ExtraFileV1 | null | undefined, snapshot: ExtraSnapshot, pool: ExtraPoolInfo, carryWeeks: number = EXTRA_BACKLOG_CARRY_WEEKS, opts: ExtraOptsV1 = {}): ExtraFileV1 {
+  const body = computeExtraEpoch(base, prev, snapshot, pool, carryWeeks, opts);
   return { ...body, dataHash: dataHashExtra(body), proofs: extraTree(body.epoch, body.leaves).proofs };
 }
 
@@ -730,7 +1001,7 @@ export function skipReasonOf(v: unknown): string {
  *    Artifact is "new" there (a heartbeat) and extra n+2 compares two good snapshots again. One bad week therefore costs
  *    at most two weekly releases, which stay in the pot, and can never block the history.
  */
-export function skipExtraEpoch(base: EpochFileV3, prev: ExtraFileV1 | null | undefined, reason: string, pool: ExtraPoolInfo, carryWeeks: number = EXTRA_BACKLOG_CARRY_WEEKS): ExtraBodyV1 {
+export function skipExtraEpoch(base: EpochFileV3, prev: ExtraFileV1 | null | undefined, reason: string, pool: ExtraPoolInfo, carryWeeks: number = EXTRA_BACKLOG_CARRY_WEEKS, opts: ExtraOptsV1 = {}): ExtraBodyV1 {
   const pv = prev ?? null;
   const proto = protoPath(pool);
   if (proto) throw new Error(`pool has a "__proto__" member at ${proto}`);
@@ -761,6 +1032,13 @@ export function skipExtraEpoch(base: EpochFileV3, prev: ExtraFileV1 | null | und
   if (lamports < open) throw new Error(`extra pot ${lamports} at build is below X = ${open} (free_after of the previous publication)`);
   const init = checkedInitMark(pool.init, pv);
   const R = releaseOf(open);
+  // Legacy Pilot: a skip pays nothing and establishes no claim; the links base file n adds, the owed claims and the used
+  // sets are carried, so nothing is lost
+  const rule = opts.legacy === false ? null : legacyRuleOfBase(base);
+  const state = rule ? legacyStateOf(pv, base) : null;
+  const legacy: ExtraLegacyV1 | null = state
+    ? { linked: linkedOf(state), boundBacking: "0", room: "0", claims: [], payments: [], paid: "0", owed: state.owed, usedWallets: [...state.usedWallets].sort(cmpStr), usedPilots: [...state.usedPilots].sort() }
+    : null;
   return {
     kind: EXTRA_FORMAT,
     version: EXTRA_VERSION,
@@ -771,7 +1049,7 @@ export function skipExtraEpoch(base: EpochFileV3, prev: ExtraFileV1 | null | und
     baseDataHash: base.dataHash,
     prevDataHash: pv ? pv.dataHash : null,
     window: { startTs, endTs, seasonAfter: seasonAfterOf(startTs), weeks: needWeeksOf(startTs, endTs) },
-    policy: policy(carryWeeksOf(carryWeeks)),
+    policy: { ...policy(carryWeeksOf(carryWeeks)), ...(rule ? { legacyRebateBps: rule.artifactRebateBps } : {}) },
     pool: { open: open.toString(), lamports: lamports.toString(), slot: pool.slot, init },
     snapshot: { slot, blockTime: endTs, records: [] },
     excluded: [],
@@ -783,6 +1061,7 @@ export function skipExtraEpoch(base: EpochFileV3, prev: ExtraFileV1 | null | und
     leaves: [],
     root: EMPTY_ROOT,
     skip: { reason: skipReasonOf(reason) },
+    ...(legacy ? { legacy } : {}),
   };
 }
 
@@ -799,8 +1078,8 @@ export function baseSnapshotSkipReason(base: EpochFileV3): string {
   return skipReasonOf(`the base snapshot S(${base.epoch}) is unavailable (A13.9): ${baseSnapshotUnavailable(base) ?? "no"}`);
 }
 
-export function buildSkipExtraFile(base: EpochFileV3, prev: ExtraFileV1 | null | undefined, reason: string, pool: ExtraPoolInfo, carryWeeks: number = EXTRA_BACKLOG_CARRY_WEEKS): ExtraFileV1 {
-  const body = skipExtraEpoch(base, prev, reason, pool, carryWeeks);
+export function buildSkipExtraFile(base: EpochFileV3, prev: ExtraFileV1 | null | undefined, reason: string, pool: ExtraPoolInfo, carryWeeks: number = EXTRA_BACKLOG_CARRY_WEEKS, opts: ExtraOptsV1 = {}): ExtraFileV1 {
+  const body = skipExtraEpoch(base, prev, reason, pool, carryWeeks, opts);
   return { ...body, dataHash: dataHashExtra(body), proofs: {} };
 }
 
@@ -859,7 +1138,11 @@ export function verifyExtraFile(f: ExtraFileV1, base: EpochFileV3, prev?: ExtraF
     const budget = uint(f.totals.budget, "totals.budget", U64);
     const open = uint(f.pool.open, "pool.open", U64);
     if (budget > (open * EXTRA_RELEASE_BPS) / BPS) errors.push("budget above 8% of the free extra pot at the previous publication");
-    if (budget > backingBoundOf(uint(f.totals.eligibleBacking, "totals.eligibleBacking"), nat(f.window.weeks, "window.weeks"))) errors.push("budget above window.weeks × 4% of the eligible backing (A13.3)");
+    // Legacy Pilot: the holder rebates within the eligible backing's bound as before; with the rebates, the whole budget
+    // within the live forged backing's (legacyRecordErrorsV1)
+    const legacyPaid = f.legacy !== undefined ? uint(f.legacy.paid, "legacy.paid", U64) : 0n;
+    if (budget - legacyPaid > backingBoundOf(uint(f.totals.eligibleBacking, "totals.eligibleBacking"), nat(f.window.weeks, "window.weeks"))) errors.push("budget above window.weeks × 4% of the eligible backing (A13.3)");
+    if (f.legacy !== undefined) errors.push(...legacyRecordErrorsV1(f));
     if (f.leaves.length > EXTRA_MAX_LEAVES) errors.push(`${f.leaves.length} leaves: above EXTRA_MAX_LEAVES`);
     let sum = 0n;
     f.leaves.forEach((l, i) => {
@@ -871,7 +1154,7 @@ export function verifyExtraFile(f: ExtraFileV1, base: EpochFileV3, prev?: ExtraF
     });
     if (sum !== budget) errors.push("totals.budget is not the sum of the leaves");
     const rowPay = f.rows.reduce((s, r) => s + uint(r.pay, `row ${r.wallet} pay`, U64), 0n);
-    if (rowPay !== budget) errors.push("totals.budget is not the sum of the rows' pays");
+    if (rowPay + legacyPaid !== budget) errors.push(`totals.budget is not the sum of the rows' pays${f.legacy !== undefined ? " and the Legacy Pilot rebates" : ""}`);
     // OD-9, independently of the builder: no row carries an Artifact forged before init_extra
     const forgedAt = new Map(f.snapshot.records.map((r) => [r.asset, r.forgedAt]));
     for (const r of f.rows) {

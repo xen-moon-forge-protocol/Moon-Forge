@@ -15,12 +15,17 @@ import bs58 from "bs58";
 import { keccak } from "../src/merkle";
 import { MPL_CORE, PDA, programId, randomU64 } from "../src/x1";
 import { BPF_LOADER_UPGRADEABLE, CLAIM_COST_MAX, claimFundsOkV3, claimGuardV3, FEE_COST_MAX, feeFundsOkV3, LIVE_DEPLOY_SLOT, ORACLE_PUBLISH_RESERVE, PDA_V3, programV3, RENT_FLOOR } from "../src/x1-v3";
+import { CU_MEMO, cuExhaustedV3, cuFallbackV3, CuMemoV3, cuPlanOfUnitsV3, cuPlanV3, feeOfLimitV3, sendWithCuV3 } from "../src/cu-v3";
+import { simulateAsV3 } from "../src/seat-v3";
 import {
   armDecision, betPack, betUnpack, buildChain, chainIdOf, chainIdsOf, chainKeyOf, chainLengthOf, chainSeed, CHAIN_LEN_BASE, CLAIM_HOLD, CLAIM_WINDOW, DAY, drawDecision, HELPER_DRAW_GRACE,
   jackpotTicketV2, KEEPALIVE_AFTER, KEEPER_BOND_MIN, KEEPER_STALL_SLOTS, KeeperChains, keeperModeV3, keeperPassV3, keeperTipDueV3, KEEPER_TIP_MIN_CLAIM_V3, lookupSlotHash,
   newMemoV3, nextDeadlineV3, oracleSeatLivenessV3, predTimeReached, REARM_BELOW, SeatV3, stallReason, U64_MAX, armKeeperCli,
   takeKeeperCli, TX_SIZE_MAX, txSizeOf, UNKNOWN_CHAIN_ALERT, WALK_BATCH, cuIxV3, cuLimitForV3, CU_SIM_UNITS, measureCuV3, houseDueV3, anchorsForRoleV3,
+  KEEPER_DEAD_DELAY, KEEPER_OPEN_TS, missionVestedV3, orphanGoneV3, ORPHANS_PER_PASS, seatCreatorV3, vestedDueV3, VESTED_PER_PASS,
+  KEEPER_NOTICE, keeperWithdrawCli, keeperWithdrawDecisionV3, PairViewV3, proposeKeeperCli,
 } from "../src/keeper-v3";
+import { resignDecisionV3, resignSeatCli, rotateHotCli, rotateHotErrorV3 } from "../src/seat-v3";
 import { claimsLineV3 } from "../src/flow-v3";
 import { claimsVerdict, ORACLE_MIN_LAMPORTS } from "../src/health-rules";
 
@@ -987,12 +992,26 @@ async function main() {
   });
 
   await test("upkeep guard: the oracle key's expiries and extra closes wait while its wallet is under the publish reserve, unless the close refunds it; a helper key is never held back", async () => {
-    // pure rule
-    assert(RENT_FLOOR > FEE_COST_MAX, "every closed account refunds more than one upkeep fee");
+    CU_MEMO.clear(); // the fallbacks below are the unmeasured ones
+    // pure rule, under X1's per-CU fee (LOW-2): FEE_COST_MAX is the fee of the unmeasured fallback (200,000 units requested)
+    assert.strictEqual(FEE_COST_MAX, 2_001_500n, "1,500 + 10 × 200,000 lamports");
+    assert.strictEqual(FEE_COST_MAX, feeOfLimitV3(200_000));
+    // a measured upkeep (~20k units, limit 24,000) costs 241,500: every closed account refunds more than that
+    const measured = feeOfLimitV3(cuLimitForV3(20_000));
+    assert.strictEqual(measured, 241_500n);
+    assert(RENT_FLOOR > measured, "every closed account refunds more than one measured upkeep fee");
+    assert(RENT_FLOOR < FEE_COST_MAX, "but not more than an unmeasured one: such a close waits like any other upkeep");
     assert.deepStrictEqual(
       [feeFundsOkV3(ORACLE_PUBLISH_RESERVE + FEE_COST_MAX), feeFundsOkV3(ORACLE_PUBLISH_RESERVE + FEE_COST_MAX - 1n), feeFundsOkV3(FEE_COST_MAX, RENT_FLOOR), feeFundsOkV3(FEE_COST_MAX - 1n, RENT_FLOOR), feeFundsOkV3(0n)],
-      [true, false, true, false, false],
+      [true, false, false, false, false],
     );
+    assert.deepStrictEqual(
+      [feeFundsOkV3(measured, RENT_FLOOR, ORACLE_PUBLISH_RESERVE, measured), feeFundsOkV3(measured - 1n, RENT_FLOOR, ORACLE_PUBLISH_RESERVE, measured), feeFundsOkV3(ORACLE_PUBLISH_RESERVE + measured, 0n, ORACLE_PUBLISH_RESERVE, measured)],
+      [true, false, true],
+      "the fee of the limit actually requested",
+    );
+    // the old base-fee guess (100,000) was 20× too low for an unmeasured upkeep and below even a measured one
+    assert(feeOfLimitV3(null) === 2_000_000n && feeOfLimitV3(null, 3) === 6_000_000n && feeOfLimitV3(null, 9) === 14_000_000n, "no limit: 200,000 units per instruction, 1.4M at most");
     assert(feeFundsOkV3(ORACLE_PUBLISH_RESERVE + FEE_COST_MAX) && !claimFundsOkV3(ORACLE_PUBLISH_RESERVE + FEE_COST_MAX), "an upkeep fee is allowed where a claim is not");
     const me = Keypair.generate().publicKey;
     const conn = (bal: number | null) => ({ getBalance: async () => { if (bal === null) throw new Error("503"); return bal; } });
@@ -1000,7 +1019,8 @@ async function main() {
     assert.match((await claimGuardV3(conn(null), me, me).checkFee())!, /^D-47 \(upkeep\): .*could not be read/, "fail closed");
     const g = claimGuardV3(conn(Number(ORACLE_PUBLISH_RESERVE)), me, me);
     assert.match((await g.checkFee())!, /^D-47 \(upkeep\): the oracle wallet holds 0\.0500 XNT/);
-    assert.strictEqual(await g.checkFee(RENT_FLOOR), null, "a close that refunds this wallet still goes");
+    assert.strictEqual(await g.checkFee(RENT_FLOOR, measured), null, "a close that refunds this wallet more than its fee still goes");
+    assert.match((await g.checkFee(RENT_FLOOR))!, /plus one fee \(0\.0020 XNT at the requested compute-unit limit\)/, "unmeasured: the fallback's fee is more than the rent floor");
     assert.strictEqual(g.stopped, null, "the claims' state is separate");
 
     // the keeper pass with the oracle key: an expired epoch and an extra epoch past its 90 days
@@ -1022,16 +1042,39 @@ async function main() {
     assert.deepStrictEqual(a.c.names().filter((n) => n === "expireEpoch" || n === "closeExtraEpoch"), [], "held back: the reserve is for publishing");
     assert.strictEqual(logs.filter((l) => /D-47 \(upkeep\)/.test(l)).length, 1, "said once per pass: " + logs.join(" | "));
     assert(rep.notes.some((n) => /^D-47 \(upkeep\)/.test(n)), "the pass report carries it");
-    // under the reserve, but the close refunds its rent to this very wallet: it goes (the expiry still waits)
+    // under the reserve plus the measured fee (limit 25,000: 251,500 lamports), but the close refunds its rent to this very
+    // wallet, more than that fee: it goes (the expiry still waits); each carries the limit its own simulation measured
     const b = mk(oracleKp, oracleKp.publicKey);
-    b.c.balance = low;
+    b.c.balance = Number(ORACLE_PUBLISH_RESERVE + feeOfLimitV3(cuLimitForV3(20_150)) - 1n);
+    b.c.cuPerIx = 20_000;
     await keeperPassV3(b.c.connection(), b.p, b.keeper, () => undefined, opts(files));
     assert.deepStrictEqual(b.c.names().filter((n) => n === "expireEpoch" || n === "closeExtraEpoch"), ["closeExtraEpoch"]);
-    // at the line: both go
+    assert.deepStrictEqual(b.c.cuLimits, [cuLimitForV3(20_150)], "the close went with the limit the guard priced");
+    // the same close on a node that cannot simulate, nothing measured in this process: the fallback's fee (2,001,500) is
+    // more than the rent floor, it waits (with b's measurements remembered, the fallback would be 1.5 × them)
+    CU_MEMO.clear();
+    const b2 = mk(oracleKp, oracleKp.publicKey);
+    b2.c.balance = low;
+    await keeperPassV3(b2.c.connection(), b2.p, b2.keeper, () => undefined, opts(files));
+    assert.deepStrictEqual(b2.c.names().filter((n) => n === "expireEpoch" || n === "closeExtraEpoch"), []);
+    // the guard derives from the limit requested: a wallet too low for an unmeasured fee still pays two measured ones
+    const b3 = mk(oracleKp, Keypair.generate().publicKey);
+    b3.c.balance = low;
+    b3.c.cuPerIx = 20_000;
+    await keeperPassV3(b3.c.connection(), b3.p, b3.keeper, () => undefined, opts(files));
+    assert.deepStrictEqual(b3.c.names().filter((n) => n === "expireEpoch" || n === "closeExtraEpoch"), ["expireEpoch", "closeExtraEpoch"]);
+    // at the line: both go; the node cannot simulate, so each carries the fallback: b3's measurement × 1.5 (this process
+    // remembers it), and with nothing remembered the runtime default, never no limit
     const c = mk(oracleKp, Keypair.generate().publicKey);
     c.c.balance = Number(ORACLE_PUBLISH_RESERVE + FEE_COST_MAX);
     await keeperPassV3(c.c.connection(), c.p, c.keeper, () => undefined, opts(files));
     assert.deepStrictEqual(c.c.names().filter((n) => n === "expireEpoch" || n === "closeExtraEpoch"), ["expireEpoch", "closeExtraEpoch"]);
+    assert.deepStrictEqual(c.c.cuLimits, [31_000, 31_000], "the remembered measurement (20,150) × 1.5, rounded up to 1,000");
+    CU_MEMO.clear();
+    const c2 = mk(oracleKp, Keypair.generate().publicKey);
+    c2.c.balance = Number(ORACLE_PUBLISH_RESERVE + FEE_COST_MAX);
+    await keeperPassV3(c2.c.connection(), c2.p, c2.keeper, () => undefined, opts(files));
+    assert.deepStrictEqual(c2.c.cuLimits, [200_000, 200_000], "never sent without a limit: the explicit fallback when the node cannot simulate");
     // balance unreadable: nothing (fail closed); a helper key with no balance at all is never held back
     const d = mk(oracleKp, oracleKp.publicKey);
     d.c.balance = null;
@@ -1283,7 +1326,7 @@ async function main() {
     assert(withCu <= TX_SIZE_MAX || txSizeOf([cuIxV3(CU_SIM_UNITS), ...ixs.slice(0, 6)], w.keeper.publicKey) <= TX_SIZE_MAX, "at least 3 pairs fit with the limit");
   });
 
-  await test("compute-unit limits (KEEPER-INCOME.md): measured by a simulation × 1.2, rounded up to 1,000; a refusal sends nothing; no simulation = as before", async () => {
+  await test("compute-unit limits (KEEPER-INCOME.md): measured by a simulation × 1.2, rounded up to 1,000; a refusal sends nothing; no simulation = an explicit fallback, never no limit", async () => {
     assert.strictEqual(cuLimitForV3(23_535), 29_000, "the kit's settleBet rule: 23,535 measured → 29,000");
     assert.strictEqual(cuLimitForV3(1), 1_000);
     assert.strictEqual(cuLimitForV3(5_000_000), CU_SIM_UNITS);
@@ -1315,6 +1358,89 @@ async function main() {
     const rep = await keeperPassV3(r.c.connection(), r.p, r.keeper, () => undefined, opts());
     assert.strictEqual(r.c.txs, 0, "nothing sent");
     assert(rep.failed >= 1);
+    // LOW-5: a node that cannot simulate never sends without a limit: the runtime default per instruction (the price of
+    // "no limit", but known before sending), or the same instruction list measured earlier in this process × 1.5
+    const walk = async (cuPerIx: number | null) => {
+      const x = world();
+      x.c.cuPerIx = cuPerIx;
+      x.c.listSlot = x.c.seatSlot;
+      armWith(x, { revealed: 0, nextIndex: 6, pending: 0 });
+      armWith(x, { revealed: 0, nextIndex: 6, pending: 1 });
+      putBet(x, { index: 0, anchorSlot: x.c.slot - 9n, anchored: true });
+      await keeperPassV3(x.c.connection(), x.p, x.keeper, () => undefined, opts({ maxTx: 2 }));
+      return x;
+    };
+    CU_MEMO.clear();
+    const cold = await walk(null);
+    assert.deepStrictEqual(cold.c.cuLimits, [4 * 200_000, 2 * 200_000], "nothing measured yet: 200,000 per instruction");
+    assert.deepStrictEqual(cold.c.names(), w.c.names(), "the same instructions");
+    await walk(20_000);
+    const warm = await walk(null);
+    assert.deepStrictEqual(warm.c.cuLimits, [121_000, 61_000], "the earlier measurement of each list × 1.5, rounded up to 1,000");
+    assert.deepStrictEqual(warm.c.names(), w.c.names());
+    CU_MEMO.clear();
+  });
+
+  await test("cu-v3: the fallback is the runtime default per unmeasured instruction (or an earlier measurement × 1.5); one retry on compute exhaustion; seat dry runs measure with the 1.4M limit", async () => {
+    const a = Keypair.generate().publicKey;
+    const ixOf = (n: number) => new TransactionInstruction({ programId, keys: [], data: Buffer.from([n, 1, 2, 3, 4, 5, 6, 7, 9]) });
+    const memo = new CuMemoV3();
+    assert.strictEqual(cuFallbackV3([ixOf(1)], memo), 200_000);
+    assert.strictEqual(cuFallbackV3([ixOf(1), ixOf(2), ixOf(1)], memo), 600_000);
+    assert.strictEqual(cuFallbackV3(Array.from({ length: 9 }, () => ixOf(1)), memo), CU_SIM_UNITS, "capped at 1.4M");
+    memo.record([ixOf(1)], 30_000);
+    assert.strictEqual(cuFallbackV3([ixOf(1)], memo), 45_000);
+    assert.strictEqual(cuFallbackV3([ixOf(1), ixOf(2)], memo), 245_000, "per instruction when the list was never measured");
+    memo.record([ixOf(2)], 190_000);
+    assert.strictEqual(cuFallbackV3([ixOf(2)], memo), 285_000, "an instruction measured near the default keeps its own margin");
+    assert.strictEqual(cuFallbackV3([ixOf(2), ixOf(1)], memo), 330_000);
+    assert.strictEqual(cuFallbackV3([cuIxV3(5), ixOf(1)], memo), 45_000, "a ComputeBudget instruction is not counted");
+    // the plan: measured × 1.2 (recorded), else the fallback; a refusal throws
+    assert.deepStrictEqual(await cuPlanV3({ simulateTransaction: async () => ({ value: { err: null, unitsConsumed: 10_000, logs: [] } }) } as any, a, [ixOf(3)], memo), { units: 12_000, measured: true });
+    assert.strictEqual(memo.ofOne(ixOf(3)), 10_000);
+    assert.deepStrictEqual(await cuPlanV3({} as any, a, [ixOf(3)], memo), { units: 15_000, measured: false });
+    assert.deepStrictEqual(cuPlanOfUnitsV3(null, [ixOf(4)], memo), { units: 200_000, measured: false });
+    assert.deepStrictEqual(cuPlanOfUnitsV3(50_000, [ixOf(4)], memo), { units: 60_000, measured: true });
+    // sendWithCuV3: the limit first, any earlier ComputeBudget instruction replaced; compute exhaustion retried once, wider
+    const sent: { units: number; n: number }[] = [];
+    let failFirst: Error | null = Object.assign(new Error("Simulation failed"), { logs: ["Program X consumed 12000 of 12000 compute units", "Program X failed: exceeded CUs meter at BPF instruction"] });
+    const provider = {
+      connection: { simulateTransaction: async () => ({ value: { err: null, unitsConsumed: 10_000, logs: [] } }) },
+      publicKey: a,
+      sendAndConfirm: async (tx: Transaction) => {
+        const cu = tx.instructions.filter((ix) => ix.programId.equals(ComputeBudgetProgram.programId));
+        sent.push({ units: cu[0].data.readUInt32LE(1), n: tx.instructions.length });
+        assert.strictEqual(cu.length, 1, "exactly one limit instruction");
+        if (failFirst) {
+          const e = failFirst;
+          failFirst = null;
+          throw e;
+        }
+        return "sig";
+      },
+    } as unknown as anchor.Provider;
+    const notes: string[] = [];
+    assert.strictEqual(await sendWithCuV3(provider, [cuIxV3(999), ixOf(5)], [], { memo, log: (s) => notes.push(s) }), "sig");
+    assert.deepStrictEqual(sent, [{ units: 12_000, n: 2 }, { units: 200_000, n: 2 }]);
+    assert.match(notes.join(" "), /limit 12000 was too low .* retrying once with 200000/);
+    assert(cuExhaustedV3(new Error("Transaction simulation failed: Error processing Instruction 1: Computational budget exceeded")));
+    assert(!cuExhaustedV3(new Error("custom program error: 0x1771")));
+    // any other failure is not retried
+    sent.length = 0;
+    failFirst = new Error("custom program error: 0x1771");
+    await assert.rejects(sendWithCuV3(provider, [ixOf(5)], [], { memo }), /0x1771/);
+    assert.strictEqual(sent.length, 1);
+    // a refused simulation sends nothing
+    sent.length = 0;
+    const refusing = { ...provider, connection: { simulateTransaction: async () => ({ value: { err: { InstructionError: [1, { Custom: 6000 }] }, unitsConsumed: 0, logs: ["Program log: Error Code: NothingVested"] } }) } } as unknown as anchor.Provider;
+    await assert.rejects(sendWithCuV3(refusing, [ixOf(5)], [], { memo }), /refused in simulation \(nothing was sent\).*NothingVested/);
+    assert.strictEqual(sent.length, 0);
+    // seat-v3's dry-run simulation carries the 1.4M limit and returns the units the send then requests × 1.2
+    let simIxs = 0;
+    const sim = await simulateAsV3({ simulateTransaction: async (vtx: VersionedTransaction) => { simIxs = vtx.message.compiledInstructions.length; return { value: { err: null, unitsConsumed: 41_000, logs: [] } }; } } as any, a, [ixOf(6)]);
+    assert.deepStrictEqual(sim, { ok: true, logs: [], err: null, units: 41_000 });
+    assert.strictEqual(simIxs, 2, "the limit instruction plus the void");
+    assert.deepStrictEqual(cuPlanOfUnitsV3(sim!.units, [ixOf(6)], memo), { units: 50_000, measured: true });
   });
 
   await test("R-6: a lost anchor race (the player's page anchored first) never stops the walk: the bet is read again and settled in the same pass", async () => {
@@ -1423,6 +1549,243 @@ async function main() {
     const { programV2 } = require("../src/x1");
     const w = world();
     await assert.rejects(keeperPassV3(w.c.connection(), programV2(w.c.provider(w.keeper)), w.keeper, () => undefined, opts()), /moon_forge\.v3\.json/);
+  });
+
+  // ── FEATURE-MATRIX gaps 11, 12: vested missions and orphaned Artifacts, permissionless, bounded, only what is due ──
+  await test("gap 11: withdraw_vested is pushed monthly and at completion (the program's vesting mirrored), never for nothing or dust", () => {
+    const DUR = 45 * DAY; // Orbit
+    const m = (o: { withdrawn?: bigint; total?: bigint } = {}) => ({ total: o.total ?? 45n * XNT, withdrawn: o.withdrawn ?? 0n, start: NOW, end: NOW + DUR });
+    assert.strictEqual(missionVestedV3(m(), NOW + 10 * DAY), 10n * XNT, "total × elapsed / duration, rounded down");
+    assert.strictEqual(missionVestedV3(m(), NOW + DUR + 1), 45n * XNT);
+    assert.strictEqual(missionVestedV3(m(), NOW - 5), 0n);
+    assert.deepStrictEqual(vestedDueV3(m(), NOW + 29 * DAY), { due: false, amount: 29n * XNT, completes: false }, "under 30 days' worth: waits");
+    assert.deepStrictEqual(vestedDueV3(m(), NOW + 30 * DAY), { due: true, amount: 30n * XNT, completes: false }, "30 days' worth: pushed");
+    assert.strictEqual(vestedDueV3(m({ withdrawn: 30n * XNT }), NOW + 40 * DAY).due, false, "10 days after a push: waits");
+    assert.deepStrictEqual(vestedDueV3(m({ withdrawn: 30n * XNT }), NOW + DUR), { due: true, amount: 15n * XNT, completes: true }, "complete: the rest, and the mission closes");
+    assert.strictEqual(vestedDueV3(m({ withdrawn: 45n * XNT }), NOW + DUR + DAY).due, false, "nothing left (NothingVested)");
+    assert.strictEqual(vestedDueV3(m({ total: 1_000n }), NOW + 40 * DAY).due, false, "dust before completion waits");
+    assert.strictEqual(vestedDueV3(m({ total: 1_000n }), NOW + DUR).due, true, "dust at completion goes (it closes the mission)");
+    assert.strictEqual(vestedDueV3({ total: 180n * XNT, withdrawn: 0n, start: NOW, end: NOW + 180 * DAY }, NOW + 30 * DAY).due, true, "Moon Landing: every 30 days");
+  });
+
+  await test("gap 12: an Artifact is reclaimed only when its asset is absent or Core's one-byte tombstone (stricter than the program)", () => {
+    assert.strictEqual(orphanGoneV3(null), true, "closed");
+    assert.strictEqual(orphanGoneV3({ owner: MPL_CORE, data: Buffer.from([0]) }), true, "burn tombstone");
+    assert.strictEqual(orphanGoneV3({ owner: MPL_CORE, data: Buffer.alloc(0) }), true);
+    assert.strictEqual(orphanGoneV3({ owner: MPL_CORE, data: Buffer.from([1, 2]) }), false, "a live asset");
+    assert.strictEqual(orphanGoneV3({ owner: MPL_CORE, data: Buffer.alloc(80) }), false, "a Core account with key byte 0 and data: left to a person");
+    assert.strictEqual(orphanGoneV3({ owner: SystemProgram.programId, data: Buffer.alloc(0) }), false, "another owner: left to a person");
+  });
+
+  await test("gaps 11, 12: the keeper pass sends withdraw_vested and reclaim_orphan for due items only, completed missions first, bounded per pass and by its cadence", async () => {
+    const w = world();
+    w.c.cuPerIx = 12_000;
+    const mission = (epoch: number, o: { start: number; end: number; total: bigint; withdrawn?: bigint }) => {
+      const player = Keypair.generate().publicKey;
+      const pk = PDA.mission(epoch, player, 1);
+      w.c.put(pk, programId, enc(w.p, "Mission", { player, epoch: BN(epoch), tier: 1, total: BN(o.total), withdrawn: BN(o.withdrawn ?? 0n), start: BN(o.start), end: BN(o.end), rentPayer: w.keeper.publicKey, bump: 255 }));
+      return { pk, player };
+    };
+    const monthly = mission(1, { start: NOW - 31 * DAY, end: NOW + 14 * DAY, total: 45n * XNT });
+    const done = mission(2, { start: NOW - 46 * DAY, end: NOW - DAY, total: 45n * XNT, withdrawn: 30n * XNT });
+    mission(3, { start: NOW - 5 * DAY, end: NOW + 40 * DAY, total: 45n * XNT }); // not due
+    mission(4, { start: NOW - 50 * DAY, end: NOW - 5 * DAY, total: 45n * XNT, withdrawn: 45n * XNT }); // nothing left
+    const record = (asset: PublicKey, tier = 0) => {
+      const pk = PDA.artifact(asset);
+      w.c.put(pk, programId, enc(w.p, "ArtifactRecord", { asset, tier, serial: 0, backing: BN(3n * XNT), origin: 0, bump: 255 }));
+      return pk;
+    };
+    const gone = Keypair.generate().publicKey;
+    const tomb = Keypair.generate().publicKey;
+    const live = Keypair.generate().publicKey;
+    const odd = Keypair.generate().publicKey;
+    w.c.put(tomb, MPL_CORE, Buffer.from([0]));
+    w.c.put(live, MPL_CORE, Buffer.alloc(66, 1));
+    w.c.put(odd, MPL_CORE, Buffer.alloc(66, 0));
+    const recGone = record(gone);
+    const recTomb = record(tomb, 2);
+    record(live);
+    record(odd);
+    const memo = newMemoV3();
+    const logs: string[] = [];
+    await keeperPassV3(w.c.connection(), w.p, w.keeper, (s) => logs.push(s), opts({ memo }));
+    const vested = w.c.sent.filter((s) => s.name === "withdrawVested");
+    assert.deepStrictEqual(vested.map((s) => s.keys[0].pubkey.toBase58()), [done.pk, monthly.pk].map((k) => k.toBase58()), "the completed mission first; nothing for the others");
+    assert.deepStrictEqual(vested[0].keys.map((k) => [k.pubkey.toBase58(), k.isWritable]), [
+      [done.pk.toBase58(), true], [done.player.toBase58(), true], [PDA.player(done.player).toBase58(), true], [w.keeper.publicKey.toBase58(), true],
+    ], "mission, player, player_state, rent_payer (forge.rs WithdrawVested)");
+    const orphans = w.c.sent.filter((s) => s.name === "reclaimOrphan");
+    assert.deepStrictEqual(new Set(orphans.map((s) => s.keys[2].pubkey.toBase58())), new Set([recGone, recTomb].map((k) => k.toBase58())), "the absent asset and the tombstone, never a live or an odd account");
+    assert.deepStrictEqual(orphans[0].keys.map((k) => k.pubkey.toBase58()).filter((_, i) => i !== 1 && i !== 2), [PDA.config(), PDA.collection(), PDA.rewardVault(), PDA_V3.extraState()].map((k) => k.toBase58()), "config, asset, record, collection, reward_vault, extra_state (artifacts.rs ReclaimOrphan)");
+    assert.strictEqual(w.c.cuLimits.length, w.c.txs, "each with its measured compute-unit limit");
+    assert(logs.some((l) => /vested 15\.0000 XNT pushed to .*mission complete/.test(l)), logs.join(" | "));
+    // the cadence: a second pass of the same process right after does not look again
+    const before = w.c.txs;
+    await keeperPassV3(w.c.connection(), w.p, w.keeper, () => undefined, opts({ memo }));
+    assert.strictEqual(w.c.txs, before);
+    // bounded: at most ORPHANS_PER_PASS per pass, and the pass budget wins
+    const b = world();
+    for (let i = 0; i < ORPHANS_PER_PASS + 3; i++) {
+      const asset = Keypair.generate().publicKey;
+      b.c.put(PDA.artifact(asset), programId, enc(b.p, "ArtifactRecord", { asset, tier: 0, serial: i, backing: BN(XNT), origin: 0, bump: 255 }));
+    }
+    await keeperPassV3(b.c.connection(), b.p, b.keeper, () => undefined, opts());
+    assert.strictEqual(b.c.names().filter((n) => n === "reclaimOrphan").length, ORPHANS_PER_PASS);
+    const t = world();
+    for (let i = 0; i < 3; i++) {
+      const asset = Keypair.generate().publicKey;
+      t.c.put(PDA.artifact(asset), programId, enc(t.p, "ArtifactRecord", { asset, tier: 0, serial: i, backing: BN(XNT), origin: 0, bump: 255 }));
+    }
+    await keeperPassV3(t.c.connection(), t.p, t.keeper, () => undefined, opts({ maxTx: 2 }));
+    assert.strictEqual(t.c.names().filter((n) => n === "reclaimOrphan").length, 2);
+    assert.strictEqual(VESTED_PER_PASS, 20);
+    // the program refuses one in simulation (state moved): nothing sent, the others still go
+    const r = world();
+    r.c.cuPerIx = 12_000;
+    for (let i = 0; i < 2; i++) {
+      const asset = Keypair.generate().publicKey;
+      r.c.put(PDA.artifact(asset), programId, enc(r.p, "ArtifactRecord", { asset, tier: 0, serial: i, backing: BN(XNT), origin: 0, bump: 255 }));
+    }
+    r.c.simRefuse = "ArtifactAlive";
+    const rl: string[] = [];
+    const rep = await keeperPassV3(r.c.connection(), r.p, r.keeper, (s) => rl.push(s), opts());
+    assert.strictEqual(r.c.names().filter((n) => n === "reclaimOrphan").length, 0, "refused in simulation: nothing sent");
+    assert(rep.failed >= 2 && rl.some((l) => /reclaimed: its floor back to the pool, its supply slot freed failed: refused in simulation \(nothing was sent\).*ArtifactAlive/.test(l)), rl.join(" | "));
+  });
+
+  await test("r9 dated opening: keeper-arm and keeper-take say who may create the never-armed seat; the program's verdict is simulated, nothing sent", async () => {
+    assert.strictEqual(KEEPER_OPEN_TS, Date.UTC(2026, 11, 16) / 1000, "2026-12-16 00:00 UTC");
+    assert.strictEqual(KEEPER_OPEN_TS, Date.UTC(2026, 10, 18) / 1000 + KEEPER_DEAD_DELAY, "the 2026-11-18 upgrade window + 28 days");
+    const before = seatCreatorV3(KEEPER_OPEN_TS - 1);
+    const at = seatCreatorV3(KEEPER_OPEN_TS);
+    assert(!before.open && /until 2026-12-16T00:00:00Z only the program's INITIAL_KEEPER may create it \(another key's arm is refused with OnlyKeeper\)/.test(before.text), before.text);
+    assert(at.open && /since 2026-12-16T00:00:00Z anyone may create it with keeper-arm and a bond of at least 20 XNT, and becomes its keeper/.test(at.text), at.text);
+    const w = world();
+    putProgram(w.c, 90_000_000);
+    w.c.put(PDA_V3.extraState(), programId, enc(w.p, "ExtraState", { bump: 255, vaultBump: 255 }));
+    w.c.put(PDA_V3.oracleSeat(), programId, enc(w.p, "OracleSeat", { generation: BN(1), bump: 255 }));
+    w.c.cuPerIx = 9_000;
+    const logs: string[] = [];
+    assert.strictEqual(await armKeeperCli(w.c.connection(), w.p, w.keeper, 20, false, (s) => logs.push(s)), null);
+    assert.match(logs[0], /the seat was never created: (until|since) 2026-12-16T00:00:00Z .*this arm creates it/);
+    assert(logs.some((l) => /simulation as .*: accepted by the program \(9150 compute units\)/.test(l)), logs.join(" | "));
+    // a refusal (a stranger before the date: OnlyKeeper) is reported in the dry run and refused with --yes, nothing sent
+    w.c.simRefuse = "OnlyKeeper";
+    const dry: string[] = [];
+    await armKeeperCli(w.c.connection(), w.p, w.keeper, 20, false, (s) => dry.push(s));
+    assert(dry.some((l) => /REFUSED: refused in simulation \(nothing was sent\).*OnlyKeeper/.test(l)), dry.join(" | "));
+    await assert.rejects(armKeeperCli(w.c.connection(), w.p, w.keeper, 20, true, () => undefined), /^Error: keeper-arm: refused in simulation \(nothing was sent\).*OnlyKeeper/);
+    assert.deepStrictEqual(w.c.names(), []);
+    // keeper-take on a seat that was never created: it says how the seat is created instead
+    await assert.rejects(takeKeeperCli(w.c.connection(), w.p, w.keeper, 20, true, () => undefined), /no keeper seat to take: the seat was never created: .*\(npm run keeper-arm -- --deposit 20\)/);
+  });
+
+  // ── r9 fix-up (c): keeper_withdraw (with its notice toggle), propose_keeper, rotate_hot, resign_seat ──────────────
+  const upgradedWorld = () => {
+    const w = world();
+    putProgram(w.c, 90_000_000);
+    w.c.put(PDA_V3.extraState(), programId, enc(w.p, "ExtraState", { bump: 255, vaultBump: 255 }));
+    w.c.put(PDA_V3.oracleSeat(), programId, enc(w.p, "OracleSeat", { generation: BN(1), bump: 255 }));
+    w.c.cuPerIx = 7_000;
+    return w;
+  };
+  const wallNow = () => Math.floor(Date.now() / 1000); // the CLIs read X1's clock, else the machine's (the fake has no block time)
+
+  await test("keeper-withdraw: the notice toggle is named (start / cancel, never the other by accident); an amount after 7 days, nothing pending, 0 or >= 20 XNT left", async () => {
+    const k = Keypair.generate().publicKey;
+    const s = { keeper: k, bond: 30n * XNT, withdrawTs: 0, pendingBets: 0 };
+    const t0 = 1_800_000_000;
+    assert.deepStrictEqual(keeperWithdrawDecisionV3(s, k, { notice: "start" }, t0).ok, true);
+    assert.match(keeperWithdrawDecisionV3({ ...s, withdrawTs: t0 - 10 }, k, { notice: "start" }, t0).reason, /already runs .*would CANCEL it/);
+    assert.match(keeperWithdrawDecisionV3(s, k, { notice: "cancel" }, t0).reason, /no withdrawal notice runs .*would START one/);
+    assert.strictEqual(keeperWithdrawDecisionV3({ ...s, withdrawTs: t0 - 10 }, k, { notice: "cancel" }, t0).ok, true);
+    assert.match(keeperWithdrawDecisionV3(s, Keypair.generate().publicKey, { notice: "start" }, t0).reason, /OnlyKeeper/);
+    const due = { ...s, withdrawTs: t0 - KEEPER_NOTICE };
+    assert.deepStrictEqual(keeperWithdrawDecisionV3(due, k, { amount: 10n * XNT }, t0).amount, 10n * XNT);
+    assert.strictEqual(keeperWithdrawDecisionV3(due, k, { amount: 30n * XNT }, t0).ok, true, "the whole bond");
+    assert.match(keeperWithdrawDecisionV3(due, k, { amount: 15n * XNT }, t0).reason, /KeeperBondTooSmall/, "15 XNT would stay: under 20");
+    assert.match(keeperWithdrawDecisionV3(due, k, { amount: 31n * XNT }, t0).reason, /less than/);
+    assert.match(keeperWithdrawDecisionV3(s, k, { amount: XNT }, t0).reason, /no withdrawal notice runs.*KeeperNotice/);
+    assert.match(keeperWithdrawDecisionV3({ ...s, withdrawTs: t0 - KEEPER_NOTICE + 1 }, k, { amount: 10n * XNT }, t0).reason, /runs until .*KeeperNotice/);
+    assert.match(keeperWithdrawDecisionV3({ ...due, pendingBets: 2 }, k, { amount: 10n * XNT }, t0).reason, /KeeperBusy/);
+    assert.match(keeperWithdrawDecisionV3(due, k, { amount: 0n }, t0).reason, /more than 0/);
+    // the CLI: dry by default (simulated), sends keeper_withdraw with the HouseKeeperOnly accounts and a measured limit
+    const w = upgradedWorld();
+    putSeat(w, { bond: BN(30n * XNT), withdrawTs: BN(wallNow() - KEEPER_NOTICE - 60) });
+    const logs: string[] = [];
+    assert.strictEqual(await keeperWithdrawCli(w.c.connection(), w.p, w.keeper, { amount: 10n * XNT }, false, (s) => logs.push(s)), null);
+    assert(logs.some((l) => /accepted by the program \(7150 compute units\)/.test(l)) && logs.some((l) => /dry: nothing signed/.test(l)), logs.join(" | "));
+    assert.deepStrictEqual(w.c.names(), []);
+    await keeperWithdrawCli(w.c.connection(), w.p, w.keeper, { amount: 10n * XNT }, true, () => undefined);
+    assert.deepStrictEqual(w.c.names(), ["keeperWithdraw"]);
+    assert.strictEqual(w.c.sent[0].data.amount.toString(), (10n * XNT).toString());
+    assert.deepStrictEqual(w.c.sent[0].keys.map((k) => k.pubkey.toBase58()), [PDA.config(), PDA_V3.houseKeeper(), w.keeper.publicKey, PDA.bankrollVault(), PDA.rewardVault(), SystemProgram.programId].map((k) => k.toBase58()));
+    assert.deepStrictEqual(w.c.cuLimits, [cuLimitForV3(7_150)]);
+    // the seat read still shows its running notice: "start" would cancel it and is refused; "cancel" sends amount 0
+    await assert.rejects(keeperWithdrawCli(w.c.connection(), w.p, w.keeper, { notice: "start" }, true, () => undefined), /refused: .*would CANCEL it/);
+    await keeperWithdrawCli(w.c.connection(), w.p, w.keeper, { notice: "cancel" }, true, () => undefined);
+    assert.deepStrictEqual(w.c.names(), ["keeperWithdraw", "keeperWithdraw"]);
+    assert.strictEqual(w.c.sent[1].data.amount.toString(), "0", "the toggle: amount 0");
+  });
+
+  await test("propose-keeper names a successor (or none) and keeper-take then works for it after the notice; only the keeper may", async () => {
+    const w = upgradedWorld();
+    putSeat(w, {});
+    const next = Keypair.generate().publicKey;
+    const logs: string[] = [];
+    await proposeKeeperCli(w.c.connection(), w.p, w.keeper, next.toBase58(), true, (s) => logs.push(s));
+    assert.deepStrictEqual(w.c.names(), ["proposeKeeper"]);
+    assert.strictEqual((w.c.sent[0].data.newKeeper as PublicKey).toBase58(), next.toBase58());
+    assert(logs.some((l) => /names .* who may take the seat with keeper-take from/.test(l)), logs.join(" | "));
+    await proposeKeeperCli(w.c.connection(), w.p, w.keeper, "none", true, () => undefined);
+    assert.strictEqual((w.c.sent[1].data.newKeeper as PublicKey).toBase58(), PublicKey.default.toBase58(), "none cancels");
+    await assert.rejects(proposeKeeperCli(w.c.connection(), w.p, Keypair.generate(), next.toBase58(), true, () => undefined), /OnlyKeeper/);
+    await assert.rejects(proposeKeeperCli(w.c.connection(), w.p, w.keeper, w.keeper.publicKey.toBase58(), true, () => undefined), /another key/);
+  });
+
+  await test("rotate-hot and resign-seat: the cold key's operations, mirrored, simulated as the cold key (or --as), sent only with --yes", async () => {
+    const cold = Keypair.generate();
+    const arch = Keypair.generate().publicKey.toBase58();
+    const ck = cold.publicKey.toBase58();
+    const hot = Keypair.generate().publicKey.toBase58();
+    assert.strictEqual(rotateHotErrorV3({ cold: ck, actor: ck, newHot: hot, architect: arch }), null);
+    assert.strictEqual(rotateHotErrorV3({ cold: ck, actor: null, newHot: hot, architect: arch }), null, "a plan without a key");
+    assert.match(String(rotateHotErrorV3({ cold: ck, actor: hot, newHot: hot, architect: arch })), /OnlyCold/);
+    assert.match(String(rotateHotErrorV3({ cold: PublicKey.default.toBase58(), actor: ck, newHot: hot, architect: arch })), /no cold key/);
+    for (const bad of [PublicKey.default.toBase58(), ck, arch]) assert.match(String(rotateHotErrorV3({ cold: ck, actor: ck, newHot: bad, architect: arch })), /InvalidTarget/);
+    // resign: an open seat never; a seat that served since max(now − 28 d, taken_at): yes, with the walk pairs
+    const t = 1_800_000_000;
+    const pairs = new Map<number, PairViewV3>([[5, { id: 5, publishedAt: t - DAY, closed: false, extra: null }], [4, { id: 4, publishedAt: t - 8 * DAY, closed: false, extra: null }]]);
+    assert.deepStrictEqual(resignDecisionV3({ takenAt: t - 60 * DAY, openSince: 0 }, 5, (id) => pairs.get(id) ?? null, t), { ok: true, reason: resignDecisionV3({ takenAt: t - 60 * DAY, openSince: 0 }, 5, (id) => pairs.get(id) ?? null, t).reason, walkIds: [5, 4] }, "5 is still in its hold, 4 survived");
+    assert.match(resignDecisionV3({ takenAt: t - 60 * DAY, openSince: t - 1 }, 5, (id) => pairs.get(id) ?? null, t).reason, /SeatOpen/);
+    assert.match(resignDecisionV3({ takenAt: t - 60 * DAY, openSince: 0 }, 5, (id) => ({ id, publishedAt: t - 40 * DAY, closed: false, extra: null }), t).reason, /SeatDead/);
+    assert.match(resignDecisionV3({ takenAt: t - 60 * DAY, openSince: 0 }, 5, () => null, t).reason, /could not be read/);
+    // the CLIs on the fake chain
+    const w = upgradedWorld();
+    const now = wallNow();
+    const refund = Keypair.generate().publicKey;
+    w.c.put(PDA.config(), programId, enc(w.p, "Config", { version: 2, architect: new PublicKey(arch), oracle: w.oracle, pendingOracle: Keypair.generate().publicKey, lastEpoch: BN(3), jackpotRound: BN(5), drawRound: BN(3) }));
+    w.c.put(PDA_V3.oracleSeat(), programId, enc(w.p, "OracleSeat", { generation: BN(2), cold: cold.publicKey, refund, bond: BN(XNT), takenAt: BN(now - 60 * DAY), bump: 255 }));
+    w.c.put(PDA.epoch(3), programId, enc(w.p, "Epoch", { id: BN(3), publishedAt: BN(now - 5 * DAY), expiresAt: BN(now + 80 * DAY), bump: 255 }));
+    const logs: string[] = [];
+    assert.strictEqual(await rotateHotCli(w.c.connection(), w.p, null, { yes: false, as: ck, newHot: hot, log: (s) => logs.push(s) }), null, "--as: simulated, nothing sent");
+    assert(logs.some((l) => /the pending hand-over to .* is wiped/.test(l)) && logs.some((l) => /simulation as .*accepted/.test(l)), logs.join(" | "));
+    await assert.rejects(rotateHotCli(w.c.connection(), w.p, null, { yes: true, newHot: hot }), /--yes needs COLD_PRIVATE_KEY/);
+    await assert.rejects(rotateHotCli(w.c.connection(), w.p, Keypair.generate(), { yes: true, newHot: hot }), /OnlyCold/);
+    await rotateHotCli(w.c.connection(), w.p, cold, { yes: true, newHot: hot, log: () => undefined });
+    assert.deepStrictEqual(w.c.names(), ["rotateHot"]);
+    assert.deepStrictEqual(w.c.sent[0].keys.map((k) => [k.pubkey.toBase58(), k.isWritable, k.isSigner]), [[PDA.config().toBase58(), true, false], [PDA_V3.oracleSeat().toBase58(), false, false], [ck, false, true]]);
+    const rl: string[] = [];
+    await resignSeatCli(w.c.connection(), w.p, cold, { yes: true, successor: "none", log: (s) => rl.push(s) });
+    assert.deepStrictEqual(w.c.names(), ["rotateHot", "resignSeat"], rl.join(" | "));
+    const r = w.c.sent[1];
+    assert.strictEqual((r.data.successor as PublicKey).toBase58(), PublicKey.default.toBase58());
+    assert.deepStrictEqual(r.keys.map((k) => k.pubkey.toBase58()), [PDA.config(), PDA_V3.oracleSeat(), PDA.rewardVault(), refund, cold.publicKey, PDA.epoch(3), PDA_V3.extraEpoch(3)].map((k) => k.toBase58()), "the refund key, then the walk pair");
+    assert.deepStrictEqual(w.c.cuLimits, [cuLimitForV3(7_150), cuLimitForV3(7_150)]);
+    // a seat that has not served cannot resign: refused before anything is simulated
+    w.c.put(PDA.epoch(3), programId, enc(w.p, "Epoch", { id: BN(3), publishedAt: BN(now - DAY), expiresAt: BN(now + 80 * DAY), bump: 255 }));
+    w.c.put(PDA.epoch(2), programId, enc(w.p, "Epoch", { id: BN(2), publishedAt: BN(now - 40 * DAY), expiresAt: BN(now + 50 * DAY), bump: 255 }));
+    await assert.rejects(resignSeatCli(w.c.connection(), w.p, cold, { yes: true, successor: "none", log: () => undefined }), /SeatDead/);
   });
 
   void SystemProgram;

@@ -841,7 +841,10 @@ async function main() {
   await test("T2-RULES / X-010: the reader records the rules block in force and the portal counters at toBlock (the logs' RPC)", () => {
     const i = base.inputs;
     assert.deepStrictEqual(i.rulesBlock, rulesForEpochV3(2, null), "the rules version in force, no pin");
-    assert.deepStrictEqual(built.file!.rulesBlock, { ...DEFAULT_RULES_V3 }, "rules 1: tip minimum 0.2 XNT, every leaf claimed, no operator wallet");
+    // the rules of the first v3 epoch (rulesId 2), the Legacy Pilot member included once its snapshot is pinned (legacy.ts)
+    assert.deepStrictEqual(built.file!.rulesBlock, rulesForEpochV3(2, null), "rules 2: tip minimum 0.2 XNT, every leaf claimed, no operator wallet");
+    const { legacyPilot: _legacy, ...normalRules } = built.file!.rulesBlock;
+    assert.deepStrictEqual(normalRules, { ...DEFAULT_RULES_V3 }, "every member but the Legacy Pilot is the engine's default");
     assert.strictEqual(built.file!.rulesBlock.tipMin, KEEPER_TIP_MIN_CLAIM.toString());
     assert.strictEqual(rulesInForceErrorV3(built.file!, null), null);
     assert.match(String(rulesInForceErrorV3(built.file!, "ab".repeat(32))), /not the pinned binary's/);

@@ -88,25 +88,18 @@ jobs:
           EPOCHS_DIR: ../frontend/public/epochs
           # optional comma list of X1 endpoints tried before the default one (oracle/src/x1-rpc.ts); empty = unchanged
           X1_RPC_URLS: ${{ vars.X1_RPC_URLS }}
+          X1_RPC_URL: ${{ vars.X1_RPC_URL }} # the default X1 endpoint (empty = the built-in one, oracle/src/config.ts)
           # D-17: 'true' = an epoch whose anomaly-gate hold ran out is not released until an operator clears it (a heartbeat,
           # which pays nothing, is never held; the health check is amber while it is set: review r4 finding 12)
           GATE_BLOCK: ${{ vars.GATE_BLOCK }}
-          PORTAL_ETH: ${{ vars.PORTAL_ETH }}
-          START_ETH: ${{ vars.START_ETH }}
-          PORTAL_OP: ${{ vars.PORTAL_OP }}
-          START_OP: ${{ vars.START_OP }}
-          PORTAL_BSC: ${{ vars.PORTAL_BSC }}
-          START_BSC: ${{ vars.START_BSC }}
-          PORTAL_POLYGON: ${{ vars.PORTAL_POLYGON }}
-          START_POLYGON: ${{ vars.START_POLYGON }}
-          PORTAL_AVAX: ${{ vars.PORTAL_AVAX }}
-          START_AVAX: ${{ vars.START_AVAX }}
-          PORTAL_BASE: ${{ vars.PORTAL_BASE }}
-          START_BASE: ${{ vars.START_BASE }}
-          PORTAL_PULSE: ${{ vars.PORTAL_PULSE }}
-          START_PULSE: ${{ vars.START_PULSE }}
-          PORTAL_MOONBEAM: ${{ vars.PORTAL_MOONBEAM }}
-          START_MOONBEAM: ${{ vars.START_MOONBEAM }}
+          # the chains and their start blocks come from deployments/portals.json (oracle/src/config.ts), never from
+          # PORTAL_/START_ variables: GitHub passes an unset variable as "", which the oracle reads as "skip this chain"
+          # optional EVM endpoint lists per chain (comma-separated; empty = the defaults in oracle/src/config.ts)
+          OP_RPC_URL: ${{ vars.OP_RPC_URL }}
+          BSC_RPC_URL: ${{ vars.BSC_RPC_URL }}
+          POLYGON_RPC_URL: ${{ vars.POLYGON_RPC_URL }}
+          AVAX_RPC_URL: ${{ vars.AVAX_RPC_URL }}
+          BASE_RPC_URL: ${{ vars.BASE_RPC_URL }}
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.dry }}" = "true" ]; then
             npm run epoch -- --dry
@@ -161,6 +154,14 @@ jobs:
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
           X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
+          # the post reads X1 and the chains: the same optional endpoints as the build (empty = the defaults in config.ts)
+          X1_RPC_URLS: ${{ vars.X1_RPC_URLS }}
+          X1_RPC_URL: ${{ vars.X1_RPC_URL }}
+          OP_RPC_URL: ${{ vars.OP_RPC_URL }}
+          BSC_RPC_URL: ${{ vars.BSC_RPC_URL }}
+          POLYGON_RPC_URL: ${{ vars.POLYGON_RPC_URL }}
+          AVAX_RPC_URL: ${{ vars.AVAX_RPC_URL }}
+          BASE_RPC_URL: ${{ vars.BASE_RPC_URL }}
         run: npm run announce -- epoch
       # ── the extra pot (upgraded program only; dormant before it) ────────────────────────────────────────────
       # A10.11, durable first: an extra epoch is published only once its file is in the pushed history, so these
@@ -181,6 +182,7 @@ jobs:
           ORACLE_PRIVATE_KEY: ${{ secrets.ORACLE_PRIVATE_KEY }}
           EPOCHS_DIR: ../frontend/public/epochs
           X1_RPC_URLS: ${{ vars.X1_RPC_URLS }}
+          X1_RPC_URL: ${{ vars.X1_RPC_URL }} # the default X1 endpoint (empty = the built-in one, oracle/src/config.ts)
           EXTRA_DURABLE_REF: origin/${{ github.ref_name }}
           BRANCH: ${{ github.ref_name }}
         run: |
@@ -250,6 +252,7 @@ jobs:
         continue-on-error: true
         env:
           X1_RPC_URLS: ${{ vars.X1_RPC_URLS }}
+          X1_RPC_URL: ${{ vars.X1_RPC_URL }} # the default X1 endpoint (empty = the built-in one, oracle/src/config.ts)
         run: timeout 150 npx ts-node src/heartbeat.ts ../ops/heartbeat.json
       # Second push path for the epoch data: the epoch job keeps frontend/public/epochs as a run artifact before
       # publishing. If its own commit step failed (six push attempts, a rule added later, a conflict), the files

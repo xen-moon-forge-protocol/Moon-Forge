@@ -10,6 +10,18 @@ Everything below that needs the v3 rules or the upgraded program is switched on 
 refused, with nothing sent, before that. Against the live program (tag `program-2026-10-12`) the kit sends the same
 instructions as 1.0.0.
 
+**Amended final program (2026-11-02), switched on with the upgraded program like everything below**
+- `recycleArtifact()` supports the final program's Core-closed floor hatch: under the v3 rules it first reads Metaplex
+  Core's program account and its ProgramData account (`MPL_CORE_PROGRAMDATA`). Only when Core was closed (the program
+  account still under the upgradeable loader, the ProgramData account gone or no longer the loader's: `coreClosed()`)
+  does it add that ProgramData account as the one remaining account, so the program pays the floor without the Core
+  burn that can no longer run. With Core working nothing changes. The result gains `coreHatch` (true when the hatch
+  was used). `test/unit/v3-methods.test.mjs` covers both reads and the rule.
+- `PRICE_LAUNCH_TS` (`rules-v3.mjs`) is 1,795,564,800 (2026-11-25 00:00 UTC), the program's value for the 2026-11-18
+  upgrade window.
+- The bundled upgraded IDL is unchanged (sha256 `9617cd5e…a72f`): the amended program adds no IDL account, argument or
+  error code.
+
 **F5, the carried liquidity rule (rules block 2, 2026-10-26), switched on with the v3 rules like everything below**
 - `quote-v3.mjs` follows rules block 2 of the oracle engine (`RULES_ID_V3 = 2`). A chain valued in an epoch whose hourly
   liquidity feed is missing or thin (fewer than 4 recorded samples on more than 2 of the 7 days, or none at all; the
@@ -45,6 +57,8 @@ instructions as 1.0.0.
   largest voider can take the oracle seat from day 28, anyone from day 29.
 
 **Changed for every user**
+- `NOTICES.consent` (`burn.mjs`) names no other project: "Moon Forge is independent and is not run by the XEN or X1
+  teams or any other XEN program" (owner rule of 2026-11-02, docs/WORDING.md §3 "Other projects"). Text only.
 - `connect()` uses the program interface (IDL) bundled with the kit (`frontend/src/idl/`, pinned by sha256 in
   `idl.mjs`) instead of reading the IDL account on chain, which its authority can change until the freeze. The live
   IDL is used while the program reports the current rules, the upgraded program's IDL once it reports the final

@@ -39,6 +39,10 @@
  *      D-47: paid by the oracle key, the automatic claims stop before its wallet falls under the publish reserve, and
  *      the fee-only upkeep (expire_epoch, close_extra_epoch) waits too, unless the close refunds its rent to that wallet
  *      (the upkeep guard, x1-v3.ts feeFundsOkV3). Any other key is never held back.
+ *   6. duties nobody else would do after the handover (FEATURE-MATRIX gaps 11, 12; permissionless, bounded per pass):
+ *      withdraw_vested of missions with 30 days' worth vested or complete (vestedDueV3), reclaim_orphan of Artifact
+ *      records whose Core asset is absent or a burn tombstone (orphanGoneV3).
+ * Every transaction carries a compute-unit limit: measured by a simulation, or the explicit fallback of cu-v3.ts.
  *
  * ── Hash-chain secrets (GitHub Actions has no private persistent storage) ───────────────────────────────────────────
  * Every chain is derived, never stored:
@@ -78,13 +82,14 @@
  */
 import * as anchor from "@coral-xyz/anchor";
 import { createHmac, randomInt } from "crypto";
-import { Commitment, ComputeBudgetProgram, Connection, Keypair, PublicKey, SYSVAR_SLOT_HASHES_PUBKEY, SystemProgram, Transaction, TransactionInstruction, TransactionMessage, VersionedTransaction } from "@solana/web3.js";
+import { Commitment, Connection, Keypair, PublicKey, SYSVAR_SLOT_HASHES_PUBKEY, SystemProgram, Transaction, TransactionInstruction } from "@solana/web3.js";
+import { CU_SIM_UNITS, cuIxV3, CuPlanV3, cuPlanOfUnitsV3, cuPlanV3, feeOfLimitV3, measureCuV3, rpcWithCuV3, sendWithCuV3 } from "./cu-v3";
 import { EpochFile } from "./epoch";
 import { ExtraFileV1 } from "./extra";
 import { gatedSealActionV3, sealAllowedV3 } from "./flow-v3";
 import { keccak } from "./merkle";
 import { deliverDrops, MPL_CORE, PDA, programId, randomU64, XDEX_XNT_OBSERVATION } from "./x1";
-import { claimExtraIxV3, ClaimGuardV3, claimGuardV3, closeExtraEpochIxV3, isV3Program, RENT_FLOOR, PDA_V3, readUpgradeProbeV3, sweepReceiptsV3, UpgradeProbeV3, upgradeVerdictV3, UpgradeVerdictV3 } from "./x1-v3";
+import { claimExtraIxV3, ClaimGuardV3, claimGuardV3, closeExtraEpochIxV3, isV3Program, RENT_FLOOR, PDA_V3, readUpgradeProbeV3, sweepReceiptsV3, UpgradeProbeV3, upgradeVerdictV3, UpgradeVerdictV3, x1NowV3 } from "./x1-v3";
 import { trustedConnectionFor } from "./x1-rpc";
 
 // ── program constants (mainnet values of constants.rs / state.rs) ───────────────────────────────────────────────────
@@ -639,6 +644,9 @@ export async function keeperPassV3(connection: Connection, program: anchor.Progr
   if (due("epochs", SLOW_EVERY_MS)) await step("epochs", () => epochsV3(c, o.epochFiles ?? []));
   if (due("extras", SLOW_EVERY_MS)) await step("extra pot", () => extrasV3(c, o.extraFiles ?? []));
   if (due("listings", SLOW_EVERY_MS)) await step("listings", () => listingsV3(c));
+  // FEATURE-MATRIX gaps 11, 12: permissionless duties nobody else would do after the handover (bounded, slow, each due item only)
+  if (due("vested", VESTED_EVERY_MS)) await step("vested missions", () => vestedMissionsV3(c));
+  if (due("orphans", ORPHAN_EVERY_MS)) await step("orphaned Artifacts", () => orphanArtifactsV3(c));
   // R-1 (2): the sweep is bounded by the pass budget like every other loop (it used to send without a bound)
   if (run.canSend() && due("sweep", SWEEP_EVERY_MS)) await step("receipt sweep", async () => void (await sweepReceiptsV3(connection, program, payer, log, run)));
   if (due("liveness", LIVENESS_EVERY_MS)) await step("oracle seat", () => oracleSeatV3(c));
@@ -695,45 +703,21 @@ export function txSizeOf(ixs: TransactionInstruction[], payer: PublicKey): numbe
   return n + 64 * sigs + tx.serializeMessage().length;
 }
 
-// ── compute-unit limits (KEEPER-INCOME.md; agents/README.md "Compute-unit limits") ─────────────────────────────────
+// ── compute-unit limits (KEEPER-INCOME.md; agents/README.md "Compute-unit limits"; cu-v3.ts) ────────────────────────
 /**
  * X1 charges 10 lamports per compute unit REQUESTED; without a limit every instruction requests 200,000 (≈ 0.002 XNT per
  * transaction). No v3 instruction has a measured limit yet (none was measured on the final build), so every keeper
  * transaction is simulated first with the same instructions (nothing signed or sent) and carries that measurement × 1.2
  * rounded up to 1,000 (the kit's rule, limitFor): about 8× cheaper for a settle. A simulation that the program refuses is
  * reported as that refusal, with no fee spent. A node that cannot simulate (an RPC error, or a client without it) sends
- * as before, without a limit, so a keeper duty never waits on a measurement.
+ * with the explicit fallback of cu-v3.ts (an earlier measurement of the same instruction × 1.5, else the runtime default
+ * 200,000 per instruction), never without a limit, so a keeper duty never waits on a measurement (X1-V4-AUDIT LOW-5).
  */
-export const CU_SIM_UNITS = 1_400_000;
-export function cuLimitForV3(consumed: number): number {
-  return Math.min(CU_SIM_UNITS, Math.max(1_000, Math.ceil((consumed * 1.2) / 1_000) * 1_000));
-}
-/** the limit instruction a transaction carries (and what the size check counts for it: its data does not depend on the units) */
-export const cuIxV3 = (units: number) => ComputeBudgetProgram.setComputeUnitLimit({ units });
+export { CU_SIM_UNITS, cuIxV3, cuLimitForV3, measureCuV3 } from "./cu-v3";
 
-/** The units the instructions consume, by a simulation at "confirmed" (null: the node cannot simulate); throws on a program refusal. */
-export async function measureCuV3(connection: Connection, payer: PublicKey, ixs: TransactionInstruction[]): Promise<number | null> {
-  const sim = (connection as { simulateTransaction?: unknown }).simulateTransaction;
-  if (typeof sim !== "function") return null;
-  let r: Awaited<ReturnType<Connection["simulateTransaction"]>>;
-  try {
-    const msg = new TransactionMessage({ payerKey: payer, recentBlockhash: PublicKey.default.toBase58(), instructions: [cuIxV3(CU_SIM_UNITS), ...ixs] }).compileToV0Message();
-    r = await connection.simulateTransaction(new VersionedTransaction(msg), { sigVerify: false, replaceRecentBlockhash: true, commitment: "confirmed" });
-  } catch {
-    return null;
-  }
-  if (r.value.err) {
-    const why = (r.value.logs ?? []).find((l) => /Error Code|failed|insufficient/i.test(l)) ?? JSON.stringify(r.value.err);
-    throw new Error(`refused in simulation (nothing was sent): ${why.slice(0, 200)}`);
-  }
-  return typeof r.value.unitsConsumed === "number" && r.value.unitsConsumed > 0 ? r.value.unitsConsumed : null;
-}
-
-async function sendTx(c: { program: anchor.Program; payer: Keypair }, ixs: TransactionInstruction[]): Promise<string> {
+async function sendTx(c: { program: anchor.Program; payer: Keypair }, ixs: TransactionInstruction[], plan?: CuPlanV3): Promise<string> {
   // R-5: simulated on the very connection the transaction is then sent through (a reveal's preimage reaches no other node)
-  const units = await measureCuV3(c.program.provider.connection, c.payer.publicKey, ixs);
-  const pre = units === null ? [] : [cuIxV3(cuLimitForV3(units))];
-  return c.program.provider.sendAndConfirm!(new Transaction().add(...pre, ...ixs), []);
+  return sendWithCuV3(c.program.provider, ixs, [], { payer: c.payer.publicKey, ...(plan ? { plan } : {}) });
 }
 
 /**
@@ -1256,9 +1240,13 @@ async function epochsV3(c: Ctx, files: EpochFile[]): Promise<void> {
     if (e.acc.closed || !run.canSend()) continue;
     const id = num(e.acc.id);
     if (now >= num(e.acc.expiresAt)) {
-      // upkeep guard: an expiry paid by the oracle key waits while its wallet is too low to publish (it refunds it nothing)
-      if (await feeHeldV3(c, 0n)) continue;
-      if (await run.send(`epoch ${id} expired: unclaimed budget back to the pool`, () => methods(program).expireEpoch().accountsPartial({ config: PDA.config(), epoch: e.pk }).instruction().then((ix: TransactionInstruction) => sendTx(c, [ix])))) e.acc.closed = true;
+      // upkeep guard: an expiry paid by the oracle key waits while its wallet is too low to publish (it refunds it nothing);
+      // LOW-2: the fee it is checked against is the one of the limit this very transaction will request
+      const ix: TransactionInstruction = await methods(program).expireEpoch().accountsPartial({ config: PDA.config(), epoch: e.pk }).instruction();
+      const label = `epoch ${id} expired: unclaimed budget back to the pool`;
+      const plan = await upkeepPlanV3(c, [ix], label);
+      if (!plan || (await feeHeldV3(c, 0n, feeOfLimitV3(plan.units)))) continue;
+      if (await run.send(label, () => sendTx(c, [ix], plan))) e.acc.closed = true;
       continue;
     }
     // a drop seed of an epoch published by the v2 binary (v3 epochs have none): seal it, or cancel it once its window passed
@@ -1281,12 +1269,30 @@ async function epochsV3(c: Ctx, files: EpochFile[]): Promise<void> {
   }
 }
 
-/** upkeep guard: true (and said once per pass) when the oracle key must not pay this upkeep transaction now */
-async function feeHeldV3(c: Ctx, refundToPayer: bigint): Promise<boolean> {
+/**
+ * upkeep guard: true (and said once per pass) when the oracle key must not pay this upkeep transaction now. `cost`: the
+ * X1 fee of the limit the transaction will request (feeOfLimitV3 of its plan), LOW-2.
+ */
+async function feeHeldV3(c: Ctx, refundToPayer: bigint, cost?: bigint): Promise<boolean> {
   const was = c.claimGuard.feeStopped;
-  const stop = await c.claimGuard.checkFee(refundToPayer);
-  if (stop && stop !== was) c.log(`  ${stop}`);
+  const stop = await c.claimGuard.checkFee(refundToPayer, cost);
+  // said once per pass (each transaction's fee is its own, so the texts of two holds may differ by the fee alone)
+  if (stop && was === null) c.log(`  ${stop}`);
   return stop !== null;
+}
+
+/**
+ * The compute-unit plan of one upkeep transaction (measured, else the explicit fallback), made BEFORE the upkeep guard so
+ * the guard prices exactly what is then sent. A simulation the program refuses is that duty's failed attempt (through the
+ * pass budget, as a refused send was before: logged and counted, nothing sent): null.
+ */
+async function upkeepPlanV3(c: Ctx, ixs: TransactionInstruction[], label: string): Promise<CuPlanV3 | null> {
+  try {
+    return await cuPlanV3(c.program.provider.connection, c.payer.publicKey, ixs);
+  } catch (e) {
+    await c.run.send(label, () => Promise.reject(e));
+    return null;
+  }
 }
 
 // ── extra pot claims and closes ─────────────────────────────────────────────────────────────────────────────────────
@@ -1305,8 +1311,11 @@ async function extrasV3(c: Ctx, files: ExtraFileV1[]): Promise<void> {
     if (now >= at + CLAIM_WINDOW) {
       // upkeep guard: the close returns the unclaimed budget to the extra pot and the rent to x.rentPayer; paid by the
       // oracle key, it waits while the wallet is too low to publish, unless that rent comes back to this very wallet
-      if (await feeHeldV3(c, (x.rentPayer as PublicKey).equals(payer.publicKey) ? RENT_FLOOR : 0n)) continue;
-      await run.send(`extra epoch ${f.epoch} closed (rent back to the oracle)`, async () => sendIx(c, await closeExtraEpochIxV3(program, f.epoch, x.rentPayer)));
+      const ix = await closeExtraEpochIxV3(program, f.epoch, x.rentPayer);
+      const label = `extra epoch ${f.epoch} closed (rent back to the oracle)`;
+      const plan = await upkeepPlanV3(c, [ix], label);
+      if (!plan || (await feeHeldV3(c, (x.rentPayer as PublicKey).equals(payer.publicKey) ? RENT_FLOOR : 0n, feeOfLimitV3(plan.units)))) continue;
+      await run.send(label, async () => sendTx(c, [ix], plan));
       continue;
     }
     if (x.closed || now < at + CLAIM_HOLD) continue;
@@ -1342,6 +1351,103 @@ async function listingsV3(c: Ctx): Promise<void> {
     if (!stale && c.now() < num(l.acc.expiresAt)) continue;
     await run.send(`listing of ${(l.acc.asset as PublicKey).toBase58()} closed (${stale ? "stale" : "expired"})`, () =>
       methods(program).closeListing().accountsPartial({ config: PDA.config(), listing: l.pk, seller: l.acc.seller, asset: l.acc.asset, collection }).instruction().then((ix: TransactionInstruction) => sendTx(c, [ix])));
+  }
+}
+
+// ── vested missions and orphaned Artifact records (FEATURE-MATRIX gaps 11, 12) ───────────────────────────────────────
+/** withdraw_vested is pushed once a mission's vested-but-unpaid share is worth this much of its vesting (monthly) */
+export const VESTED_PUSH_EVERY_S = 30 * DAY;
+/** and never for less than this before the mission completes (a push costs its payer one fee): 0.001 XNT */
+export const VESTED_MIN_PUSH = 1_000_000n;
+/** per pass at most this many withdraw_vested and reclaim_orphan (the rest waits for the next slow pass) */
+export const VESTED_PER_PASS = 20;
+export const ORPHANS_PER_PASS = 10;
+/** how often a keeper process looks (per process, like the sweep) */
+export const VESTED_EVERY_MS = 6 * 3_600_000;
+export const ORPHAN_EVERY_MS = 24 * 3_600_000;
+
+/** forge.rs vested() (pure mirror): the whole total from `end`, else total × elapsed / duration, rounded down. */
+export function missionVestedV3(m: { total: bigint; start: number; end: number }, now: number): bigint {
+  if (now >= m.end) return m.total;
+  const dur = BigInt(Math.max(1, m.end - m.start));
+  const el = BigInt(Math.max(0, now - m.start));
+  return (m.total * el) / dur;
+}
+
+/**
+ * Whether the keeper pushes withdraw_vested for a mission now (pure). Permissionless on chain (forge.rs: any fee payer;
+ * the XNT goes to the player's wallet, or to its PlayerState balance when the wallet would stay under rent), so after the
+ * handover nobody else would do it for a burner who never comes back. Due when the mission is complete (it then closes
+ * and its rent returns to whoever paid it) or when at least 30 days' worth of vesting waits, never for less than
+ * VESTED_MIN_PUSH before completion; never when nothing waits (the program would refuse: NothingVested).
+ */
+export function vestedDueV3(m: { total: bigint; withdrawn: bigint; start: number; end: number }, now: number): { due: boolean; amount: bigint; completes: boolean } {
+  const v = missionVestedV3(m, now);
+  const amount = v > m.withdrawn ? v - m.withdrawn : 0n;
+  const completes = now >= m.end;
+  if (amount === 0n) return { due: false, amount, completes };
+  if (completes) return { due: true, amount, completes };
+  const month = amount * BigInt(Math.max(1, m.end - m.start)) >= m.total * BigInt(VESTED_PUSH_EVERY_S);
+  return { due: month && amount >= VESTED_MIN_PUSH, amount, completes };
+}
+
+/**
+ * artifacts.rs asset_is_gone, STRICTER off-chain (pure): the asset account is absent, or Core's one-byte burn tombstone.
+ * The program also accepts a Core-owned account whose key byte is 0, or one another program owns; the keeper never
+ * automates those (a reclaim of a live Artifact would send its floor to the pool), it leaves them to a person.
+ */
+export function orphanGoneV3(info: { owner: PublicKey; data: Buffer | Uint8Array } | null): boolean {
+  if (!info) return true;
+  return info.owner.equals(MPL_CORE) && info.data.length <= 1;
+}
+
+/** withdraw_vested for every due mission (completed ones first), at most VESTED_PER_PASS per pass. */
+async function vestedMissionsV3(c: Ctx): Promise<void> {
+  const { program, payer, run } = c;
+  const now = c.now();
+  const due = (await allAs(c.connection, program, "Mission")).items
+    .map((m) => ({ m, d: vestedDueV3({ total: big(m.acc.total), withdrawn: big(m.acc.withdrawn), start: num(m.acc.start), end: num(m.acc.end) }, now) }))
+    .filter((x) => x.d.due)
+    .sort((a, b) => Number(b.d.completes) - Number(a.d.completes) || (b.d.amount > a.d.amount ? 1 : b.d.amount < a.d.amount ? -1 : 0) || a.m.pk.toBase58().localeCompare(b.m.pk.toBase58()));
+  let n = 0;
+  for (const { m, d } of due) {
+    if (!run.canSend() || n >= VESTED_PER_PASS) break;
+    const player = m.acc.player as PublicKey;
+    const rentPayer = m.acc.rentPayer as PublicKey;
+    const ix: TransactionInstruction = await methods(program).withdrawVested().accountsPartial({ mission: m.pk, player, playerState: PDA.player(player), rentPayer }).instruction();
+    const label = `vested ${(Number(d.amount) / 1e9).toFixed(4)} XNT pushed to ${player.toBase58()} (epoch ${num(m.acc.epoch)}, tier ${m.acc.tier}${d.completes ? "; mission complete, its rent back to its payer" : ""})`;
+    const plan = await upkeepPlanV3(c, [ix], label);
+    if (!plan) continue;
+    // upkeep guard: paid by the oracle key, it waits while the wallet is too low to publish, unless the rent comes back to it
+    if (await feeHeldV3(c, d.completes && rentPayer.equals(payer.publicKey) ? RENT_FLOOR : 0n, feeOfLimitV3(plan.units))) continue;
+    n++;
+    await run.send(label, () => sendTx(c, [ix], plan));
+  }
+}
+
+/** reclaim_orphan for every Artifact record whose Core asset is gone (orphanGoneV3), at most ORPHANS_PER_PASS per pass. */
+async function orphanArtifactsV3(c: Ctx): Promise<void> {
+  const { connection, program, run } = c;
+  const recs = (await allAs(connection, program, "ArtifactRecord")).items.sort((a, b) => a.pk.toBase58().localeCompare(b.pk.toBase58()));
+  if (!recs.length) return;
+  const infos: ({ owner: PublicKey; data: Buffer } | null)[] = [];
+  for (let i = 0; i < recs.length; i += 100) {
+    infos.push(...((await connection.getMultipleAccountsInfo(recs.slice(i, i + 100).map((r) => r.acc.asset as PublicKey), "confirmed")) as ({ owner: PublicKey; data: Buffer } | null)[]));
+  }
+  let n = 0;
+  for (let i = 0; i < recs.length; i++) {
+    if (!run.canSend() || n >= ORPHANS_PER_PASS) break;
+    if (!orphanGoneV3(infos[i] ?? null)) continue;
+    const r = recs[i];
+    const asset = r.acc.asset as PublicKey;
+    const ix: TransactionInstruction = await methods(program).reclaimOrphan().accountsPartial({
+      config: PDA.config(), asset, record: r.pk, collection: PDA.collection(), rewardVault: PDA.rewardVault(), extraState: PDA_V3.extraState(),
+    }).instruction();
+    const label = `orphaned Artifact ${asset.toBase58()} (tier ${r.acc.tier}) reclaimed: its floor back to the pool, its supply slot freed`;
+    const plan = await upkeepPlanV3(c, [ix], label);
+    if (!plan || (await feeHeldV3(c, 0n, feeOfLimitV3(plan.units)))) continue;
+    n++;
+    await run.send(label, () => sendTx(c, [ix], plan));
   }
 }
 
@@ -1495,12 +1601,30 @@ export async function nextDeadlineV3(connection: Connection, program: anchor.Pro
   return { at: Math.max(now, due[0].at), reasons: due.slice(0, 5).map((d) => d.why) };
 }
 
-// ── later manual step (F1-b, not S7): the first arm ─────────────────────────────────────────────────────────────────
+// ── the house keeper seat: the first arm (r9 dated opening) and re-arms ─────────────────────────────────────────────
+/**
+ * KEEPER_OPEN_TS (constants.rs, r9): 2026-12-16 00:00:00 UTC, the 2026-11-18 upgrade window + 28 days (KEEPER_DEAD_DELAY).
+ * While the seat was never created, arm_keeper creates it for the program's INITIAL_KEEPER only before this time, and
+ * for whoever signs it from then on (its own chain, its own bond of at least KEEPER_BOND_MIN; every other check is
+ * unchanged). An existing seat changes hands only through take_keeper (keeper-take): its named successor after the
+ * notice, or anyone once it has been idle KEEPER_DEAD_DELAY (28 days).
+ */
+export const KEEPER_OPEN_TS = 1_797_379_200;
+const KEEPER_OPEN_ISO = new Date(KEEPER_OPEN_TS * 1000).toISOString().replace(".000Z", "Z");
+
+/** Who may create the never-armed seat at `now` (pure; chain time): what keeper-arm and keeper-take print. */
+export function seatCreatorV3(now: number): { open: boolean; text: string } {
+  return now >= KEEPER_OPEN_TS
+    ? { open: true, text: `the seat was never created: since ${KEEPER_OPEN_ISO} anyone may create it with keeper-arm and a bond of at least 20 XNT, and becomes its keeper` }
+    : { open: false, text: `the seat was never created: until ${KEEPER_OPEN_ISO} only the program's INITIAL_KEEPER may create it (another key's arm is refused with OnlyKeeper); from then on anyone may, with a bond of at least 20 XNT` };
+}
+
 /**
  * `keeper-arm --deposit <XNT> [--yes]`: arms the seat with a chain this key derives (so every keeper run holding the key
- * can reveal it), adding `deposit` to the bond. The first arm creates the seat, whose keeper is the program's
- * INITIAL_KEEPER. A manual step (it moves the bond), run only later, once a keeper runs continuously (F1-b: not at S7;
- * s7.mjs --arm-keeper), with a bond from project wallets; without --yes it only prints the plan. Never called by the loop.
+ * can reveal it), adding `deposit` to the bond. The first arm creates the seat: its keeper is the program's
+ * INITIAL_KEEPER before KEEPER_OPEN_TS and this key from then on (seatCreatorV3). A manual step (it moves the bond);
+ * without --yes it prints the plan and the program's verdict on it (a simulation: nothing signed, nothing sent). Never
+ * called by the loop, which only re-arms its own seat with deposit 0.
  */
 export async function armKeeperCli(connection: Connection, program: anchor.Program, signer: Keypair, depositXnt: number, yes: boolean, log = console.log): Promise<string | null> {
   if (!isV3Program(program)) throw new Error("keeper-arm needs the v3 client");
@@ -1509,23 +1633,46 @@ export async function armKeeperCli(connection: Connection, program: anchor.Progr
   if (verdict.status !== "upgraded") throw new Error(`refusing to arm: the live program is not the upgraded binary (${verdict.status}: ${verdict.reasons.join("; ")}) (W2-4)`);
   const raw = await fetchAs(connection, program, "HouseKeeper", PDA_V3.houseKeeper());
   const seat = raw ? seatOf(raw) : null;
-  if (seat && !seat.keeper.equals(signer.publicKey)) throw new Error(`the seat is held by ${seat.keeper.toBase58()}, not this key ${signer.publicKey.toBase58()} (take_keeper is a separate manual operator step)`);
+  if (seat && !seat.keeper.equals(signer.publicKey)) {
+    throw new Error(`the seat is held by ${seat.keeper.toBase58()}, not this key ${signer.publicKey.toBase58()}: only its keeper arms it; another key takes it with keeper-take (its named successor after the notice, or anyone once it has been idle 28 days)`);
+  }
   if (seat && seat.pendingBets > 0) throw new Error(`the seat has ${seat.pendingBets} pending bets / drawing rounds: arm_keeper would fail (KeeperBusy)`);
   const deposit = BigInt(Math.round(depositXnt * 1e9));
   const bondAfter = (seat ? seat.bond : 0n) + deposit;
   if (bondAfter < KEEPER_BOND_MIN) throw new Error(`the bond after the arm would be ${bondAfter} lamports, below KEEPER_BOND_MIN ${KEEPER_BOND_MIN} (KeeperBondTooSmall)`);
+  // r9: who may create a never-armed seat depends on the chain's clock (the local clock only when X1's is unreadable)
+  const creator = seat ? null : seatCreatorV3((await x1NowV3(connection, 1)) ?? Math.floor(Date.now() / 1000));
   const chains = new KeeperChains(signer);
   const buildSlot = BigInt(await connection.getSlot("processed"));
   const { id, tip } = chains.fresh(buildSlot);
-  log(`keeper-arm plan: seat ${PDA_V3.houseKeeper().toBase58()} ${seat ? "(exists)" : "(created by this arm; its keeper is INITIAL_KEEPER)"}, keeper ${signer.publicKey.toBase58()}`);
+  log(`keeper-arm plan: seat ${PDA_V3.houseKeeper().toBase58()} ${seat ? "(exists, held by this key)" : `(${creator!.text}; this arm creates it${creator!.open ? " with this key as its keeper" : ", which works only when this key is INITIAL_KEEPER"})`}, keeper ${signer.publicKey.toBase58()}`);
   log(`  deposit ${deposit} lamports, bond after ${bondAfter}; chain of ${id.length} positions, tip ${tip.toString("hex")} (build slot ${buildSlot}, nonce ${id.nonce})`);
+  const builder = methods(program).armKeeper(Array.from(tip), new anchor.BN(id.length), new anchor.BN(deposit.toString())).accountsPartial({
+    config: PDA.config(), keeperSeat: PDA_V3.houseKeeper(), keeper: signer.publicKey, bankrollVault: PDA.bankrollVault(), rewardVault: PDA.rewardVault(), systemProgram: SystemProgram.programId,
+  });
+  const hint = (e: unknown) => {
+    const t = short(e, 300);
+    return creator && !creator.open && /OnlyKeeper/.test(t) ? `${t} (${creator.text})` : t;
+  };
   if (!yes) {
+    let said: string;
+    try {
+      const units = await measureCuV3(connection, signer.publicKey, [await builder.instruction()]);
+      said = units === null ? "the node cannot simulate" : `accepted by the program (${units} compute units)`;
+    } catch (e) {
+      said = `REFUSED: ${hint(e)}`;
+    }
+    log(`  simulation as ${signer.publicKey.toBase58()}: ${said}`);
     log("  dry: nothing sent (add --yes to send it)");
     return null;
   }
-  const sig: string = await methods(program).armKeeper(Array.from(tip), new anchor.BN(id.length), new anchor.BN(deposit.toString())).accountsPartial({
-    config: PDA.config(), keeperSeat: PDA_V3.houseKeeper(), keeper: signer.publicKey, bankrollVault: PDA.bankrollVault(), rewardVault: PDA.rewardVault(), systemProgram: SystemProgram.programId,
-  }).signers([signer]).rpc();
+  // MED-2: with a measured compute-unit limit (cu-v3.ts); a refused simulation sends nothing
+  let sig: string;
+  try {
+    sig = await rpcWithCuV3(builder, program.provider, [signer]);
+  } catch (e) {
+    throw new Error(`keeper-arm: ${hint(e)}`);
+  }
   log(`  armed: ${sig}`);
   await assertChainDerivableV3(connection, program, signer, "keeper-arm", log);
   return sig;
@@ -1551,9 +1698,9 @@ export async function assertChainDerivableV3(connection: Connection, program: an
 /**
  * `keeper-take --deposit <XNT> [--yes]` (R-4): take_keeper by the named successor after KEEPER_NOTICE, or by anyone once
  * the seat is dead (28 days without arm / reveal / settle), on a chain this key derives. The old bond goes back to the
- * old keeper in full; `deposit` is the new bond (at least KEEPER_BOND_MIN), from a project wallet only. A manual operator
- * step; without --yes it only prints
- * the plan. After landing, the seat's chain is checked to be derivable by this key.
+ * old keeper in full; `deposit` is the taker's own new bond (at least KEEPER_BOND_MIN). A manual step; without --yes it
+ * only prints the plan. After landing, the seat's chain is checked to be derivable by this key. A seat that was never
+ * created cannot be taken: it is created by keeper-arm (seatCreatorV3: INITIAL_KEEPER before KEEPER_OPEN_TS, anyone after).
  */
 export async function takeKeeperCli(connection: Connection, program: anchor.Program, signer: Keypair, depositXnt: number, yes: boolean, log = console.log): Promise<string | null> {
   if (!isV3Program(program)) throw new Error("keeper-take needs the v3 client");
@@ -1561,7 +1708,7 @@ export async function takeKeeperCli(connection: Connection, program: anchor.Prog
   const { verdict } = await keeperModeV3(connection, program);
   if (verdict.status !== "upgraded") throw new Error(`refusing to take the seat: the live program is not the upgraded binary (${verdict.status}: ${verdict.reasons.join("; ")}) (W2-4)`);
   const raw = await fetchAs(trustedConnectionFor(connection), program, "HouseKeeper", PDA_V3.houseKeeper());
-  if (!raw) throw new Error("there is no keeper seat yet: the first arm is `keeper-arm` (INITIAL_KEEPER)");
+  if (!raw) throw new Error(`there is no keeper seat to take: ${seatCreatorV3((await x1NowV3(connection, 1)) ?? Math.floor(Date.now() / 1000)).text} (npm run keeper-arm -- --deposit 20)`);
   const seat = seatOf(raw);
   if (seat.keeper.equals(signer.publicKey)) throw new Error("this key already holds the seat: use keeper-arm to re-arm it");
   if (seat.pendingBets > 0) throw new Error(`the seat has ${seat.pendingBets} pending bets / drawing rounds: take_keeper would fail (KeeperBusy); they refund or settle permissionlessly first`);
@@ -1577,12 +1724,122 @@ export async function takeKeeperCli(connection: Connection, program: anchor.Prog
     log("  dry: nothing sent (add --yes to send it)");
     return null;
   }
-  const sig: string = await methods(program).takeKeeper(Array.from(tip), new anchor.BN(id.length), new anchor.BN(deposit.toString())).accountsPartial({
+  // MED-2: with a measured compute-unit limit (cu-v3.ts)
+  const sig: string = await rpcWithCuV3(methods(program).takeKeeper(Array.from(tip), new anchor.BN(id.length), new anchor.BN(deposit.toString())).accountsPartial({
     config: PDA.config(), keeperSeat: PDA_V3.houseKeeper(), oldKeeper: seat.keeper, taker: signer.publicKey, rewardVault: PDA.rewardVault(), systemProgram: SystemProgram.programId,
-  }).signers([signer]).rpc();
+  }), program.provider, [signer]);
   log(`  taken: ${sig}`);
   await assertChainDerivableV3(connection, program, signer, "keeper-take", log);
   return sig;
+}
+
+// ── the keeper's own seat operations (r9 fix-up c): keeper_withdraw (and its notice), propose_keeper ─────────────────
+/** KEEPER_NOTICE (constants.rs): a withdrawal waits this long after its notice; a named successor this long after the proposal */
+export const KEEPER_NOTICE = 7 * DAY;
+
+export type KeeperWithdrawRequestV3 = { notice: "start" | "cancel" } | { amount: bigint };
+
+/**
+ * keeper.rs keeper_withdraw (pure mirror): amount 0 toggles the 7-day notice (starts it when none runs, cancels a
+ * running one), so the CLI names which one it means and refuses the other; an amount needs a notice older than
+ * KEEPER_NOTICE, nothing pending, and leaves either nothing or at least KEEPER_BOND_MIN in the bond (withdraw_check).
+ */
+export function keeperWithdrawDecisionV3(
+  seat: Pick<SeatV3, "keeper" | "bond" | "withdrawTs" | "pendingBets">, actor: PublicKey, req: KeeperWithdrawRequestV3, now: number,
+): { ok: boolean; reason: string; amount: bigint } {
+  const no = (reason: string) => ({ ok: false, reason, amount: 0n });
+  if (!seat.keeper.equals(actor)) return no(`only the seat's keeper ${seat.keeper.toBase58()} may do this (OnlyKeeper)`);
+  const at = (t: number) => new Date(t * 1000).toISOString();
+  if ("notice" in req) {
+    if (req.notice === "start") {
+      return seat.withdrawTs !== 0 ? no(`a withdrawal notice already runs since ${at(seat.withdrawTs)} (a second toggle would CANCEL it: use --notice cancel for that)`) : { ok: true, reason: `starts the ${KEEPER_NOTICE / DAY}-day withdrawal notice: the bond can be withdrawn from ${at(now + KEEPER_NOTICE)}`, amount: 0n };
+    }
+    return seat.withdrawTs === 0 ? no("no withdrawal notice runs (a toggle now would START one: use --notice start for that)") : { ok: true, reason: `cancels the withdrawal notice of ${at(seat.withdrawTs)}`, amount: 0n };
+  }
+  const amount = req.amount;
+  if (amount <= 0n) return no("--amount must be more than 0 (0 is the notice toggle: --notice start|cancel)");
+  if (amount > seat.bond) return no(`the bond holds ${seat.bond} lamports, less than ${amount}`);
+  const left = seat.bond - amount;
+  if (left !== 0n && left < KEEPER_BOND_MIN) return no(`the bond would keep ${left} lamports: withdraw all of it or leave at least ${KEEPER_BOND_MIN} (KeeperBondTooSmall)`);
+  if (seat.withdrawTs === 0) return no("no withdrawal notice runs: start one with --notice start, then withdraw 7 days later (KeeperNotice)");
+  if (now < seat.withdrawTs + KEEPER_NOTICE) return no(`the notice of ${at(seat.withdrawTs)} runs until ${at(seat.withdrawTs + KEEPER_NOTICE)} (KeeperNotice)`);
+  if (seat.pendingBets > 0) return no(`${seat.pendingBets} bets / drawing rounds are pending: they settle or refund first (KeeperBusy)`);
+  return { ok: true, reason: `withdraws ${amount} lamports, ${left === 0n ? "the whole bond (house games pause until someone arms or takes the seat)" : `${left} stay in the bond`}`, amount };
+}
+
+/** keeper_withdraw / propose_keeper: both take HouseKeeperOnly (config, keeper_seat, keeper, bankroll_vault, reward_vault, system_program). */
+const keeperOnlyAccounts = (keeper: PublicKey) => ({
+  config: PDA.config(), keeperSeat: PDA_V3.houseKeeper(), keeper, bankrollVault: PDA.bankrollVault(), rewardVault: PDA.rewardVault(), systemProgram: SystemProgram.programId,
+});
+export async function keeperWithdrawIxV3(program: anchor.Program, keeper: PublicKey, amount: bigint): Promise<TransactionInstruction> {
+  return methods(program).keeperWithdraw(new anchor.BN(amount.toString())).accountsPartial(keeperOnlyAccounts(keeper)).instruction();
+}
+export async function proposeKeeperIxV3(program: anchor.Program, keeper: PublicKey, successor: PublicKey): Promise<TransactionInstruction> {
+  return methods(program).proposeKeeper(successor).accountsPartial(keeperOnlyAccounts(keeper)).instruction();
+}
+
+/** The common tail of the keeper's seat operations: the program's verdict (simulated), then, with --yes, the send. */
+async function keeperOpSendV3(connection: Connection, program: anchor.Program, signer: Keypair, ix: TransactionInstruction, yes: boolean, what: string, log: (s: string) => void): Promise<string | null> {
+  let units: number | null;
+  try {
+    units = await measureCuV3(connection, signer.publicKey, [ix]);
+  } catch (e) {
+    log(`  simulation as ${signer.publicKey.toBase58()}: REFUSED: ${short(e, 300)}`);
+    if (yes) throw new Error(`${what}: ${short(e, 300)}`);
+    return null;
+  }
+  log(`  simulation as ${signer.publicKey.toBase58()}: ${units === null ? "the node cannot simulate" : `accepted by the program (${units} compute units)`}`);
+  if (!yes) {
+    log("  dry: nothing signed, nothing sent (add --yes to send it)");
+    return null;
+  }
+  // MED-2: the measured units × 1.2 as the limit (the explicit fallback when the node could not simulate)
+  const sig = await sendWithCuV3(program.provider, [ix], [signer], { payer: signer.publicKey, plan: cuPlanOfUnitsV3(units, [ix]) });
+  log(`  sent: ${sig}`);
+  return sig;
+}
+
+/**
+ * `keeper-withdraw -- --notice start|cancel [--yes]` or `keeper-withdraw -- --amount <XNT> [--yes]` (KEEPER_PRIVATE_KEY):
+ * the keeper's bond out of its seat, after the 7-day notice and with nothing pending. Dry by default (the plan and the
+ * program's verdict, simulated).
+ */
+export async function keeperWithdrawCli(connection: Connection, program: anchor.Program, signer: Keypair, req: KeeperWithdrawRequestV3, yes: boolean, log = console.log): Promise<string | null> {
+  if (!isV3Program(program)) throw new Error("keeper-withdraw needs the v3 client");
+  const { verdict } = await keeperModeV3(connection, program);
+  if (verdict.status !== "upgraded") throw new Error(`keeper-withdraw: the live program is not the upgraded binary (${verdict.status}) (W2-4)`);
+  const raw = await fetchAs(trustedConnectionFor(connection), program, "HouseKeeper", PDA_V3.houseKeeper());
+  if (!raw) throw new Error("there is no keeper seat");
+  const seat = seatOf(raw);
+  const now = (await x1NowV3(connection, 1)) ?? Math.floor(Date.now() / 1000);
+  const d = keeperWithdrawDecisionV3(seat, signer.publicKey, req, now);
+  log(`keeper-withdraw plan: seat ${PDA_V3.houseKeeper().toBase58()} held by ${seat.keeper.toBase58()}, bond ${seat.bond} lamports, notice ${seat.withdrawTs ? new Date(seat.withdrawTs * 1000).toISOString() : "none"}, ${seat.pendingBets} pending`);
+  log(`  decision: ${d.ok ? "OK" : "REFUSED"}: ${d.reason}`);
+  if (!d.ok) {
+    if (yes) throw new Error(`keeper-withdraw refused: ${d.reason}`);
+    return null;
+  }
+  return keeperOpSendV3(connection, program, signer, await keeperWithdrawIxV3(program, signer.publicKey, d.amount), yes, "keeper-withdraw", log);
+}
+
+/**
+ * `propose-keeper -- <pubkey>|none [--yes]` (KEEPER_PRIVATE_KEY): names the successor that may take the seat with
+ * keeper-take after KEEPER_NOTICE (7 days); `none` cancels the proposal. Dry by default.
+ */
+export async function proposeKeeperCli(connection: Connection, program: anchor.Program, signer: Keypair, successor: string, yes: boolean, log = console.log): Promise<string | null> {
+  if (!isV3Program(program)) throw new Error("propose-keeper needs the v3 client");
+  if (!successor) throw new Error("usage: propose-keeper <pubkey>|none [--yes]");
+  const next = successor === "none" ? PublicKey.default : new PublicKey(successor);
+  const { verdict } = await keeperModeV3(connection, program);
+  if (verdict.status !== "upgraded") throw new Error(`propose-keeper: the live program is not the upgraded binary (${verdict.status}) (W2-4)`);
+  const raw = await fetchAs(trustedConnectionFor(connection), program, "HouseKeeper", PDA_V3.houseKeeper());
+  if (!raw) throw new Error("there is no keeper seat");
+  const seat = seatOf(raw);
+  if (!seat.keeper.equals(signer.publicKey)) throw new Error(`only the seat's keeper ${seat.keeper.toBase58()} may name a successor (OnlyKeeper)`);
+  if (next.equals(signer.publicKey)) throw new Error("the successor must be another key");
+  const now = (await x1NowV3(connection, 1)) ?? Math.floor(Date.now() / 1000);
+  log(`propose-keeper plan: seat held by ${seat.keeper.toBase58()}; ${next.equals(PublicKey.default) ? `cancels the proposal of ${seat.pendingKeeper.equals(PublicKey.default) ? "nobody (none is pending)" : seat.pendingKeeper.toBase58()}` : `names ${next.toBase58()}, who may take the seat with keeper-take from ${new Date((now + KEEPER_NOTICE) * 1000).toISOString()} (its own bond; this bond comes back in full)`}`);
+  return keeperOpSendV3(connection, program, signer, await proposeKeeperIxV3(program, signer.publicKey, next), yes, "propose-keeper", log);
 }
 
 /**

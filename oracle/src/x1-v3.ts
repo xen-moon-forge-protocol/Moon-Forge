@@ -14,6 +14,7 @@ import * as anchor from "@coral-xyz/anchor";
 import { createHash } from "crypto";
 import { Commitment, Connection, Keypair, PublicKey, SystemProgram, Transaction, TransactionInstruction } from "@solana/web3.js";
 import bs58 from "bs58";
+import { CU_DEFAULT_PER_IX, feeOfLimitV3, rpcWithCuV3, sendWithCuV3 } from "./cu-v3";
 import { trustedConnectionFor, x1Connection } from "./x1-rpc";
 import { BPS, keeperTipDue, MAX_PUBLISH_LAG, MIN_EPOCH_INTERVAL, programClaims, publishableError, publishAgeError, WEEK } from "./rewards";
 import type { PublishedRecordV3, SnapshotReadV3, SnapshotRecordV3 } from "./flow-v3";
@@ -406,7 +407,8 @@ export async function publishEpochV3(program: anchor.Program, oracle: Keypair, f
   // unreadable clock refuses (fail closed). The run's gate rebuilds such a file on a fresh snapshot instead.
   const aged = publishAgeError(f as { epoch: number; window?: { endTs?: unknown } }, await x1NowV3(program.provider.connection));
   if (aged) throw new Error(`refusing to publish: ${aged} (CF-22)`);
-  return program.provider.sendAndConfirm!(await publishEpochTxV3(program, oracle.publicKey, f), [oracle]);
+  // MED-2: with a measured compute-unit limit (cu-v3.ts; an explicit fallback when the node cannot simulate)
+  return sendWithCuV3(program.provider, (await publishEpochTxV3(program, oracle.publicKey, f)).instructions, [oracle]);
 }
 
 /**
@@ -483,11 +485,13 @@ export function claimFundsOkV3(balance: bigint, reserve: bigint = ORACLE_PUBLISH
 }
 
 /**
- * upkeep guard: the most one fee-only upkeep transaction costs its payer (the expiry of a base
- * epoch, the close of an extra epoch), rounded up: one signature at the base fee with room for a priority fee. Neither
- * opens an account.
+ * upkeep guard: the most one fee-only upkeep transaction costs its payer (the expiry of a base epoch, the close of an
+ * extra epoch; neither opens an account) under X1's per-CU fee (X1-V4-AUDIT LOW-2): 1,500 + 10 × the requested limit,
+ * and the most a single-instruction upkeep ever requests is the cu-v3.ts fallback of the runtime default, 200,000 units
+ * (2,001,500 lamports). The keeper passes the fee of the limit it actually requests (feeOfLimitV3 of its plan: about
+ * 0.0001-0.0003 XNT once measured); this constant is the default for a caller that does not know it.
  */
-export const FEE_COST_MAX = 100_000n;
+export const FEE_COST_MAX = feeOfLimitV3(CU_DEFAULT_PER_IX);
 /** the rent of an account's 128-byte header at X1's rate (6,960 lamports per byte): every closed account refunds at least this */
 export const RENT_FLOOR = 128n * 6_960n;
 
@@ -512,9 +516,11 @@ export interface ClaimGuardV3 {
   /**
    * The upkeep guard of the fee-only upkeep (base expiries, extra closes): null = it may go out (feeFundsOkV3, the balance
    * re-read each time), else why it is held back. `refundToPayer`: what the transaction refunds to this payer (0 when it
-   * refunds nothing to it). Separate from the claims: a wallet too low for a claim may still pay an upkeep fee.
+   * refunds nothing to it). `cost`: the X1 fee of the limit the transaction requests (LOW-2: feeOfLimitV3 of its
+   * compute-unit plan; FEE_COST_MAX, the unmeasured worst case, when not given). Separate from the claims: a wallet too
+   * low for a claim may still pay an upkeep fee.
    */
-  checkFee(refundToPayer?: bigint): Promise<string | null>;
+  checkFee(refundToPayer?: bigint, cost?: bigint): Promise<string | null>;
   /** the last reason an upkeep transaction was held back in this pass (null: none was) */
   readonly feeStopped: string | null;
 }
@@ -539,7 +545,7 @@ export function claimGuardV3(connection: { getBalance(pk: PublicKey, c?: Commitm
     get feeStopped() {
       return feeStopped;
     },
-    async checkFee(refundToPayer = 0n) {
+    async checkFee(refundToPayer = 0n, cost = FEE_COST_MAX) {
       if (!isOracle) return null;
       let bal: bigint;
       try {
@@ -548,8 +554,8 @@ export function claimGuardV3(connection: { getBalance(pk: PublicKey, c?: Commitm
         feeStopped = `D-47 (upkeep): the oracle wallet's balance could not be read (${String((e as Error)?.message ?? e).slice(0, 120)}): expiries and extra closes held back, publication keeps priority`;
         return feeStopped;
       }
-      if (feeFundsOkV3(bal, refundToPayer, reserve)) return null;
-      feeStopped = `D-47 (upkeep): the oracle wallet holds ${xntStr(bal)} XNT, under the ${xntStr(reserve)} XNT kept for publishing plus one fee (${xntStr(FEE_COST_MAX)} XNT): expiries and extra closes that do not refund it are held back, publication keeps priority (anyone can send them)`;
+      if (feeFundsOkV3(bal, refundToPayer, reserve, cost)) return null;
+      feeStopped = `D-47 (upkeep): the oracle wallet holds ${xntStr(bal)} XNT, under the ${xntStr(reserve)} XNT kept for publishing plus one fee (${xntStr(cost)} XNT at the requested compute-unit limit): expiries and extra closes that do not refund it are held back, publication keeps priority (anyone can send them)`;
       return feeStopped;
     },
     async check() {
@@ -611,7 +617,8 @@ export async function claimLeavesV3(connection: Connection, program: anchor.Prog
       const m = l.tier === 0
         ? program.methods.claimInstant(new anchor.BN(f.epoch), l.tier, new anchor.BN(l.score), proof).accountsPartial(common)
         : program.methods.claimMission(new anchor.BN(f.epoch), l.tier, new anchor.BN(l.score), proof).accountsPartial({ ...common, mission: PDA.mission(f.epoch, player, l.tier) });
-      const sig = await m.signers([payer]).rpc();
+      // MED-2: one claim per transaction, each with its measured compute-unit limit (cu-v3.ts)
+      const sig = await rpcWithCuV3(m, program.provider, [payer], { log });
       claimed++;
       if (tip) tipped++;
       else dust++;
@@ -650,7 +657,8 @@ export async function sweepReceiptsV3(connection: Connection, program: anchor.Pr
   for (const r of mine) {
     const epochPk = over.get(Number(bnStr(r.account.epoch)));
     if (!epochPk) continue;
-    const close = () => program.methods.closeReceipt().accountsPartial({ epoch: epochPk, receipt: r.publicKey, rentPayer: payer.publicKey }).signers([payer]).rpc();
+    // MED-2: with a measured compute-unit limit (cu-v3.ts), also when the keeper pass calls this sweep
+    const close = () => rpcWithCuV3(program.methods.closeReceipt().accountsPartial({ epoch: epochPk, receipt: r.publicKey, rentPayer: payer.publicKey }), program.provider, [payer]);
     if (run) {
       // R-1 (2): bounded by the pass, like every other loop of the keeper (the rest waits for the next sweep)
       if (!run.canSend()) break;
@@ -1217,7 +1225,8 @@ export async function publishExtraEpochV3(program: anchor.Program, oracle: Keypa
   if (err) {
     throw new Error(`refusing to publish extra epoch ${a.epoch}: the program would refuse it (${err}; weeks ${a.weeks}, chain max ${pre.weeksMax}, total ${a.total}, bound ${extraBoundV3(pre.state, a.weeks).bound})`);
   }
-  return publishExtraEpochMethodV3(program, oracle.publicKey, a).signers([oracle]).rpc();
+  // MED-2: with a measured compute-unit limit (cu-v3.ts)
+  return rpcWithCuV3(publishExtraEpochMethodV3(program, oracle.publicKey, a), program.provider, [oracle]);
 }
 
 /** claim_extra(epoch_id, index, amount, proof): permissionless; the lamports go to the leaf wallet (an account). */

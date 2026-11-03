@@ -109,6 +109,6 @@ See `examples/war-bot.mjs` for a complete loop.
 - Source, tests and rules: https://github.com/xen-moon-forge-protocol/Moon-Forge (deployed program: tag `program-2026-10-12`)
 - Known issues register: https://github.com/xen-moon-forge-protocol/Moon-Forge/blob/main/docs/KNOWN-ISSUES.md
 - Live numbers and checklist: https://xen-moon-forge-protocol.github.io/Moon-Forge/start/
-- Moon Forge is independent: not run by the XEN or X1 teams, not XEN Prime, not X1 Forge, not Moon Party, no token.
+- Moon Forge is independent: not run by, and not speaking for, the XEN or X1 teams or any other XEN or X1 project; no token.
 - If the GitHub account falls, the site, the oracle, the keeper and the epoch files stop; payouts pause; the reward pool
   stays locked in the program.

@@ -87,7 +87,7 @@ export const HOUR_EDGE_SEC = 180;
 export const NOTICES = Object.freeze({
   consent: 'Burning XEN through a Moon Forge portal is irreversible: the XEN is destroyed on its chain and the payout is XNT on X1, '
     + 'credited to the X1 address you enter (never to the EVM wallet that burns), under the rules of the epoch the burn falls in. '
-    + 'Moon Forge is not XEN Prime and is not run by the XEN or X1 teams. Only burns through these portals are counted.',
+    + 'Moon Forge is independent and is not run by the XEN or X1 teams or any other XEN program. Only burns through these portals are counted.',
   etiquette: `${V3_FROM}, capacity opens in daily tranches counted from the previous epoch's publication time (UTC); `
     + 'scripted burns can take a tranche first. Spread your burns: the kit refuses one burn that takes more than half of what is left of today\'s tranche.',
   noQuoteToday: 'No binding quote exists before the v3 switch epoch (planned for November 2026, announced at least one full epoch ahead): '

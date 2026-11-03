@@ -37,6 +37,7 @@ import { createHash } from "crypto";
 import { closesFromOhlcvV3, QUOTE_USD_MAX_DIFF_BPS, quoteUsdDiffBpsV3 } from "./pricing";
 import type { XenRouteV3 } from "./pricing";
 import { rulesForEpochV3 } from "./rules-v3";
+import { legacyPilotInputsV3 } from "./legacy";
 import {
   baseSnapshotSkipReason, baseSnapshotUnavailable, buildExtraFile, buildSkipExtraFile, dataHashExtra, EXTRA_FIRST_EPOCH, EXTRA_POT_LIVE, ExtraFileV1, ExtraInitMark, ExtraSnapshot,
   verifyExtraFile,
@@ -415,7 +416,7 @@ export function marketV3(m: XenMarketV3): ChainInputV3["market"] {
   return {
     spotE18: toE18(m.spotUsd),
     refUsdE18: toE18(m.refUsd),
-    priceSource: `reserve-weighted spot of ${m.pools.length} eligible pools`,
+    priceSource: (m as { source?: string }).source ?? `reserve-weighted spot of ${m.pools.length} eligible pools`,
     pools: m.pools.map((p) => ({ address: p.address, reserveUsd: String(p.reserveUsd), createdAt: null })),
   };
 }
@@ -676,6 +677,11 @@ export async function assembleInputsV3(
     for (const [id, q] of [...quotes.entries()].sort((a, b) => a[0] - b[0])) if (inputsChains.some((x) => x.chainId === id)) quoteRec[String(id)] = q;
     sidecar = { kind: "price-sidecar", version: 1, programId: PROGRAM_ID, epoch: n, candles: sortedObject(candles), depth, xdex, quotes: quoteRec };
   }
+  // T2-RULES: the rules block in force for epoch n (rules-v3.ts), recorded and hashed with the file; Legacy Pilot (legacy.ts):
+  // under a block that carries the rule, the window's burn pilots the repository snapshot lists (never a throw)
+  const rulesBlock = s.rulesBlock ? s.rulesBlock(n) : rulesForEpochV3(n, null);
+  const legacyPilot = legacyPilotInputsV3(rulesBlock, inputsChains);
+  if (legacyPilot.legacyPilot?.unavailable) warnings.push(`Legacy Pilot: ${legacyPilot.legacyPilot.unavailable.reason} (nobody is listed this week)`);
   const inputs: EpochInputsV3 = {
     programId: PROGRAM_ID,
     epoch: n,
@@ -686,8 +692,8 @@ export async function assembleInputsV3(
     freePool: { lamports: freePool.lamports, slot: freePool.slot, open },
     xnt,
     switchRefs,
-    // T2-RULES: the rules block in force for epoch n (rules-v3.ts), recorded and hashed with the file
-    rulesBlock: s.rulesBlock ? s.rulesBlock(n) : rulesForEpochV3(n, null),
+    rulesBlock,
+    ...legacyPilot,
     ...(s.xdex ? { xdex } : {}),
     ...(sidecar ? { sidecar: { file: sidecarFileV3(n), sha256: sidecarSha256V3(sidecar) } } : {}),
     ...(noMarket.length ? { noMarket: [...noMarket].sort((a, b) => a - b) } : {}),

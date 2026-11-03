@@ -8,7 +8,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { Keypair, PublicKey, SystemProgram, SYSVAR_SLOT_HASHES_PUBKEY } from '@solana/web3.js';
-import { errorMessage, MPL_CORE, PDA, programErrorName, programErrorNumber } from '../../moonforge.mjs';
+import { coreClosed, errorMessage, LOADER_V3, MPL_CORE, MPL_CORE_PROGRAMDATA, PDA, programErrorName, programErrorNumber } from '../../moonforge.mjs';
 import { loadBundledIdl } from '../../idl.mjs';
 import { betPack, duelCommitment, duelJoinCommitment, warEntropyCommitment, warJoinCommitment, V3 } from '../../rules-v3.mjs';
 import { BN, disc, idlAccounts, offlineConnection, offlineKit } from './helpers-v3.mjs';
@@ -440,4 +440,40 @@ test('round 4: settledBetResult reads the G-2 keeper tip of BetSettled; a stall 
   const s1 = await mf.settledBetResult(bet);
   assert.deepEqual([s1.reason, s1.paidFrom, s1.bankrollKeptXnt, s1.bondForfeitXnt], [1, 'keeper bond', 0.00985, undefined]);
   assert.match(s.note, /whole stake is refunded \(stake - edge by the bankroll, the edge by the keeper bond, which also forfeits stake - edge\)/);
+});
+test("recycleArtifact: Core's ProgramData account goes as the one remaining account only when Metaplex Core was closed (the final program's floor hatch)", async () => {
+  const loaderV4 = new PublicKey('LoaderV411111111111111111111111111111111111');
+  const acct = (owner) => ({ owner, data: Buffer.alloc(36), lamports: 1, executable: false });
+  // the pure rule (artifacts.rs core_is_closed): Core under the upgradeable loader AND its ProgramData gone / not the loader's
+  assert.equal(coreClosed(acct(LOADER_V3), acct(LOADER_V3)), false, 'Core alive');
+  assert.equal(coreClosed(acct(LOADER_V3), null), true, 'Core closed: ProgramData gone');
+  assert.equal(coreClosed(acct(LOADER_V3), acct(SystemProgram.programId)), true, 'Core closed: lamports sent to the old address');
+  assert.equal(coreClosed(acct(loaderV4), null), false, 'Core migrated to another loader: it still runs');
+  assert.equal(coreClosed(null, null), false, 'no Core account at all');
+  assert.ok(PublicKey.findProgramAddressSync([MPL_CORE.toBuffer()], LOADER_V3)[0].equals(MPL_CORE_PROGRAMDATA), 'the ProgramData PDA');
+  // the flow: reads the two accounts first, then builds the call
+  const run = async (core, programData) => {
+    const { mf } = kit3();
+    const asset = PDA.asset(0, 1);
+    const data = Buffer.concat([Buffer.from([1]), mf.me.toBuffer(), Buffer.from([2]), PDA.collection().toBuffer(), Buffer.alloc(8)]);
+    mf.acc.artifactRecord = { fetchNullable: async () => ({ backing: new BN((5n * 10n ** 9n).toString()), tier: 0, origin: 0 }) };
+    mf.connection.getAccountInfo = async () => ({ owner: MPL_CORE, data, lamports: 1 });
+    const reads = [];
+    mf.connection.getMultipleAccountsInfo = async (keys) => { reads.push(keys.map((k) => k.toBase58())); return [core, programData]; };
+    const r = await mf.recycleArtifact(asset);
+    assert.deepEqual(reads, [[MPL_CORE.toBase58(), MPL_CORE_PROGRAMDATA.toBase58()]], 'Core and its ProgramData read first');
+    return { r, ix: mf.sent[0].ix, asset };
+  };
+  const alive = await run(acct(LOADER_V3), acct(LOADER_V3));
+  assertIx(alive.ix, 'recycle_artifact', { config: PDA.config(), asset: alive.asset, record: PDA.artifact(alive.asset), collection: PDA.collection(), core_program: MPL_CORE });
+  assert.equal(alive.r.coreHatch, false);
+  const closed = await run(acct(LOADER_V3), null);
+  const n = idlAccounts(v3, 'recycle_artifact').length;
+  assert.equal(closed.ix.keys.length, n + 1, 'one remaining account');
+  const extra = closed.ix.keys[n];
+  assert.ok(extra.pubkey.equals(MPL_CORE_PROGRAMDATA) && !extra.isSigner && !extra.isWritable, "Core's ProgramData, read-only");
+  assert.equal(closed.r.coreHatch, true);
+  assert.equal(closed.r.floorXnt, 5);
+  const migrated = await run(acct(new PublicKey('LoaderV411111111111111111111111111111111111')), null);
+  assert.equal(migrated.ix.keys.length, n, 'a migrated Core gets no remaining account');
 });

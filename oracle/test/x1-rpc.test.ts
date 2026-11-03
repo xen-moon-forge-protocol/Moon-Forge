@@ -5,6 +5,7 @@
 import assert from "assert";
 import { Connection } from "@solana/web3.js";
 import { failoverFetch, rpcHost, trustedConnectionFor, websocketUrlOf, x1Connection, X1_MAINNET_GENESIS, x1RpcIgnored, x1RpcList, x1RpcWithPath } from "../src/x1-rpc";
+import { CHAINS, rpcListOf, X1_RPC_DEFAULT, x1RpcOf } from "../src/config";
 
 let n = 0;
 const tests: [string, () => Promise<void> | void][] = [];
@@ -128,6 +129,25 @@ t("R-8: entries with a path or a query (where a key would sit) are counted for t
   assert.equal(x1RpcWithPath({}), 0);
   assert.equal(x1RpcWithPath({ X1_RPC_URLS: "https://a.example,https://b.example/" }), 0, "a bare host or '/' is keyless");
   assert.equal(x1RpcWithPath({ X1_RPC_URLS: "https://a.example/k1,https://b.example?api-key=x,https://u:p@c.example,not a url" }), 3);
+});
+
+t("the workflows' endpoint variables: an unset variable arrives as \"\" and means the default; blanks never empty a list", () => {
+  // X1_RPC_URL: the default endpoint itself (the trusted one), replaced without a code edit
+  assert.equal(x1RpcOf(undefined), X1_RPC_DEFAULT);
+  assert.equal(x1RpcOf(""), X1_RPC_DEFAULT, "${{ vars.X1_RPC_URL }} of an unset variable");
+  assert.equal(x1RpcOf("   "), X1_RPC_DEFAULT);
+  assert.equal(x1RpcOf(" https://x1.example "), "https://x1.example");
+  assert.equal(X1_RPC_DEFAULT, DEFAULT);
+  assert.deepEqual(x1RpcList({}, x1RpcOf("https://x1.example")), ["https://x1.example"], "the replaced default is the list's last (trusted) entry");
+  // <CHAIN>_RPC_URL: the chain's EVM list
+  const d = "https://a.example,https://b.example";
+  assert.deepEqual(rpcListOf(undefined, d), ["https://a.example", "https://b.example"]);
+  assert.deepEqual(rpcListOf("", d), ["https://a.example", "https://b.example"], "${{ vars.BSC_RPC_URL }} of an unset variable");
+  assert.deepEqual(rpcListOf(" , ,", d), ["https://a.example", "https://b.example"], "a value with no entry is the default list, never an empty one");
+  assert.deepEqual(rpcListOf(" https://c.example , https://d.example", d), ["https://c.example", "https://d.example"], "a set value replaces the list");
+  // every configured chain has at least one endpoint whatever the environment holds
+  for (const c of CHAINS) assert(c.rpcs.length >= 1 && c.rpc === c.rpcs[0], c.name);
+  assert.deepEqual(CHAINS.map((c) => c.chainId), [10, 56, 137, 43114, 8453], "the five portal chains (no Ethereum, PulseChain or Moonbeam entry)");
 });
 
 (async () => {

@@ -17,8 +17,11 @@
  *    (trustedConnectionFor).
  * R-8: X1_RPC_URLS is a repository VARIABLE, and GitHub prints the env of every step in the run logs, which are public
  * for this repository. Only KEYLESS endpoints belong in it (no API key in the path or the query); the health check
- * warns about an entry with a path or a query (x1RpcWithPath). A keyed endpoint belongs in the X1_RPC_URL secret.
- * Only the host of an entry is ever printed by this code.
+ * warns about an entry with a path or a query (x1RpcWithPath). The workflows pass X1_RPC_URL (the default endpoint,
+ * the trusted one of R-5) from the repository VARIABLE of that name too, so a dead default endpoint is replaced without a
+ * code edit; it is just as public, so it may only name a keyless endpoint as well (a keyed one would need the workflow
+ * to read a secret instead). Empty or blank = the built-in default (config.ts x1RpcOf). Only the host of an entry is
+ * ever printed by this code.
  */
 import { Commitment, Connection } from "@solana/web3.js";
 import { X1_RPC } from "./config";

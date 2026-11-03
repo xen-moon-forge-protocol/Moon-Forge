@@ -10,7 +10,9 @@
  * between the build and the publication. F_ref is free_pool_before − the budget.
  * The base pot is the two-pot base (A13.1): an Artifact enters it only as the base share of its forge (an inflow);
  * the snapshot is recorded for the extra pot and never read, which the suite checks exactly, per epoch and across
- * whole histories (NFT-1), and per burn, holder against non-holder (NFT-2).
+ * whole histories (NFT-1), and per burn, holder against non-holder (NFT-2). LEGACY-1 (legacy.ts): every epoch rebuilt with
+ * the Legacy Pilot rule (its burns re-addressed to a few EVM addresses, half of them listed) has exactly the burns, the
+ * capacity and the normal targets of the same epoch without it; the top-ups only add to tier-0 leaves.
  *   npm test                         (FAIRNESS_WORLDS=3000 npm test for a longer run)
  */
 import assert from "assert";
@@ -21,6 +23,7 @@ import {
   AnyEpochFile, buildLimit, BurnInputV3, BurnV3, buildEpochFileV3, ChainInputV3, computeEpochV3, DEFAULT_RULES_V3, EpochBodyV3, EpochFileV3, EpochInputsV3, globalOrder,
   operatorOfV3, ORIGIN_DROP, ORIGIN_FORGED, ORIGIN_GENESIS, plannedOutflow, rankClassV3, rankOrderV3, rebuildReason, retiredBaseTerms, RulesBlockV3, SnapshotRecord, verifyAny,
 } from "../src/rewards";
+import { legacyPilotRules } from "../src/legacy";
 
 const WORLDS = Number(process.env.FAIRNESS_WORLDS || 500);
 const SEED = 20_261_016;
@@ -403,6 +406,7 @@ const stats = {
   a9Attacks: 0, a9AttackLocks: 0, a9Sabotage: 0, a9Size: 0, a9SizeFlips: 0, i2KeptFlips: 0, i2ReservedMore: 0, locksSplit: 0,
   nft1Epochs: 0, nft1Histories: 0, nft1Holders: 0, nft2: 0, nft2Missions: 0, nft2Shortfall: 0, inflow: 0, inflowWallets: 0, inflowFlips: 0, inflowMisaligned: 0,
   backlogBurns: 0, operatorBurns: 0, exceptionBurns: 0, d12: 0, d18: 0, rankedAfter: 0,
+  legacy1Epochs: 0, legacy1Burns: 0, legacy1TopUps: 0, legacy1Shortfalls: 0,
 };
 /** D-12 / D-18: a burn that ranks after the window's burns (a skipped chain's backlog, or an operator burn) */
 const late = (b: BurnV3) => rankClassV3(b) !== 0;
@@ -1261,6 +1265,37 @@ function boundaryTests() {
   }
 }
 
+// ── LEGACY-1 (legacy.ts): the Legacy Pilot rule never changes a normal number of an epoch ─────────────────
+const LEGACY_SHA = "5e".repeat(32);
+const legacyPilotOf = (b: { txHash: string }) => "0x" + ((parseInt(b.txHash.slice(-4), 16) % 7) + 16).toString(16) + "7a".repeat(19);
+function checkLegacy(w: World, p: Paid) {
+  const label = `build ${p.build} (epoch ${p.file.epoch}) LEGACY-1`;
+  const inp = clone(p.inputs);
+  for (const c of inp.chains) for (const b of c.burns) b.pilot = legacyPilotOf(b);
+  const pilots = [...new Set(inp.chains.flatMap((c) => c.burns.map((b) => b.pilot)))].sort();
+  const rules = inp.rulesBlock ?? DEFAULT_RULES_V3;
+  const without = computeEpochV3({ ...inp, rulesBlock: rules }, p.prev);
+  const withR = computeEpochV3({ ...inp, rulesBlock: { ...rules, legacyPilot: legacyPilotRules(LEGACY_SHA) }, legacyPilot: { snapshotSha256: LEGACY_SHA, listed: pilots.filter((_, i) => i % 2 === 0) } }, p.prev);
+  check(w, label, !!without && !!withR, () => "a build is empty");
+  for (const k of Object.keys(withR!) as (keyof EpochBodyV3)[]) {
+    if (["legacy", "targets", "leaves", "totalScore", "root", "rulesBlock"].includes(k)) continue;
+    check(w, label, JSON.stringify(withR![k]) === JSON.stringify((without as unknown as Record<string, unknown>)[k]), () => `${k} differs with the rule`);
+  }
+  const add = new Map<string, bigint>();
+  for (const t of withR!.legacy!.topUps) add.set(t.x1, (add.get(t.x1) ?? 0n) + BigInt(t.paid));
+  const norm = new Map(without!.targets.map((t) => [leafKey(t.player, t.tier), BigInt(t.target)]));
+  for (const t of withR!.targets) {
+    check(w, label, BigInt(t.target) - (t.tier === 0 ? add.get(t.player) ?? 0n : 0n) === (norm.get(leafKey(t.player, t.tier)) ?? 0n), () => `target ${t.player}:${t.tier} is not the normal one plus its top-up`);
+    norm.delete(leafKey(t.player, t.tier));
+  }
+  check(w, label, norm.size === 0, () => "a normal target is missing with the rule");
+  check(w, label, BigInt(withR!.legacy!.paid) <= (BigInt(withR!.capacity.left) * 2_500n) / 10_000n, () => "top-ups above 25% of the leftover");
+  stats.legacy1Epochs++;
+  stats.legacy1Burns += withR!.burns.length;
+  stats.legacy1TopUps += withR!.legacy!.topUps.filter((t) => t.paid !== "0").length;
+  if (withR!.capacity.shortfall) stats.legacy1Shortfalls++;
+}
+
 // ── main ───────────────────────────────────────────────────────────────────────────────────────
 const started = Date.now();
 if (!process.env.FAIRNESS_RANDOM_ONLY) boundaryTests();
@@ -1279,6 +1314,7 @@ for (let id = 0; id < WORLDS; id++) {
     }
     checkEpoch(w, p);
     checkVariations(w, p);
+    checkLegacy(w, p);
   }
   if (!w.arts.length) continue;
   // NFT-1 across the whole history: no Artifact at all, the same pool (the forges' base shares still flow in)
@@ -1304,6 +1340,7 @@ assert(stats.a9Attacks > 0 && stats.a9AttackLocks > 0 && stats.a9Sabotage > 0 &&
 assert(stats.locksSplit > 0, "coverage: missions locked in part (A12 pieces)");
 assert(stats.backlogBurns > 0 && stats.operatorBurns > 0 && stats.exceptionBurns > 0 && stats.d12 > 0 && stats.d18 > 0 && stats.rankedAfter > 0, "coverage: D-12 backlog, D-18 operator and PROOF_BURN_RULE (c) exception burns, and their ranking checked");
 assert(stats.i4Inexact > 0, "coverage: I4 with floored (inexact) prices");
+assert(stats.legacy1Epochs > 0 && stats.legacy1TopUps > 0 && stats.legacy1Shortfalls > 0, "coverage: LEGACY-1 with top-ups paid and in shortfall weeks");
 assert(stats.scaledDown > 0 && stats.arrivalCuts > 0 && stats.scaledDown > stats.arrivalCuts && stats.planChecks > 0 && stats.driftPublishes > 0, "coverage: shortfalls cut at both stages, checked against the plan, and publications at the lowest tolerated pool (R2-8)");
 assert(stats.i2Shortfall > 0 && stats.i7Shortfall > 0 && stats.i9Shortfall > 0, "coverage: I2, I7 and I9 in the shortfall regime");
 assert(stats.prefix > 0 && stats.prefixShortfall > 0 && stats.a9SizeShortfall > 0 && stats.a9Shortfall > 0, "coverage (A13.2): prefix-stability, own size and late burns in shortfall weeks");
@@ -1319,6 +1356,7 @@ console.log(
     `I7 ${stats.i7} (${stats.i7Shortfall} in a shortfall week, own tier ${stats.i7Own}), I9 = I12 exact (claim = target) in every epoch, ${stats.i9Shortfall} of them shortfalls, I10 eject ${stats.i10} (${stats.i10Shortfall} in a shortfall), I11 ${stats.i11}, ` +
     `A9 late-burn attacks ${stats.a9Attacks} (${stats.a9AttackLocks} locking, ${stats.a9Sabotage} mission choices paid for with their own lock, ${stats.a9Shortfall} in a shortfall week), own-size shrinks ${stats.a9Size} (${stats.a9SizeFlips} across the dust edge, ${stats.a9SizeShortfall} in a shortfall week), ` +
     `I2 kept-mission flips ${stats.i2KeptFlips} and removals where the kept later burns reserve more ${stats.i2ReservedMore}\n` +
+    `  LEGACY-1 (legacy.ts): ${stats.legacy1Epochs} epochs, ${stats.legacy1Burns} burns identical with and without the Legacy Pilot rule (${stats.legacy1TopUps} top-ups paid, ${stats.legacy1Shortfalls} shortfall weeks)\n` +
     `  D-12 / D-18: ${stats.backlogBurns} backlog burns, ${stats.operatorBurns} operator burns, ${stats.exceptionBurns} burns under a dated exception; ranking checked in ${stats.d12} backlog and ${stats.d18} operator epochs (${stats.rankedAfter} window burns)\n` +
     `  A13.1: NFT-1 (the base never depends on any Artifact) ${stats.nft1Epochs} epochs, ${stats.nft1Histories} whole histories (${stats.nft1Holders} with forges, recycles or transfers); ` +
     `NFT-2 (holder = non-holder for the same burn) ${stats.nft2} (${stats.nft2Missions} missions, ${stats.nft2Shortfall} in a shortfall week); ` +

@@ -15,7 +15,7 @@ import { createHash } from "crypto";
 import * as fs from "fs";
 import * as path from "path";
 import * as anchor from "@coral-xyz/anchor";
-import { Keypair, PublicKey, SystemProgram, Transaction, TransactionInstruction } from "@solana/web3.js";
+import { ComputeBudgetProgram, Keypair, PublicKey, SystemProgram, Transaction, TransactionInstruction } from "@solana/web3.js";
 import { connect, keeperPass, LIVE_IDL, PDA, programId, programV2 } from "../src/x1";
 import {
   assertUpgradedV3, BPF_LOADER_UPGRADEABLE, connectV3, EXTRA_STATE_SIZE, isV3Program, LIVE_DEPLOY_SLOT, markWritable, ORACLE_SEAT_SIZE, PDA_V3, programV3, publishEpochV3,
@@ -101,6 +101,8 @@ type FakeAccount = { owner: PublicKey; data: Buffer; lamports: number; executabl
 class FakeChain {
   accounts = new Map<string, FakeAccount>();
   sent: TransactionInstruction[][] = [];
+  /** the compute-unit limit each sent transaction requested (null: none, or more than one limit instruction) */
+  cuLimits: (number | null)[] = [];
   rpcError: string | null = null;
   /** getBlockTime's answer (null: the node has none) */
   blockTime: number | null = null;
@@ -132,7 +134,10 @@ class FakeChain {
       publicKey: payer.publicKey,
       wallet: new anchor.Wallet(payer),
       sendAndConfirm: async (tx: Transaction) => {
-        this.sent.push(tx.instructions);
+        // MED-2: the compute-unit limit instruction (cu-v3.ts) is recorded apart; `sent` keeps the program's instructions
+        const cu = tx.instructions.filter((ix) => ix.programId.equals(ComputeBudgetProgram.programId));
+        this.cuLimits.push(cu.length === 1 ? cu[0].data.readUInt32LE(1) : null);
+        this.sent.push(tx.instructions.filter((ix) => !ix.programId.equals(ComputeBudgetProgram.programId)));
         return `sig${this.sent.length}`;
       },
     } as unknown as anchor.Provider;
@@ -271,10 +276,11 @@ async function main() {
       }));
       const lines: string[] = [];
       await keeperPass(c.connection(), program, payer, (s) => lines.push(s), []);
-      return { sent: c.sent, lines };
+      return { sent: c.sent, lines, cuLimits: c.cuLimits };
     };
     const v2 = await run(programV2);
     assert.strictEqual(v2.sent.length, 1, `exactly one transaction (the draw); log: ${v2.lines.join(" | ")}`);
+    assert.deepStrictEqual(v2.cuLimits, [200_000], "MED-2: the legacy client's draw carries a compute-unit limit too");
     assert.strictEqual(v2.sent[0].length, 1);
     const ix = v2.sent[0][0];
     assert(ix.programId.equals(programId));
@@ -390,6 +396,8 @@ async function main() {
     up.blockTime = v3Base.window.endTs + MAX_PUBLISH_LAG;
     assert.strictEqual(await publishEpochV3(programV3(up.provider(oracle)), oracle, v3Base), "sig1");
     assert.strictEqual(up.sent.length, 1);
+    // MED-2: with a compute-unit limit (this node cannot simulate: the explicit fallback, 200,000 for one instruction)
+    assert.deepStrictEqual(up.cuLimits, [200_000], "publish_epoch never goes without a limit");
     const ix = up.sent[0][0];
     assert.strictEqual(ix.data.length, 108, "the publish_epoch ABI is unchanged");
     assert.strictEqual(ix.data.subarray(0, 8).toString("hex"), LIVE_V2.publishEpoch[1]);
@@ -447,6 +455,7 @@ async function main() {
     await xAt(T); // the previous paying extra's base (epoch 1) was published 14 days ago
     // the W2-3 file (two weeks, 8 XNT) goes through
     assert.strictEqual(await publishExtraEpochV3(p, oracle, extra({})), "sig1");
+    assert.deepStrictEqual(up.cuLimits, [200_000], "MED-2: publish_extra_epoch carries a compute-unit limit");
     const ix = up.sent[0][0];
     assert.strictEqual(ix.data.length, 93);
     assert.strictEqual(ix.data.subarray(0, 8).toString("hex"), "58472b582480adff");

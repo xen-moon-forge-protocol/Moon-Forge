@@ -275,18 +275,42 @@ export async function xntHourlyClosesV3(hourStart: number, sink?: (r: RawCandles
  * T1-9 / O-22: GeckoTerminal with its Retry-After honoured. A 429 (or a 5xx) waits what the server asks (seconds or an
  * HTTP date, at most 60 s), else the backoff of getJson; the same 30-requests-a-minute pacing. v3 readers only.
  */
-export async function getJsonV3(url: string, fetcher: typeof fetch = fetch, sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))): Promise<any> {
+export async function getJsonV3(url: string, fetcher: typeof fetch = fetch, sleep = (ms: number) => new Promise((r) => setTimeout(r, ms)), breaker: GtBreakerV3 = GT_BREAKER): Promise<any> {
+  // FEATURE-MATRIX gap 3: once GeckoTerminal failed GT_BREAKER_LIMIT requests in a row, this process stops asking it, so
+  // an outage costs minutes, not the step's whole budget; the callers then use the on-chain market (xen-onchain-v3.ts)
+  // or the engine's existing fallback prices (no candle: the build spot / the build XNT price)
+  if (breaker.failures >= GT_BREAKER_LIMIT) throw new Error(`${url} -> not asked: GeckoTerminal failed ${breaker.failures} requests in a row in this run`);
   const wait = lastCall + 2100 - Date.now();
   if (wait > 0) await sleep(wait);
   lastCall = Date.now();
-  for (let i = 0; i < 4; i++) {
-    const r = await fetcher(url, { headers: { accept: "application/json" } });
-    if (r.ok) return r.json();
-    if (r.status !== 429 && r.status < 500) throw new Error(`${url} -> HTTP ${r.status}`);
-    await sleep(retryAfterMs(r.headers?.get?.("retry-after") ?? null, 5000 * (i + 1)));
+  try {
+    for (let i = 0; i < 4; i++) {
+      // a request that hangs counts as a failed try (fetch itself has no limit)
+      const r = await fetcher(url, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(GT_TIMEOUT_MS) });
+      if (r.ok) {
+        const j = await r.json();
+        breaker.failures = 0;
+        return j;
+      }
+      if (r.status !== 429 && r.status < 500) throw new Error(`${url} -> HTTP ${r.status}`);
+      await sleep(retryAfterMs(r.headers?.get?.("retry-after") ?? null, 5000 * (i + 1)));
+    }
+    throw new Error(`${url} -> unavailable`);
+  } catch (e) {
+    breaker.failures++;
+    throw e;
   }
-  throw new Error(`${url} -> unavailable`);
 }
+
+/** one GeckoTerminal request's limit (a hanging connection is a failed try) */
+export const GT_TIMEOUT_MS = 30_000;
+/** GeckoTerminal is not asked again in this process after this many failed requests in a row (each after its own retries) */
+export const GT_BREAKER_LIMIT = 3;
+export interface GtBreakerV3 {
+  failures: number;
+}
+/** the process-wide breaker of getJsonV3 (a success resets it) */
+export const GT_BREAKER: GtBreakerV3 = { failures: 0 };
 
 /** Retry-After as milliseconds: delta-seconds or an HTTP date, at most 60 s; `fallback` when absent or unreadable. */
 export function retryAfterMs(v: string | null, fallback: number, now = Date.now()): number {

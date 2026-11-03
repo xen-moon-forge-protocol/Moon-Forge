@@ -15,7 +15,10 @@
  * no new NFT buyers from week 26, a mass recycle at week 26, an LP run on the bankroll, XNT × 0.25 (with a 50% crash
  * week) and × 3, owner gone (no keeper from week 40, no oracle for weeks 60–65, then a successor publishes the long
  * window), oracle-key theft within the B-1 bound (weeks 30–31: one foreign publication per week on each pot, at the
- * program's bound, after F_ref was fixed; the honest history goes on as if those epochs were voided).
+ * program's bound, after F_ref was fixed; the honest history goes on as if those epochs were voided), and the Legacy Pilot
+ * rule (legacy.ts) in force with half of 30 burning addresses listed: every week, LEGACY-1 (the base file without the rule,
+ * from the same inputs and previous file, has the same burns, capacity and normal targets) and LEGACY-2 (the extra file
+ * without it has the same holder rows and leaves).
  *
  * Invariants checked every week of every scenario:
  *   R1 every pot and vault ≥ 0;
@@ -46,6 +49,7 @@ import {
   RulesBlockV3, SnapshotRecord, verifyEpochV3, XNT_POOL_DEFAULT,
 } from "../src/rewards";
 import { buildExtraFile, EXTRA_BACKLOG_CARRY_WEEKS, EXTRA_MAX_WEEKS, ExtraFileV1, ExtraSnapshotRecord, MIN_PAY, verifyExtraFile } from "../src/extra";
+import { legacyPilotRules } from "../src/legacy";
 
 let passed = 0;
 let failed = 0;
@@ -169,7 +173,16 @@ interface Scenario {
   extraInflowMul?: bigint;
   /** backlog carry weeks for the extra files (default: EXTRA_BACKLOG_CARRY_WEEKS, the rule in force) */
   carryWeeks?: number;
+  /**
+   * Legacy Pilot: "on" = the rule in force (the burns' EVM addresses drawn from 30, the even ones listed); "off" = the same
+   * world without the rule (the cross-week comparison); absent = every burn from one address, no rule (the pinned worlds)
+   */
+  legacy?: "on" | "off";
 }
+/** Legacy Pilot: the 30 burning addresses of the legacy worlds (no randomness drawn: the other worlds are unchanged) and the listed half */
+const regPilot = (seq: number) => "0x" + ((seq % 30) + 16).toString(16) + "5e".repeat(19);
+const REG_LISTED = new Set(Array.from({ length: 30 }, (_, i) => regPilot(i)).filter((_, i) => i % 2 === 0));
+const REG_SHA = createHash("sha256").update("regression-104 legacy snapshot").digest("hex");
 const SCENARIOS: Scenario[] = [
   { name: "baseline", seed: 104_001, xntEnd: [1, 1], quiet: [70, 74] },
   { name: "no-new-buyers", seed: 104_002, xntEnd: [1, 1], forgeStop: 26 },
@@ -179,6 +192,7 @@ const SCENARIOS: Scenario[] = [
   { name: "xnt-x3", seed: 104_006, xntEnd: [3, 1] },
   { name: "owner-gone", seed: 104_007, xntEnd: [1, 1], keeperOff: 40, oracleGap: [60, 66] },
   { name: "oracle-theft", seed: 104_008, xntEnd: [1, 1], theft: [30, 31] },
+  { name: "legacy-pilots", seed: 104_009, xntEnd: [1, 1], legacy: "on" },
 ];
 
 // ── the world ─────────────────────────────────────────────────────────────────────────────────────
@@ -216,6 +230,11 @@ interface Result {
   baseHashes: string[];
   stats: Record<string, number>;
   ledger: { F: bigint; X: bigint; floor: bigint; B: bigint };
+  /** per week (null: no publication): Σ alloc of the burns, Σ holder pays, the Legacy Pilot top-ups and payments */
+  paidNormal: (bigint | null)[];
+  paidHolders: (bigint | null)[];
+  paidLegacy: bigint[];
+  paidLegacyBase: bigint[];
 }
 
 function fail(s: Scenario, week: number, what: string): never {
@@ -262,7 +281,8 @@ function runScenario(s: Scenario): Result {
   const extraMul = s.extraInflowMul ?? 1n;
   const wallets = Array.from({ length: 40 }, (_, i) => key(1, i));
   const operator = key(3, 0);
-  const rules: RulesBlockV3 = { ...DEFAULT_RULES_V3, operatorWallets: { rule: "rank-last", wallets: [operator], exceptions: [] } };
+  const rules0: RulesBlockV3 = { ...DEFAULT_RULES_V3, operatorWallets: { rule: "rank-last", wallets: [operator], exceptions: [] } };
+  const rules: RulesBlockV3 = s.legacy === "on" ? { ...rules0, legacyPilot: legacyPilotRules(REG_SHA) } : rules0;
   assert.strictEqual(rules.rulesId, RULES_ID_V3, "the regression runs the rules in force (rulesId 2: F5 and the liquidity rule fixes of 2026-10-26)");
 
   // market paths: XEN per chain (USD × 1e18), liquidity per chain (µUSD), XNT (USD × 1e18) with the scenario's end point
@@ -309,7 +329,7 @@ function runScenario(s: Scenario): Result {
       const x1 = isOp ? operator : rng.chance(500) ? rng.pick(holderWallets) : rng.pick(wallets);
       seq++;
       chainBurns.get(chainId)!.push({
-        chainId, txHash: "0x" + seq.toString(16).padStart(64, "0"), logIndex: 0, blockNumber: blockAt(ts), missionId: String(seq), pilot: "0x" + "ab".repeat(20),
+        chainId, txHash: "0x" + seq.toString(16).padStart(64, "0"), logIndex: 0, blockNumber: blockAt(ts), missionId: String(seq), pilot: s.legacy ? regPilot(seq) : "0x" + "ab".repeat(20),
         amountWei: amountWei.toString(), tier: rng.int(3), x1, timestamp: ts, medianE18: median.toString(), lastCloseE18: rng.jitter(median, 95, 105).toString(), priceSource: "candles",
         xntMedianE18: xm.toString(), xntLastCloseE18: rng.jitter(xm, 98, 102).toString(), xntSource: "candles",
       });
@@ -342,8 +362,13 @@ function runScenario(s: Scenario): Result {
   const stats: Record<string, number> = {
     builds: 0, heartbeats: 0, extraPaying: 0, burns: 0, backlogBurns: 0, operatorBurns: 0, shortfalls: 0, carried: 0, tranchePinned: 0, theft: 0, expiredBase: 0,
     expiredExtra: 0, selfClaims: 0, longWindows: 0, preUpgradeExcluded: 0, extraCarry: 0, extraCarryFields: 0,
+    legacy1Epochs: 0, legacy1Burns: 0, legacyTopUps: 0, legacy2Epochs: 0, legacy2Rows: 0, legacyClaims: 0, legacyPayments: 0,
   };
   const rows: WeekRow[] = [];
+  const paidNormal: (bigint | null)[] = [];
+  const paidHolders: (bigint | null)[] = [];
+  const paidLegacy: bigint[] = [];
+  const paidLegacyBase: bigint[] = [];
   const digest = createHash("sha256");
   const baseHashes: string[] = [];
 
@@ -446,6 +471,10 @@ function runScenario(s: Scenario): Result {
     if (!published(w)) {
       rows.push({ week: w, epoch: null, F, X, B, floor, baseOut: 0n, extraOut: 0n, baseRelBps: 0n, extraRelBps: 0n, heartbeat: false, shortfall: false });
       digest.update(`${w}|-|${F}|${X}|${B}|${floor}\n`);
+      paidNormal.push(null);
+      paidHolders.push(null);
+      paidLegacy.push(0n);
+      paidLegacyBase.push(0n);
       continue;
     }
 
@@ -483,6 +512,7 @@ function runScenario(s: Scenario): Result {
         ? prev.chains.map((c) => ({ chainId: c.chainId, readings: [c.xenUsdE18, c.xenUsdE18, c.xenUsdE18, c.xenUsdE18], liquidity: [0, 1, 2, 3].map((k) => (k === 0 ? c.liquidityUsdMicro : rng.jitter(BigInt(c.liquidityUsdMicro), 80 + k, 120).toString())) }))
         : null,
       rulesBlock: rules,
+      ...(s.legacy === "on" ? { legacyPilot: { snapshotSha256: REG_SHA, listed: [...new Set(chains.flatMap((c) => c.burns.map((b) => b.pilot)))].filter((a) => REG_LISTED.has(a)).sort() } } : {}),
       xdex: { pool: XNT_POOL_DEFAULT, slot: slot - 2, wxntReserveLamports: reserveXnt.toString(), usdcReserveMicro: ((reserveXnt * xntWeek[w]) / 10n ** 21n).toString(), feeBps: 25 },
     };
     let built = buildEpochFileV3(inputs, prev);
@@ -499,6 +529,31 @@ function runScenario(s: Scenario): Result {
     // R5: the file verifies against its previous file
     const verr = verifyEpochV3(f, prev);
     check(s, w, verr.length === 0, () => `base epoch ${epoch} does not verify: ${verr.slice(0, 3).join("; ")}`);
+    // LEGACY-1: the same epoch without the rule (same inputs, same previous file) has the same burns, capacity and every
+    // member but the rule's own; its targets are the file's less the top-ups, each on its burner's tier-0 leaf
+    const legacyPaidBase = BigInt(f.legacy?.paid ?? "0");
+    if (s.legacy === "on") {
+      const { legacyPilot: _lp, ...plainInputs } = inputs;
+      const plain = buildEpochFileV3({ ...plainInputs, rulesBlock: rules0 }, prev, { heartbeat });
+      check(s, w, !!plain, () => "LEGACY-1: the build without the rule is empty");
+      const p = JSON.parse(JSON.stringify(plain)) as EpochFileV3;
+      for (const k of Object.keys(f) as (keyof EpochFileV3)[]) {
+        if (["legacy", "targets", "leaves", "totalScore", "root", "rulesBlock", "dataHash", "proofs"].includes(k)) continue;
+        check(s, w, JSON.stringify(f[k]) === JSON.stringify(p[k]), () => `LEGACY-1: ${k} differs with the rule`);
+      }
+      const add = new Map<string, bigint>();
+      for (const t of f.legacy!.topUps) add.set(t.x1, (add.get(t.x1) ?? 0n) + BigInt(t.paid));
+      const norm = new Map(p.targets.map((t) => [`${t.player}:${t.tier}`, BigInt(t.target)]));
+      for (const t of f.targets) {
+        const want = norm.get(`${t.player}:${t.tier}`) ?? 0n;
+        check(s, w, BigInt(t.target) - (t.tier === 0 ? add.get(t.player) ?? 0n : 0n) === want, () => `LEGACY-1: target ${t.player}:${t.tier}`);
+        norm.delete(`${t.player}:${t.tier}`);
+      }
+      check(s, w, norm.size === 0, () => "LEGACY-1: a normal target is missing with the rule");
+      stats.legacy1Epochs++;
+      stats.legacy1Burns += f.burns.length;
+      stats.legacyTopUps += f.legacy!.topUps.filter((t) => t.paid !== "0").length;
+    }
 
     // R2 at the build
     const Fbuild = BigInt(f.freePool.lamports);
@@ -517,7 +572,7 @@ function runScenario(s: Scenario): Result {
     check(s, w, C === (cap === null ? planCash : min(planCash, cap)), () => `C ${C} is not min(planCash, trancheCap ${cap})`);
     if (cap !== null && cap < planCash) stats.tranchePinned++;
     const paid = sum(f.burns.map((b) => BigInt(b.alloc)));
-    check(s, w, paid <= C, () => `burners paid ${paid} above C ${C}`);
+    check(s, w, paid + legacyPaidBase <= C, () => `burners paid ${paid} (+ ${legacyPaidBase} Legacy Pilot top-ups) above C ${C}`);
     for (let d = 0; d < 7; d++) {
       const seniorTo = sum(f.burns.filter((b) => b.day <= d).map((b) => BigInt(b.senior)));
       check(s, w, seniorTo <= scheduleOpen(C, d), () => `arrival claims up to day ${d} (${seniorTo}) above the schedule ${scheduleOpen(C, d)}`);
@@ -557,6 +612,24 @@ function runScenario(s: Scenario): Result {
     const xrecords: ExtraSnapshotRecord[] = live.map((a) => ({ asset: a.asset, tier: a.tier, owner: a.owner, backing: a.backing.toString(), origin: a.origin, forgedAt: a.forgedAt, signature: sig(a.sig) }));
     const xf = buildExtraFile(f, prevExtra, { slot, blockTime: end, records: xrecords }, { open: Xopen.toString(), lamports: X.toString(), slot: slot + 5, createdAt: iso(end + 30), init: INIT }, s.carryWeeks);
     const xerr = verifyExtraFile(JSON.parse(JSON.stringify(xf)), f, prevExtra, s.carryWeeks);
+    // LEGACY-2: the same extra epoch without the rule has the same holder rows; each leaf differs by the wallet's Legacy
+    // Pilot payments only
+    const legacyPaidExtra = BigInt(xf.legacy?.paid ?? "0");
+    if (s.legacy === "on") {
+      const plainX = buildExtraFile(f, prevExtra, { slot, blockTime: end, records: xrecords }, { open: Xopen.toString(), lamports: X.toString(), slot: slot + 5, createdAt: iso(end + 30), init: INIT }, s.carryWeeks, { legacy: false });
+      check(s, w, JSON.stringify(xf.rows) === JSON.stringify(plainX.rows), () => "LEGACY-2: a holder row differs with the rule");
+      const extra = new Map<string, bigint>();
+      for (const x of xf.legacy!.payments) extra.set(x.wallet, (extra.get(x.wallet) ?? 0n) + BigInt(x.paid));
+      for (const wl of new Set([...xf.leaves, ...plainX.leaves].map((l) => l.wallet))) {
+        const a = BigInt(xf.leaves.find((l) => l.wallet === wl)?.amount ?? "0");
+        const b = BigInt(plainX.leaves.find((l) => l.wallet === wl)?.amount ?? "0");
+        check(s, w, a - (extra.get(wl) ?? 0n) === b, () => `LEGACY-2: wallet ${wl}`);
+      }
+      stats.legacy2Epochs++;
+      stats.legacy2Rows += xf.rows.length;
+      stats.legacyClaims += xf.legacy!.claims.length;
+      stats.legacyPayments += xf.legacy!.payments.length;
+    }
     // the backlog carry was really used (a backlog burn counted against last week's unused need)
     stats.extraCarryFields += xf.rows.filter((r) => r.carry !== undefined || r.useBacklog !== undefined).length;
     stats.extraCarry += xf.rows.filter((r) => {
@@ -570,17 +643,21 @@ function runScenario(s: Scenario): Result {
     check(s, w, xf.totals.release === release.toString(), () => `release ${xf.totals.release} is not 8% of X ${Xopen}`);
     check(s, w, xb <= release, () => `extra budget ${xb} above the release ${release}`);
     const k = BigInt(xf.window.weeks);
-    check(s, w, xb <= k * ((BigInt(xf.totals.eligibleBacking) * EXTRA_BOUND_BPS) / BPS), () => `extra budget ${xb} above ${k} × 4% of the eligible backing`);
+    check(s, w, xb - legacyPaidExtra <= k * ((BigInt(xf.totals.eligibleBacking) * EXTRA_BOUND_BPS) / BPS), () => `extra budget ${xb} above ${k} × 4% of the eligible backing`);
     const liveForged = sum(live.filter((a) => a.origin === ORIGIN_FORGED && a.forgedAt >= INIT.ts).map((a) => a.backing));
     const onChainBound = min(release, k * ((liveForged * EXTRA_BOUND_BPS) / BPS));
     check(s, w, xb <= onChainBound, () => `extra budget ${xb} above the program's bound ${onChainBound}`);
-    check(s, w, xb <= 2n * BigInt(xf.totals.counted), () => `rho above 2: budget ${xb}, counted ${xf.totals.counted}`);
+    check(s, w, xb - legacyPaidExtra <= 2n * BigInt(xf.totals.counted), () => `rho above 2: budget ${xb}, counted ${xf.totals.counted}`);
     check(s, w, xf.leaves.every((l) => BigInt(l.amount) >= MIN_PAY), () => "an extra pay below MIN_PAY");
     check(s, w, k >= 1n && k <= BigInt(EXTRA_MAX_WEEKS), () => `extra weeks ${k}`);
     const preUpgrade = live.filter((a) => a.origin === ORIGIN_FORGED && a.forgedAt < INIT.ts).length;
     check(s, w, prevExtra === null || xf.excluded.filter((e) => e.reason === "pre-upgrade").length === preUpgrade, () => "OD-9: a pre-upgrade Artifact is not excluded");
     stats.preUpgradeExcluded += xf.excluded.filter((e) => e.reason === "pre-upgrade").length;
     if (xb > 0n) stats.extraPaying++;
+    paidNormal.push(paid);
+    paidHolders.push(sum(xf.rows.map((r) => BigInt(r.pay))));
+    paidLegacy.push(legacyPaidBase + legacyPaidExtra);
+    paidLegacyBase.push(legacyPaidBase);
     X -= xb;
     flows.extraOut += claimOrReserve("extra", w, xf.leaves.map((l) => BigInt(l.amount)));
     Xopen = X;
@@ -619,7 +696,7 @@ function runScenario(s: Scenario): Result {
   assert.strictEqual(X + reserved("extra"), flows.extraIn - flows.extraOut, `${s.name}: the extra pot's ledger does not close`);
   assert.strictEqual(floor, floor0 + flows.floorIn - flows.floorOut, `${s.name}: the floor vault's ledger does not close`);
   assert.strictEqual(B, B0 + flows.bIn + flows.bResult - flows.bOut, `${s.name}: the bankroll's ledger does not close`);
-  return { rows, digest: digest.digest("hex"), baseHashes, stats, ledger: { F, X, floor, B } };
+  return { rows, digest: digest.digest("hex"), baseHashes, stats, ledger: { F, X, floor, B }, paidNormal, paidHolders, paidLegacy, paidLegacyBase };
 }
 
 // ── the run ───────────────────────────────────────────────────────────────────────────────────────
@@ -665,6 +742,40 @@ test("regression coverage: every path the scenarios are meant to reach was reach
   assert(st("owner-gone").longWindows === 1 && st("owner-gone").selfClaims > 0 && st("owner-gone").expiredBase > 0, "owner-gone: the long window, self-claims and expiries");
   assert(st("oracle-theft").theft === 2, "oracle-theft: two foreign publications");
   assert(results.get("mass-recycle-w26")!.rows.find((x) => x.week === 26)!.floor === 0n, "mass recycle: the floor vault is empty at week 26");
+});
+
+test("Legacy Pilot (legacy-pilots): LEGACY-1 and LEGACY-2 held every week; the cross-week effect on everyone else is bounded by what the rule paid", () => {
+  if (only && only !== "legacy-pilots") return;
+  const on = results.get("legacy-pilots")!;
+  const st = on.stats;
+  assert(st.legacy1Epochs >= 100 && st.legacy2Epochs >= 100, `LEGACY-1 ${st.legacy1Epochs} / LEGACY-2 ${st.legacy2Epochs} weeks`);
+  assert(st.legacyTopUps > 0 && st.legacyClaims > 0 && st.legacyPayments > 0, "the rule paid top-ups and Artifact rebates");
+  for (const r of results.values()) if (r !== on) assert.strictEqual(r.stats.legacy1Epochs + r.stats.legacyTopUps, 0, "no rule in the other worlds");
+  // the same world without the rule: within a week nothing differs (LEGACY-1/2 above); across weeks the pool keeps what
+  // the rule paid, so a later capacity-bound week can quote a slightly larger C. Measured, and bounded by what was paid.
+  const off = runScenario({ ...SCENARIOS.find((x) => x.name === "legacy-pilots")!, legacy: "off" });
+  const paidRule = sum(on.paidLegacy);
+  let lessNormal = 0n;
+  let lessHolders = 0n;
+  let weeksMoved = 0;
+  let firstMoved = 0;
+  for (let i = 0; i < on.paidNormal.length; i++) {
+    const dn = (off.paidNormal[i] ?? 0n) - (on.paidNormal[i] ?? 0n);
+    const dh = (off.paidHolders[i] ?? 0n) - (on.paidHolders[i] ?? 0n);
+    if (dn !== 0n || dh !== 0n) {
+      weeksMoved++;
+      if (!firstMoved) firstMoved = i + 1;
+    }
+    lessNormal += dn;
+    lessHolders += dh;
+  }
+  const firstPaid = on.paidLegacy.findIndex((x) => x > 0n) + 1;
+  assert(firstMoved === 0 || firstMoved > firstPaid, "nothing moves before the rule first pays (and never within the week it pays)");
+  assert(lessNormal + lessHolders <= paidRule, `everyone else together received ${lessNormal + lessHolders} less over 104 weeks, above the ${paidRule} the rule paid`);
+  console.log(
+    `  legacy-pilots: the rule paid ${(Number(paidRule) / 1e9).toFixed(3)} XNT over 104 weeks (${(Number(sum(on.paidLegacyBase)) / 1e9).toFixed(3)} in burn top-ups, the rest in Artifact rebates); without it the burners would have received ` +
+      `${(Number(lessNormal) / 1e9).toFixed(3)} XNT more and the holders ${(Number(lessHolders) / 1e9).toFixed(3)} XNT more, in ${weeksMoved} later weeks (pool memory, first at week ${firstMoved || "-"})`,
+  );
 });
 
 test("the backlog carry switched on is reached in the model (a backlog burn uses a carried need) and keeps every invariant; the base files do not change", () => {

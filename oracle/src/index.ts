@@ -32,7 +32,7 @@ import { CHAINS, EPOCHS_DIR, PROGRAM_ID, RATE_CAP_K } from "./config";
 import { Burn, finalHead, portalCountersV3, readBurns, readChainV3 } from "./evm";
 import { baseScore, buildTree, ChainSnapshot, computeLeaves, dataHash, eligibleHolders, EpochBody, EpochFile, epochRateCap, toE18, verifyEpochFile } from "./epoch";
 import { burnTimePrice, clamp, median, xenMarket, xenTotalSupply, xntUsd } from "./pricing";
-import { artifactSnapshot, claimAll, connect, deliverDrops, fetchConfig, keeperPass, loadKeypair, nextDeadline, PDA, publishEpoch, sealDrop } from "./x1";
+import { artifactSnapshot, claimAll, connect, deliverDrops, fetchConfig, keeperPass, loadKeypair, nextDeadline, PDA, publishEpoch, rpcCu, sealDrop } from "./x1";
 import { AnyEpochFile, anomalyGateV3, EpochFileV3, isHeartbeatV3, MIN_EPOCH_INTERVAL, provisionalReasonOf, verifyAny, verifyChainLinkV3, verifyChainSetV3, verifyPublishedV3, verifySnapshotTimeV3 } from "./rewards";
 import { baseNftTermsError, ExtraFileV1, preUpgradePotError, verifyExtraChainLink, verifyExtraFile, verifyPublishedExtra } from "./extra";
 import { execFileSync } from "child_process";
@@ -40,7 +40,7 @@ import {
   assembleInputsV3, AssembledV3, buildExtraAfterBaseV3, buildV3, burnEvent, catchUpExtrasV3, claimPlanV3, durableExtraErrorV3, emptyRecording, extraCreatedAtV3, extraFirstEpochV3,
   extraInitV3, extraOpenV3, extraPoolV3, publishExtraRefusalsV3,
   keeperFilesV3, lastMissionIds, missionContinuity, NotDueV3, postPublishReport, publishDecisionV3, publishGateV3, publishRecordV3, readPublishClockV3, rebuildExtraV3,
-  recordingSources, refreshSnapshotIfOldV3, rewardsVersionGatedV3, V2_CLOSED_TEXT, baseDueAfterExtraV3, EXTRA_LAG_MARGIN, SnapshotReadV3, SourcesV3, staleEpochs, toPublishedEpochV3, withRetries,
+  recordingSources, refreshSnapshotIfOldV3, rewardsVersionGatedV3, rpcOrderV3, V2_CLOSED_TEXT, baseDueAfterExtraV3, EXTRA_LAG_MARGIN, SnapshotReadV3, SourcesV3, staleEpochs, toPublishedEpochV3, withRetries,
   gateDecisionV3, gateHoldsV3, gateRecordOf, GateRecordV3, PriceSidecarV3, verifyPriceSidecarV3, heartbeatAllowedV3,
 } from "./flow-v3";
 import * as os from "os";
@@ -51,11 +51,15 @@ import {
 } from "./x1-v3";
 import { assembleWeekSoFarV3, engineSha256Of, feedGateV3, feedText, fetchFeedV1, knownReadingsOfFeedV1, prevFeedDecisionV1, PrevFeedStatusV1, samplesOfFeedV1 } from "./feed-v3";
 import { countersMissingV3, rulesInForceErrorV3 } from "./rules-v3";
+import { legacyListingCheckV3 } from "./legacy";
 import { ChainResult, chainLine, chainsArg, chainsToVerify, checkChains, unreadableLine, verifyOutcomeV3 } from "./verify-chains";
-import { seatStatusCli, takeSeatCli, voidEpochCli } from "./seat-v3";
+import { resignSeatCli, rotateHotCli, seatStatusCli, takeSeatCli, voidEpochCli } from "./seat-v3";
+import { isOnChainSourceV3, onChainMarketMismatchV3, xenMarketOnChainV3 } from "./xen-onchain-v3";
+import { trustedConnectionFor } from "./x1-rpc";
+import { candidateFromPagesV3, candidatesFromGitV3, candidatesFromPathV3, epochDataHashOfAccountV3, prevMismatchV3, recoverEpochCli } from "./recover-v3";
 import {
   anchorsForRoleV3, armKeeperCli, CLAIM_HOLD, HOUSE_TICK_MS, houseDueV3, KeeperChains, keeperModeV3, KeeperModeV3, keeperPassV3, newMemoV3, nextDeadlineV3, readOracleSeatLivenessV3, RoleV3,
-  takeKeeperCli,
+  takeKeeperCli, keeperWithdrawCli, proposeKeeperCli,
 } from "./keeper-v3";
 
 const file = (n: number) => path.join(EPOCHS_DIR, `epoch-${n}.json`);
@@ -153,7 +157,13 @@ async function runEpoch(dry: boolean) {
     return;
   }
   const prev = onChainLast > 0 ? readEpoch(onChainLast) : null;
-  if (onChainLast > 0 && !prev) throw new Error(`epoch-${onChainLast}.json missing locally — restore it from git before continuing`);
+  // r9 (b): a build continues from the file the program recorded for the newest epoch (Epoch.data_hash), never from a
+  // missing or different one (that would pay or drop other burns): recover-epoch restores the published copy
+  if (onChainLast > 0) {
+    const info = await connection.getAccountInfo(PDA.epoch(onChainLast), "confirmed").catch(() => null);
+    const bad = prevMismatchV3(prev, onChainLast, epochDataHashOfAccountV3(info, program.programId));
+    if (bad) throw new Error(bad);
+  }
   const n = onChainLast + 1;
   // v3 (A11): from the switch epoch on (REWARDS_VERSION / V3_FIRST_EPOCH, or a v3 previous file) the v3 flow runs;
   // the v2 path below stays exactly as it is before it
@@ -375,20 +385,20 @@ async function main() {
     const { SystemProgram } = await import("@solana/web3.js");
     const pda = (s: string) => PublicKey.findProgramAddressSync([Buffer.from(s)], program.programId)[0];
     if (!(await connection.getAccountInfo(PDA.config()))) {
-      const tx = await program.methods.initializeV2().accountsPartial({
+      const tx = await rpcCu(program, program.methods.initializeV2().accountsPartial({
         config: PDA.config(), rewardVault: PDA.rewardVault(), bankrollVault: PDA.bankrollVault(), drawVault: PDA.drawVault(),
         collection: PDA.collection(), artifactAuthority: pda("artifact_authority"), payer: signer.publicKey, systemProgram: SystemProgram.programId,
-      }).signers([signer]).rpc();
+      }), [signer]);
       console.log("initialize_v2:", tx);
     }
     if (!(await connection.getAccountInfo(PDA.collection()))) {
-      const tx = await program.methods.initArtifacts().accountsPartial({
+      const tx = await rpcCu(program, program.methods.initArtifacts().accountsPartial({
         config: PDA.config(), collection: PDA.collection(), artifactAuthority: pda("artifact_authority"), payer: signer.publicKey,
         coreProgram: new PublicKey("CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d"), systemProgram: SystemProgram.programId,
-      }).signers([signer]).rpc();
+      }), [signer]);
       console.log("init_artifacts:", tx);
     }
-    const tx = await program.methods.sweepLegacy().accountsPartial({ config: PDA.config(), rewardVault: PDA.rewardVault() }).signers([signer]).rpc();
+    const tx = await rpcCu(program, program.methods.sweepLegacy().accountsPartial({ config: PDA.config(), rewardVault: PDA.rewardVault() }), [signer]);
     console.log("sweep_legacy:", tx);
     return;
   }
@@ -397,11 +407,11 @@ async function main() {
     const signer = loadKeypair();
     const { program } = connect(signer);
     const { SystemProgram } = await import("@solana/web3.js");
-    const tx = await program.methods.refreshCollectionUri().accountsPartial({
+    const tx = await rpcCu(program, program.methods.refreshCollectionUri().accountsPartial({
       config: PDA.config(), collection: PDA.collection(),
       artifactAuthority: PublicKey.findProgramAddressSync([Buffer.from("artifact_authority")], program.programId)[0],
       payer: signer.publicKey, coreProgram: new PublicKey("CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d"), systemProgram: SystemProgram.programId,
-    }).signers([signer]).rpc();
+    }), [signer]);
     console.log("refresh_collection_uri:", tx);
     return;
   }
@@ -412,16 +422,17 @@ async function main() {
     const { program } = connect(signer);
     const accounts = { config: PDA.config(), signer: signer.publicKey };
     const tx = cmd === "propose-oracle"
-      ? await program.methods.proposeOracle(new PublicKey(arg)).accountsPartial(accounts).signers([signer]).rpc()
-      : await program.methods.acceptOracle().accountsPartial(accounts).signers([signer]).rpc();
+      ? await rpcCu(program, program.methods.proposeOracle(new PublicKey(arg)).accountsPartial(accounts), [signer])
+      : await rpcCu(program, program.methods.acceptOracle().accountsPartial(accounts), [signer]);
     const cfg = await fetchConfig(program);
     console.log(`${cmd}: ${tx}\n  oracle  ${cfg.oracle.toBase58()}\n  pending ${cfg.pendingOracle.toBase58()}`);
     return;
   }
   if (cmd === "keeper-arm") {
-    // A later manual step (F1-b: not at S7; s7.mjs --arm-keeper): the first arm_keeper of the house-keeper seat, with its bond, on a chain this key derives
-    // (keeper-v3.ts), so every keeper run holding the key can reveal it. Dry without --yes. Signed by KEEPER_PRIVATE_KEY
-    // (else ORACLE_PRIVATE_KEY): the program's INITIAL_KEEPER for the first arm.
+    // A manual step: arm_keeper of the house-keeper seat, with its bond, on a chain this key derives (keeper-v3.ts), so
+    // every keeper run holding the key can reveal it. Dry without --yes (the plan and the program's verdict, simulated).
+    // Signed by KEEPER_PRIVATE_KEY (else ORACLE_PRIVATE_KEY). The first arm creates the seat: by the program's
+    // INITIAL_KEEPER only before KEEPER_OPEN_TS (2026-12-16 00:00 UTC), by any key with a bond >= 20 XNT from then on.
     const signer = loadKeypair(process.env.KEEPER_PRIVATE_KEY || undefined);
     const v3 = connectV3(signer);
     const dep = argValue("--deposit");
@@ -429,8 +440,9 @@ async function main() {
     return;
   }
   if (cmd === "keeper-take") {
-    // R-4 manual operator step (bond from a project wallet only): take_keeper by the named successor (after KEEPER_NOTICE) or anyone once the seat is dead, on a
-    // chain this key derives, so the keeper runs holding this key can reveal it. Dry without --yes. KEEPER_PRIVATE_KEY.
+    // R-4 manual step: take_keeper by the named successor (after KEEPER_NOTICE) or by anyone once the seat is dead (28 days
+    // without arm / reveal / settle), on a chain this key derives, so the keeper runs holding this key can reveal it; the
+    // new bond is the taker's own (>= 20 XNT), the old bond goes back to the old keeper. Dry without --yes. KEEPER_PRIVATE_KEY.
     const signer = loadKeypair(process.env.KEEPER_PRIVATE_KEY || undefined);
     const v3 = connectV3(signer);
     const dep = argValue("--deposit");
@@ -438,6 +450,21 @@ async function main() {
     return;
   }
   if (cmd === "seat" || cmd === "void-epoch" || cmd === "take-seat") return seatCli(cmd, arg);
+  if (cmd === "recover-epoch") return recoverEpoch(Number(arg));
+  if (cmd === "rotate-hot" || cmd === "resign-seat") return coldCli(cmd);
+  if (cmd === "keeper-withdraw" || cmd === "propose-keeper") {
+    // r9 (c): the keeper's own seat operations, signed by KEEPER_PRIVATE_KEY (else ORACLE_PRIVATE_KEY); dry without --yes
+    const signer = loadKeypair(process.env.KEEPER_PRIVATE_KEY || undefined);
+    const v3 = connectV3(signer);
+    const yes = process.argv.includes("--yes");
+    if (cmd === "propose-keeper") return void (await proposeKeeperCli(v3.connection, v3.program, signer, arg ?? "", yes));
+    const notice = argValue("--notice");
+    const amount = argValue("--amount");
+    if ((notice === undefined) === (amount === undefined)) throw new Error("usage: keeper-withdraw --notice start|cancel | --amount <XNT> [--yes]");
+    if (notice !== undefined && notice !== "start" && notice !== "cancel") throw new Error("--notice start|cancel");
+    const req = notice !== undefined ? { notice: notice as "start" | "cancel" } : { amount: BigInt(Math.round(Number(amount) * 1e9)) };
+    return void (await keeperWithdrawCli(v3.connection, v3.program, signer, req, yes));
+  }
   if (cmd === "keeper") {
     const signer = loadKeypair();
     const { connection, program } = connect(signer);
@@ -524,7 +551,45 @@ async function main() {
     if (process.env.GITHUB_OUTPUT) fs.appendFileSync(process.env.GITHUB_OUTPUT, `more=${more}\n`);
     return;
   }
-  console.log("usage: epoch [--dry] [--record <fixture>] | due | verify <file> [--full] | claim <file> | sweep | rebuild-extra <n> | publish-extra [<n>] | keeper [--once | --for <seconds>] | keeper-arm --deposit <XNT> [--yes] | keeper-take --deposit <XNT> [--yes] | refresh-collection | propose-oracle <pubkey> | accept-oracle | seat | void-epoch <n> [--extra] [--as <pubkey>] [--yes] [--even-if-ours] | take-seat --hot <pk> --cold <pk> --refund <pk> [--as <pubkey>] [--yes]");
+  console.log("usage: epoch [--dry] [--record <fixture>] | due | verify <file> [--full] | claim <file> | sweep | rebuild-extra <n> | publish-extra [<n>] | keeper [--once | --for <seconds>] | keeper-arm --deposit <XNT> [--yes] | keeper-take --deposit <XNT> [--yes] | keeper-withdraw --notice start|cancel | --amount <XNT> [--yes] | propose-keeper <pubkey>|none [--yes] | rotate-hot --new-hot <pubkey> [--as <pubkey>] [--yes] | resign-seat --successor <pubkey>|none [--as <pubkey>] [--yes] | recover-epoch <n> [--from <file|dir> ...] [--yes] | refresh-collection | propose-oracle <pubkey> | accept-oracle | seat | void-epoch <n> [--extra] [--as <pubkey>] [--yes] [--even-if-ours] | take-seat --hot <pk> --cold <pk> --refund <pk> [--as <pubkey>] [--yes]");
+}
+
+/**
+ * r9 (b): `recover-epoch <n> [--from <file|dir> ...] [--yes]` (recover-v3.ts): restores the published epoch-<n>.json from
+ * any copy whose data hash is the one the program recorded (git history of every branch, GitHub Pages, the --from paths).
+ * Read-only without --yes. Needs no key.
+ */
+async function recoverEpoch(n: number) {
+  const v3 = connectV3();
+  const trusted = trustedConnectionFor(v3.connection);
+  const from: string[] = [];
+  process.argv.forEach((a, i) => {
+    if (a === "--from" && process.argv[i + 1]) from.push(process.argv[i + 1]);
+  });
+  const name = (k: number) => `epoch-${k}.json`;
+  const ok = await recoverEpochCli(n, from, process.argv.includes("--yes"), {
+    onChain: async (k) => epochDataHashOfAccountV3(await trusted.getAccountInfo(PDA.epoch(k), "finalized"), v3.program.programId),
+    publishTx: async (k) => (await readEpochPublishedV3(v3.connection, v3.program, k).catch(() => null))?.tx ?? null,
+    local: (k) => readEpochAny(k),
+    candidates: async (k, paths) => {
+      const out = paths.flatMap((p) => candidatesFromPathV3(p, name(k)));
+      out.push(...candidatesFromGitV3(file(k)));
+      const pages = await candidateFromPagesV3(name(k));
+      if (pages) out.push(pages);
+      return out;
+    },
+    write: (k, f) => {
+      fs.writeFileSync(file(k), JSON.stringify(f, null, 2));
+      writeIndex();
+    },
+    moveAside: (k) => {
+      const to = path.join(os.tmpdir(), `epoch-${k}.not-published-${Date.now()}.json`);
+      fs.renameSync(file(k), to);
+      return to;
+    },
+    log: (s) => console.log(s),
+  });
+  if (!ok) process.exitCode = 1;
 }
 
 /**
@@ -533,6 +598,18 @@ async function main() {
  * own (VOIDER_PRIVATE_KEY, TAKER_PRIVATE_KEY), never ORACLE_PRIVATE_KEY; --as <pubkey> simulates as a key whose secret
  * is not on this machine (the cold key). Upgraded program only.
  */
+/**
+ * r9 (c): the seat's cold-key operations (seat-v3.ts): `rotate-hot --new-hot <pk>` and `resign-seat --successor <pk>|none`,
+ * signed by COLD_PRIVATE_KEY (never in a workflow), or simulated as `--as <cold pubkey>` without the secret; dry without --yes.
+ */
+async function coldCli(cmd: "rotate-hot" | "resign-seat") {
+  const signer = process.env.COLD_PRIVATE_KEY ? loadKeypair(process.env.COLD_PRIVATE_KEY) : null;
+  const v3 = connectV3(signer ?? undefined);
+  const o = { yes: process.argv.includes("--yes"), as: argValue("--as") };
+  if (cmd === "rotate-hot") await rotateHotCli(v3.connection, v3.program, signer, { ...o, newHot: argValue("--new-hot") ?? "" });
+  else await resignSeatCli(v3.connection, v3.program, signer, { ...o, successor: argValue("--successor") ?? "" });
+}
+
 async function seatCli(cmd: "seat" | "void-epoch" | "take-seat", arg: string | undefined) {
   const own = (name: string) => (process.env[name] ? loadKeypair(process.env[name]) : null);
   if (cmd === "seat") {
@@ -696,7 +773,9 @@ async function runEpochV3(dry: boolean, connection: Connection, program: anchor.
   }
   const recordTo = argValue("--record");
   const rec = emptyRecording();
-  const live = liveSourcesV3(connection, program);
+  // gap 3: a chain GeckoTerminal cannot price is priced from its pools on-chain (xen-onchain-v3.ts); the run log and a
+  // GitHub warning say so (the health row "XEN price sources" too)
+  const live = liveSourcesV3(connection, program, { log: (m) => console.log(`::warning::${m.trim()}`) });
   const s: SourcesV3 = recordTo ? recordingSources(live, rec) : live;
   // D-13: the hourly liquidity samples of this window, from the published week-so-far feed (or --feed <file>); none when
   // it cannot be read (each chain's statistic is then the build's own reading)
@@ -1089,6 +1168,11 @@ async function verifyV3(p: string, f: EpochFileV3, full: boolean) {
   } else errors.push(...verifyChainLinkV3(f, null));
   const chainResults: Record<string, ChainResult> = {};
   if (full) {
+    // Legacy Pilot (legacy.ts): a file built under the rule lists exactly the window's burn pilots that the snapshot
+    // (deployments/legacy-burners.json, its sha256 named in the rules block) lists; a file without the rule is unaffected
+    const legacy = legacyListingCheckV3(f);
+    errors.push(...legacy.errors);
+    unreadable.push(...legacy.unreadable);
     // A8: the window end is the block time of the snapshot slot (a null reading is reported as unreadable, never a pass)
     const bt = await connection.getBlockTime(f.snapshot.slot);
     if (bt === null || bt === undefined) unreadable.push(`no block time for snapshot slot ${f.snapshot.slot}: the window end ${f.window.endTs} is unconfirmed`);
@@ -1118,6 +1202,12 @@ async function verifyV3(p: string, f: EpochFileV3, full: boolean) {
       // provider reads them (the reconciliation is reported unconfirmed when no other provider answers)
       if (c.missionsAt !== null && again.totalMissions !== c.missionsAt) errors.push(`${c.name}: missionsAt ${c.missionsAt}, but ${again.rpc} reads totalMissions ${again.totalMissions} at block ${c.toBlock}`);
       if (c.burnedAt !== null && again.totalBurned !== c.burnedAt) errors.push(`${c.name}: burnedAt ${c.burnedAt}, but ${again.rpc} reads totalBurned ${again.totalBurned} at block ${c.toBlock}`);
+      // FEATURE-MATRIX gap 3: a market read on-chain (GeckoTerminal was unavailable) is re-read the same way: the same pools at
+      // the same block, the engine's reference for the band (c.ref); it must give the same spot, pools and liquidity
+      if (c.market && isOnChainSourceV3(c.market.priceSource)) {
+        const market = await xenMarketOnChainV3({ ...chain, rpcs: rpcOrderV3(chain.rpcs) }, { refE18: BigInt(c.ref), pools: c.market.pools.map((p) => p.address), topPool: null, poolCreatedAt: null }, c.toBlock);
+        errors.push(...onChainMarketMismatchV3(c, market));
+      }
       const second = await portalCountersV3({ ...chain, portal: c.portal }, c.toBlock, again.rpc);
       if (!second) console.log(`(${c.name}: the portal counters at block ${c.toBlock} were not confirmed by a second provider: none answered)`);
       else if ((c.missionsAt !== null && second.totalMissions !== c.missionsAt) || (c.burnedAt !== null && second.totalBurned !== c.burnedAt)) {

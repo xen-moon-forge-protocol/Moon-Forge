@@ -7,6 +7,7 @@ import * as anchor from "@coral-xyz/anchor";
 import { Connection, Keypair, PublicKey, SYSVAR_SLOT_HASHES_PUBKEY, SystemProgram } from "@solana/web3.js";
 import bs58 from "bs58";
 import { ORACLE_PRIVATE_KEY, PROGRAM_ID } from "./config";
+import { rpcWithCuV3 } from "./cu-v3";
 import { x1Connection } from "./x1-rpc";
 import { ArtifactHolder, EpochFile } from "./epoch";
 import { keccak } from "./merkle";
@@ -51,6 +52,15 @@ export const PDA = {
   authority: () => pda(Buffer.from("artifact_authority")),
   drop: (id: number | bigint, player: PublicKey, tier: number) => pda(Buffer.from("drop"), u64(id), player.toBuffer(), Buffer.from([tier])),
 };
+
+/**
+ * X1-V4-AUDIT MED-2: every transaction of this client (in use until the upgrade) carries a compute-unit limit measured
+ * by a simulation, with an explicit fallback when the node cannot simulate (cu-v3.ts), instead of Anchor's `.rpc()`,
+ * which requests the runtime default of 200,000 units per instruction (X1 charges per unit requested).
+ */
+export function rpcCu(program: anchor.Program, builder: { transaction(): Promise<anchor.web3.Transaction> }, signers: Keypair[]): Promise<string> {
+  return rpcWithCuV3(builder, program.provider, signers);
+}
 
 /** drops.rs::DROP_BACKING — the initial recycle value of a Lunar Dust (5 XNT). */
 export const DROP_BACKING = 5_000_000_000n;
@@ -124,7 +134,7 @@ export async function fetchConfig(program: anchor.Program): Promise<any> {
 }
 
 export async function publishEpoch(program: anchor.Program, oracle: Keypair, f: EpochFile): Promise<string> {
-  return program.methods
+  return rpcCu(program, program.methods
     .publishEpoch(
       new anchor.BN(f.epoch),
       Array.from(Buffer.from(f.root, "hex")),
@@ -139,9 +149,7 @@ export async function publishEpoch(program: anchor.Program, oracle: Keypair, f: 
       rewardVault: PDA.rewardVault(),
       oracle: oracle.publicKey,
       systemProgram: SystemProgram.programId,
-    })
-    .signers([oracle])
-    .rpc();
+    }), [oracle]);
 }
 
 /**
@@ -153,9 +161,8 @@ export async function sealDrop(program: anchor.Program, payer: Keypair, epochId:
     const e: any = await (program.account as any).epoch.fetchNullable(PDA.epoch(epochId));
     if (!e || e.dropState !== 1 || e.closed) return false;
     try {
-      const sig = await program.methods.sealDrop()
-        .accountsPartial({ config: PDA.config(), epoch: PDA.epoch(epochId), slotHashes: SYSVAR_SLOT_HASHES_PUBKEY })
-        .signers([payer]).rpc();
+      const sig = await rpcCu(program, program.methods.sealDrop()
+        .accountsPartial({ config: PDA.config(), epoch: PDA.epoch(epochId), slotHashes: SYSVAR_SLOT_HASHES_PUBKEY }), [payer]);
       log(`  drops of epoch ${epochId} sealed: ${sig}`);
       return true;
     } catch (err) {
@@ -202,17 +209,17 @@ export async function deliverDrops(
     const cfg = await fetchConfig(program);
     const deliver = async (): Promise<string> => {
       if (Number(cfg.artifactsAlive[0]) >= 600) {
-        return program.methods.claimDropXnt(new anchor.BN(f.epoch), l.tier, new anchor.BN(l.score), proof).accountsPartial({
+        return rpcCu(program, program.methods.claimDropXnt(new anchor.BN(f.epoch), l.tier, new anchor.BN(l.score), proof).accountsPartial({
           config: PDA.config(), epoch: PDA.epoch(f.epoch), receipt, player, playerState: PDA.player(player),
           rewardVault: PDA.rewardVault(), payer: payer.publicKey, systemProgram: SystemProgram.programId,
-        }).signers([payer]).rpc();
+        }), [payer]);
       }
       const serial = Number(cfg.artifactsMinted[0]);
       const asset = PDA.asset(0, serial);
-      return program.methods.claimDrop(new anchor.BN(f.epoch), l.tier, serial, new anchor.BN(l.score), proof).accountsPartial({
+      return rpcCu(program, program.methods.claimDrop(new anchor.BN(f.epoch), l.tier, serial, new anchor.BN(l.score), proof).accountsPartial({
         config: PDA.config(), epoch: PDA.epoch(f.epoch), receipt, player, asset, record: PDA.artifact(asset), collection: PDA.collection(),
         artifactAuthority: PDA.authority(), rewardVault: PDA.rewardVault(), payer: payer.publicKey, coreProgram: MPL_CORE, systemProgram: SystemProgram.programId,
-      }).signers([payer]).rpc();
+      }), [payer]);
     };
     if (run) {
       if (await run.send(`Forge Drop delivered to ${l.player} (epoch ${f.epoch}, tier ${l.tier})`, deliver)) done++;
@@ -251,7 +258,7 @@ export async function claimAll(connection: Connection, program: anchor.Program, 
       const m = l.tier === 0
         ? program.methods.claimInstant(new anchor.BN(f.epoch), l.tier, new anchor.BN(l.score), proof).accountsPartial(common)
         : program.methods.claimMission(new anchor.BN(f.epoch), l.tier, new anchor.BN(l.score), proof).accountsPartial({ ...common, mission: PDA.mission(f.epoch, player, l.tier) });
-      const sig = await m.signers([payer]).rpc();
+      const sig = await rpcCu(program, m, [payer]);
       done++;
       log(`  claimed ${l.player} tier ${l.tier}: ${sig}`);
     } catch (e) {
@@ -305,10 +312,10 @@ export async function keeperPass(connection: Connection, program: anchor.Program
   for (let i = 0; i < Math.min(bets.length, 60); i++) {
     const b = bets[i];
     try {
-      await program.methods.settleBet().accountsPartial({
+      await rpcCu(program, program.methods.settleBet().accountsPartial({
         config: PDA.config(), bet: b.publicKey, playerState: b.account.playerState,
         bankrollVault: PDA.bankrollVault(), slotHashes: SYSVAR_SLOT_HASHES_PUBKEY, rentPayer: b.account.rentPayer,
-      }).signers([payer]).rpc();
+      }), [payer]);
       log(`  settled bet ${b.publicKey.toBase58()}`);
     } catch (e) {
       log(`  settle failed ${b.publicKey.toBase58()}: ${String(e).slice(0, 160)}`);
@@ -327,7 +334,7 @@ export async function keeperPass(connection: Connection, program: anchor.Program
     if (e.account.closed) continue;
     if (now >= Number(e.account.expiresAt)) {
       try {
-        await program.methods.expireEpoch().accountsPartial({ config: PDA.config(), epoch: e.publicKey }).signers([payer]).rpc();
+        await rpcCu(program, program.methods.expireEpoch().accountsPartial({ config: PDA.config(), epoch: e.publicKey }), [payer]);
         log(`  epoch ${id} expired: unclaimed reserve returned to the pool`);
       } catch (err) {
         log(`  expire ${id}: ${String(err).slice(0, 160)}`);
@@ -361,9 +368,9 @@ export async function keeperPass(connection: Connection, program: anchor.Program
       const entry = await acc.jackpotEntry.fetchNullable(PDA.jpEntry(id, i));
       if (!entry) continue;
       try {
-        await program.methods.closeJackpotEntry().accountsPartial({
+        await rpcCu(program, program.methods.closeJackpotEntry().accountsPartial({
           round: r.publicKey, playerState: PDA.player(entry.player), entry: PDA.jpEntry(id, i), rentPayer: entry.rentPayer,
-        }).signers([payer]).rpc();
+        }), [payer]);
         log(`  jackpot ${id} entry ${i} refunded`);
       } catch (err) {
         log(`  refund ${id}/${i}: ${String(err).slice(0, 160)}`);
@@ -377,18 +384,18 @@ export async function keeperPass(connection: Connection, program: anchor.Program
     const key = w.publicKey.toBase58();
     try {
       if (w.account.state === 1) {
-        await program.methods.startWar().accountsPartial({ war: w.publicKey, slotHashes: SYSVAR_SLOT_HASHES_PUBKEY }).signers([payer]).rpc();
+        await rpcCu(program, program.methods.startWar().accountsPartial({ war: w.publicKey, slotHashes: SYSVAR_SLOT_HASHES_PUBKEY }), [payer]);
         log(`  war ${key} started (or re-committed to a fresh block)`);
       } else if (w.account.state === 2 && Math.floor(Date.now() / 1000) > Number(w.account.deadline)) {
-        await program.methods.claimWarTimeout().accountsPartial({ war: w.publicKey }).signers([payer]).rpc();
+        await rpcCu(program, program.methods.claimWarTimeout().accountsPartial({ war: w.publicKey }), [payer]);
         log(`  war ${key}: turn timer ran out`);
       }
       const cur = await acc.war.fetchNullable(w.publicKey);
       if (cur && cur.state === 3) {
-        await program.methods.settleWar().accountsPartial({
+        await rpcCu(program, program.methods.settleWar().accountsPartial({
           config: PDA.config(), war: w.publicKey, creatorState: PDA.player(cur.creator), opponentState: PDA.player(cur.opponent),
           rewardVault: PDA.rewardVault(), drawVault: PDA.drawVault(), architect: ARCHITECT, rentPayer: cur.rentPayer,
-        }).signers([payer]).rpc();
+        }), [payer]);
         log(`  war ${key} paid out`);
       }
     } catch (err) {
@@ -403,12 +410,12 @@ export async function keeperPass(connection: Connection, program: anchor.Program
     const t = Math.floor(Date.now() / 1000);
     try {
       if (r.account.state === 0 && t >= Number(r.account.lockTs)) {
-        await program.methods.lockPrediction().accountsPartial({ round: r.publicKey, observation: XDEX_XNT_OBSERVATION }).signers([payer]).rpc();
+        await rpcCu(program, program.methods.lockPrediction().accountsPartial({ round: r.publicKey, observation: XDEX_XNT_OBSERVATION }), [payer]);
         log(`  prediction ${id} locked`);
       } else if (r.account.state === 1 && t >= Number(r.account.endTs)) {
-        await program.methods.settlePrediction().accountsPartial({
+        await rpcCu(program, program.methods.settlePrediction().accountsPartial({
           config: PDA.config(), round: r.publicKey, observation: XDEX_XNT_OBSERVATION, rewardVault: PDA.rewardVault(), drawVault: PDA.drawVault(), architect: ARCHITECT,
-        }).signers([payer]).rpc();
+        }), [payer]);
         log(`  prediction ${id} settled`);
       }
     } catch (err) {
@@ -420,9 +427,9 @@ export async function keeperPass(connection: Connection, program: anchor.Program
     const entries: any[] = await acc.predEntry.all([{ memcmp: { offset: 8, bytes: bs58.encode(u64(id)) } }]);
     for (const e of entries) {
       try {
-        await program.methods.claimPrediction().accountsPartial({
+        await rpcCu(program, program.methods.claimPrediction().accountsPartial({
           config: PDA.config(), round: r.publicKey, entry: e.publicKey, playerState: PDA.player(e.account.player), rentPayer: e.account.rentPayer,
-        }).signers([payer]).rpc();
+        }), [payer]);
         log(`  prediction ${id}: paid ${e.account.player.toBase58()}`);
       } catch (err) {
         log(`  prediction ${id} claim: ${String(err).slice(0, 160)}`);
@@ -431,7 +438,7 @@ export async function keeperPass(connection: Connection, program: anchor.Program
     const after = await acc.predRound.fetch(r.publicKey);
     if (after.claimed === after.entries) {
       try {
-        await program.methods.closePredictionRound().accountsPartial({ config: PDA.config(), round: r.publicKey, rewardVault: PDA.rewardVault(), rentPayer: after.rentPayer }).signers([payer]).rpc();
+        await rpcCu(program, program.methods.closePredictionRound().accountsPartial({ config: PDA.config(), round: r.publicKey, rewardVault: PDA.rewardVault(), rentPayer: after.rentPayer }), [payer]);
         log(`  prediction ${id} closed`);
       } catch (err) {
         log(`  prediction ${id} close: ${String(err).slice(0, 160)}`);
@@ -496,9 +503,9 @@ async function runRound(connection: Connection, program: anchor.Program, payer: 
   try {
     if (round.state === 0 && Number(round.endTs) !== 0 && now >= Number(round.endTs)) {
       if (kind === "jackpot") {
-        await program.methods.drawJackpot().accountsPartial({ config: PDA.config(), round: roundPk, firstPlayerState: PDA.player(round.firstPlayer) }).signers([payer]).rpc();
+        await rpcCu(program, program.methods.drawJackpot().accountsPartial({ config: PDA.config(), round: roundPk, firstPlayerState: PDA.player(round.firstPlayer) }), [payer]);
       } else {
-        await program.methods.drawDraw().accountsPartial({ config: PDA.config(), round: roundPk }).signers([payer]).rpc();
+        await rpcCu(program, program.methods.drawDraw().accountsPartial({ config: PDA.config(), round: roundPk }), [payer]);
       }
       log(`  ${kind} ${roundId} closed`);
       round = await (kind === "jackpot" ? acc.jackpotRound : acc.drawRound).fetch(roundPk);
@@ -536,15 +543,15 @@ async function runRound(connection: Connection, program: anchor.Program, payer: 
       winner = e0.player;
     }
     if (kind === "jackpot") {
-      await program.methods.settleJackpot().accountsPartial({
+      await rpcCu(program, program.methods.settleJackpot().accountsPartial({
         config: PDA.config(), round: roundPk, entry: entryPk, winnerState: PDA.player(winner!), rewardVault: PDA.rewardVault(),
         drawVault: PDA.drawVault(), architect: ARCHITECT, slotHashes: SYSVAR_SLOT_HASHES_PUBKEY,
-      }).signers([payer]).rpc();
+      }), [payer]);
     } else {
-      await program.methods.settleDraw().accountsPartial({
+      await rpcCu(program, program.methods.settleDraw().accountsPartial({
         config: PDA.config(), round: roundPk, entry: entryPk, winnerState: PDA.player(winner!), drawVault: PDA.drawVault(),
         rewardVault: PDA.rewardVault(), slotHashes: SYSVAR_SLOT_HASHES_PUBKEY,
-      }).signers([payer]).rpc();
+      }), [payer]);
     }
     log(`  ${kind} ${roundId} settled`);
   } catch (e) {

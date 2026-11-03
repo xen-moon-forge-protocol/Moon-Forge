@@ -5,7 +5,8 @@
  */
 import * as anchor from "@coral-xyz/anchor";
 import { Connection } from "@solana/web3.js";
-import { ChainConfig } from "./config";
+import { ChainConfig, EPOCHS_DIR } from "./config";
+import { OnChainMarketV3, OnChainPriorV3, onChainPriorOfV3, publishedEpochFilesOf, xenMarketOnChainV3, xenMarketWithFallbackV3 } from "./xen-onchain-v3";
 import { finalHead, missionLogBeforeV3, portalCountersV3, readChainV3 } from "./evm";
 import { toE18 } from "./epoch";
 import { ExtraRecoverySourcesV3, rpcOrderV3, SourcesV3, XenMarketV3 } from "./flow-v3";
@@ -31,12 +32,33 @@ export function liveExtraRecoveryV3(connection: Connection, program: anchor.Prog
   };
 }
 
-export function liveSourcesV3(connection: Connection, program: anchor.Program): SourcesV3 {
+/** What liveSourcesV3 may be given besides the clients (tests inject the prior; the run passes its log). */
+export interface LiveSourcesOptsV3 {
+  log?: (m: string) => void;
+  /** FEATURE-MATRIX gap 3: the chain's prior for the on-chain market (default: the published files in EPOCHS_DIR) */
+  priorOf?: (chainId: number) => OnChainPriorV3 | null;
+  /** the on-chain market reader (default: xenMarketOnChainV3 through the chain's RPCs, archive-capable hosts first) */
+  onChain?: (chain: ChainConfig, prior: OnChainPriorV3, block: number) => Promise<OnChainMarketV3>;
+  /** the chain's final head reader (default: evm.ts finalHead; tests inject one) */
+  finalHead?: (chain: ChainConfig) => Promise<number>;
+}
+
+export function liveSourcesV3(connection: Connection, program: anchor.Program, opts: LiveSourcesOptsV3 = {}): SourcesV3 {
   const markets = new Map<number, Promise<XenMarketDetailV3>>();
   // D-23 (phase 1): every candle request as answered, by candle key, for the epoch's price sidecar
   const raw = new Map<string, { url: string; ohlcv: number[][] }>();
+  // gap 3: each chain's final head as this run read it (its toBlock), and the chains whose market was read on-chain
+  const heads = new Map<number, number>();
+  const onChain = new Set<number>();
+  let files: unknown[] | null = null;
+  const priorOf = opts.priorOf ?? ((id: number) => onChainPriorOfV3((files ??= publishedEpochFilesOf(EPOCHS_DIR)), id));
+  const readOnChain = opts.onChain ?? ((c: ChainConfig, prior: OnChainPriorV3, block: number) => xenMarketOnChainV3({ ...c, rpcs: rpcOrderV3(c.rpcs) }, prior, block));
   return {
-    finalHead: (c: ChainConfig) => finalHead(c),
+    finalHead: async (c: ChainConfig) => {
+      const h = await (opts.finalHead ?? finalHead)(c);
+      heads.set(c.chainId, h);
+      return h;
+    },
     // A12 (P5): hosts that refuse historical state are tried last, so a fail-over keeps the counter at the cursor
     readChain: (c, from, to) => readChainV3({ ...c, rpcs: rpcOrderV3(c.rpcs) }, from, to),
     missionBefore: (c, missionId, to) => missionLogBeforeV3({ ...c, rpcs: rpcOrderV3(c.rpcs) }, missionId, to),
@@ -47,12 +69,25 @@ export function liveSourcesV3(connection: Connection, program: anchor.Program): 
     blockTime: (slot) => connection.getBlockTime(slot),
     market: (c) => {
       if (!markets.has(c.chainId)) {
-        // round 4: the v3 market read (GeckoTerminal with Retry-After), with the price pool's age (D-13) and its quote token (A5-c, the route)
-        markets.set(c.chainId, xenMarketV3(c));
+        // round 4: the v3 market read (GeckoTerminal with Retry-After), with the price pool's age (D-13) and its quote token (A5-c, the route);
+        // gap 3: when GeckoTerminal fails for the chain, its pools re-read on-chain at its toBlock (xen-onchain-v3.ts)
+        markets.set(c.chainId, xenMarketWithFallbackV3(c, {
+          gecko: () => xenMarketV3(c),
+          onChain: async (prior, block) => {
+            const m = await readOnChain(c, prior, block);
+            onChain.add(c.chainId);
+            return m;
+          },
+          prior: () => priorOf(c.chainId),
+          head: () => heads.get(c.chainId),
+          log: opts.log,
+        }));
       }
       return markets.get(c.chainId)!;
     },
-    xenCloses: (c, m, hourStart) =>
+    // gap 3: a chain priced on-chain reads no GeckoTerminal candle (its base/quote orientation is unknown without it): every
+    // burn then takes the engine's existing fallback price, the build spot under the cap
+    xenCloses: (c, m, hourStart) => onChain.has(c.chainId) ? Promise.resolve(null) :
       xenHourlyClosesV3(c, { refUsd: m.refUsd, spotUsd: m.spotUsd, liquidityUsd: m.liquidityUsd, topPool: m.topPool, xenIsBase: m.xenIsBase, pools: m.pools }, hourStart, (r) => raw.set(`${c.chainId}:${hourStart}`, { url: r.url, ohlcv: r.ohlcv })),
     rawCandles: (key) => raw.get(key) ?? null,
     // D-13: the eligible pools' XEN balances at toBlock (and the price pool's route for the kit)

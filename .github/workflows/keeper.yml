@@ -84,6 +84,7 @@ jobs:
         working-directory: oracle
         env:
           X1_RPC_URLS: ${{ vars.X1_RPC_URLS }} # optional X1 endpoints tried before the default one (oracle/src/x1-rpc.ts)
+          X1_RPC_URL: ${{ vars.X1_RPC_URL }} # the default X1 endpoint (empty = the built-in one, oracle/src/config.ts)
           # D-17: 'true' keeps an epoch whose anomaly-gate hold ran out from being dispatched until an operator clears it
           # (a heartbeat, which pays nothing, is never held: review r4 finding 12)
           GATE_BLOCK: ${{ vars.GATE_BLOCK }}
@@ -139,6 +140,7 @@ jobs:
         working-directory: oracle
         env:
           X1_RPC_URLS: ${{ vars.X1_RPC_URLS }}
+          X1_RPC_URL: ${{ vars.X1_RPC_URL }} # the default X1 endpoint (empty = the built-in one, oracle/src/config.ts)
         run: npm run --silent feed -- --gate-only
 
       # ── the keeper key: KEEPER_PRIVATE_KEY only, fail closed ─────────────────────────────────────
@@ -168,6 +170,7 @@ jobs:
         env:
           ORACLE_PRIVATE_KEY: ${{ secrets.KEEPER_PRIVATE_KEY }}
           X1_RPC_URLS: ${{ vars.X1_RPC_URLS }}
+          X1_RPC_URL: ${{ vars.X1_RPC_URL }} # the default X1 endpoint (empty = the built-in one, oracle/src/config.ts)
           FEED_LIVE: ${{ steps.feedgate.outputs.active }}
         run: |
           if [ "$FEED_LIVE" = "true" ]; then
@@ -204,6 +207,7 @@ jobs:
         working-directory: oracle
         env:
           X1_RPC_URLS: ${{ vars.X1_RPC_URLS }}
+          X1_RPC_URL: ${{ vars.X1_RPC_URL }} # the default X1 endpoint (empty = the built-in one, oracle/src/config.ts)
           GATE_BLOCK: ${{ vars.GATE_BLOCK }}
         run: npm run --silent due
       - name: Start the oracle run (after the loop)
@@ -306,23 +310,15 @@ jobs:
         env:
           EPOCHS_DIR: ../frontend/public/epochs
           X1_RPC_URLS: ${{ vars.X1_RPC_URLS }}
-          # the same chains as the epoch build (oracle.yml)
-          PORTAL_ETH: ${{ vars.PORTAL_ETH }}
-          START_ETH: ${{ vars.START_ETH }}
-          PORTAL_OP: ${{ vars.PORTAL_OP }}
-          START_OP: ${{ vars.START_OP }}
-          PORTAL_BSC: ${{ vars.PORTAL_BSC }}
-          START_BSC: ${{ vars.START_BSC }}
-          PORTAL_POLYGON: ${{ vars.PORTAL_POLYGON }}
-          START_POLYGON: ${{ vars.START_POLYGON }}
-          PORTAL_AVAX: ${{ vars.PORTAL_AVAX }}
-          START_AVAX: ${{ vars.START_AVAX }}
-          PORTAL_BASE: ${{ vars.PORTAL_BASE }}
-          START_BASE: ${{ vars.START_BASE }}
-          PORTAL_PULSE: ${{ vars.PORTAL_PULSE }}
-          START_PULSE: ${{ vars.START_PULSE }}
-          PORTAL_MOONBEAM: ${{ vars.PORTAL_MOONBEAM }}
-          START_MOONBEAM: ${{ vars.START_MOONBEAM }}
+          X1_RPC_URL: ${{ vars.X1_RPC_URL }} # the default X1 endpoint (empty = the built-in one, oracle/src/config.ts)
+          # the chains: deployments/portals.json, the same as the epoch build (no PORTAL_/START_ variable is passed:
+          # GitHub passes an unset variable as "", which the oracle reads as "skip this chain")
+          # optional EVM endpoint lists per chain (comma-separated; empty = the defaults in oracle/src/config.ts)
+          OP_RPC_URL: ${{ vars.OP_RPC_URL }}
+          BSC_RPC_URL: ${{ vars.BSC_RPC_URL }}
+          POLYGON_RPC_URL: ${{ vars.POLYGON_RPC_URL }}
+          AVAX_RPC_URL: ${{ vars.AVAX_RPC_URL }}
+          BASE_RPC_URL: ${{ vars.BASE_RPC_URL }}
           # an empty status (the read step itself failed) is "error"
           PREV_FEED_STATUS: ${{ steps.prevfeed.outputs.status || 'error' }}
         run: npm run --silent feed -- --out "$RUNNER_TEMP/feed/week-so-far.json" --prev-feed "$RUNNER_TEMP/prev-feed.json" --prev-feed-status "$PREV_FEED_STATUS"

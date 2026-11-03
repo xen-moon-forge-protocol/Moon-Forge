@@ -23,8 +23,9 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as anchor from "@coral-xyz/anchor";
-import { Connection, Keypair, PublicKey, SystemProgram, Transaction, TransactionInstruction, TransactionMessage, VersionedTransaction } from "@solana/web3.js";
+import { Connection, Keypair, PublicKey, SystemProgram, TransactionInstruction, TransactionMessage, VersionedTransaction } from "@solana/web3.js";
 import { EPOCHS_DIR } from "./config";
+import { CU_SIM_UNITS, cuIxV3, cuPlanOfUnitsV3, sendWithCuV3 } from "./cu-v3";
 import { PDA } from "./x1";
 import { isV3Program, PDA_V3, freePoolV3 } from "./x1-v3";
 import { CLAIM_HOLD, DEAD_SEAT_DELAY, fetchAs, keeperModeV3, oracleSeatLivenessV3, PairViewV3, SEAT_PRIORITY_WINDOW, SEAT_WALK_PAIRS } from "./keeper-v3";
@@ -259,12 +260,14 @@ async function requireUpgraded(connection: Connection, program: anchor.Program, 
 }
 
 /** Simulates `ixs` as `payer` (no signature, nothing sent): the program's answer, or null when the node cannot simulate. */
-export async function simulateAsV3(connection: Connection, payer: PublicKey, ixs: TransactionInstruction[]): Promise<{ ok: boolean; logs: string[]; err: string | null } | null> {
+export async function simulateAsV3(connection: Connection, payer: PublicKey, ixs: TransactionInstruction[]): Promise<{ ok: boolean; logs: string[]; err: string | null; units: number | null } | null> {
   try {
-    const msg = new TransactionMessage({ payerKey: payer, recentBlockhash: PublicKey.default.toBase58(), instructions: ixs }).compileToV0Message();
+    // MED-2: simulated with the maximum limit, so the units it reports become the limit the send requests (cu-v3.ts)
+    const msg = new TransactionMessage({ payerKey: payer, recentBlockhash: PublicKey.default.toBase58(), instructions: [cuIxV3(CU_SIM_UNITS), ...ixs] }).compileToV0Message();
     const r = await connection.simulateTransaction(new VersionedTransaction(msg), { sigVerify: false, replaceRecentBlockhash: true, commitment: "confirmed" });
     const logs = r.value.logs ?? [];
-    return { ok: !r.value.err, logs, err: r.value.err ? (logs.find((l) => /Error Code|failed|insufficient/i.test(l)) ?? JSON.stringify(r.value.err)) : null };
+    const units = typeof r.value.unitsConsumed === "number" && r.value.unitsConsumed > 0 ? r.value.unitsConsumed : null;
+    return { ok: !r.value.err, logs, err: r.value.err ? (logs.find((l) => /Error Code|failed|insufficient/i.test(l)) ?? JSON.stringify(r.value.err)) : null, units };
   } catch {
     return null;
   }
@@ -391,7 +394,8 @@ export async function voidEpochCli(connection: Connection, program: anchor.Progr
     return null;
   }
   if (sim && !sim.ok) throw new Error(`refusing to send: the program refuses the void in simulation (${sim.err})`);
-  const sig = await program.provider.sendAndConfirm!(new Transaction().add(ix), [signer!]);
+  // MED-2: the dry run's measurement × 1.2 as the limit (the explicit fallback when the node could not simulate)
+  const sig = await sendWithCuV3(program.provider, [ix], [signer!], { payer: actor, plan: cuPlanOfUnitsV3(sim?.units, [ix]) });
   log(`  voided: ${sig}`);
   return sig;
 }
@@ -459,7 +463,133 @@ export async function takeSeatCli(connection: Connection, program: anchor.Progra
     return null;
   }
   if (sim && !sim.ok) throw new Error(`refusing to send: the program refuses take_seat in simulation (${sim.err})`);
-  const sig = await program.provider.sendAndConfirm!(new Transaction().add(ix), [signer!]);
+  // MED-2: the dry run's measurement × 1.2 as the limit (the explicit fallback when the node could not simulate)
+  const sig = await sendWithCuV3(program.provider, [ix], [signer!], { payer: actor, plan: cuPlanOfUnitsV3(sim?.units, [ix]) });
   log(`  taken: ${sig}; the new hot key publishes from now on (set ORACLE_PRIVATE_KEY to it) and health-pins.json moves in a reviewed commit`);
+  return sig;
+}
+
+// ── the cold key's two operations (r9 fix-up c): rotate_hot, resign_seat ───────────────────────────────────────────
+/** seat.rs rotate_hot_core (pure mirror): null when the cold key may install `newHot` as the hot key, else why not. */
+export function rotateHotErrorV3(o: { cold: string; actor: string | null; newHot: string; architect: string }): string | null {
+  if (o.cold === DEFAULT_KEY) return "the seat has no cold key (OnlyCold)";
+  if (o.actor !== null && o.actor !== o.cold) return `only the seat's cold key ${o.cold} may replace the hot key; this key is ${o.actor} (OnlyCold)`;
+  if (o.newHot === DEFAULT_KEY || o.newHot === o.cold || o.newHot === o.architect) return "the new hot key must be a real key, neither the cold key nor the architect (InvalidTarget)";
+  return null;
+}
+
+/**
+ * seat.rs resign_seat / seat_can_resign (pure mirror): the cold key resigns only a seat that is not open and that has
+ * served, i.e. the walk from Config.last_epoch finds an epoch that survived its hold, published since
+ * max(now − DEAD_SEAT_DELAY, taken_at); `walkIds` are the pairs the program reads (remaining accounts, newest first).
+ */
+export function resignDecisionV3(seat: { takenAt: number; openSince: number }, lastEpoch: number, pairOf: (id: number) => PairViewV3 | null, now: number): { ok: boolean; reason: string; walkIds: number[] } {
+  if (seat.openSince) return { ok: false, reason: `the seat is already open since ${at(seat.openSince)} (SeatOpen)`, walkIds: [] };
+  const since = Math.max(now - DEAD_SEAT_DELAY, seat.takenAt);
+  const w = seatWalkV3(Number.MIN_SAFE_INTEGER, lastEpoch, pairOf, now, now - since);
+  if (w.error) return { ok: false, reason: `the walk cannot be built: ${w.error}`, walkIds: w.ids };
+  if (w.dead) return { ok: false, reason: `no epoch published since ${at(since)} survived its hold: a seat that has not served cannot resign (SeatDead); it can only be taken`, walkIds: w.ids };
+  return { ok: true, reason: `an epoch published since ${at(since)} survived its hold: the bond goes back to the refund key, the seat opens (the successor first for 24 h, then anyone)`, walkIds: w.ids };
+}
+
+export async function rotateHotIxV3(program: anchor.Program, o: { newHot: PublicKey; cold: PublicKey }): Promise<TransactionInstruction> {
+  return methods(program).rotateHot(o.newHot).accountsPartial({ config: PDA.config(), seat: PDA_V3.oracleSeat(), cold: o.cold }).instruction();
+}
+
+/** resign_seat naming the successor (PublicKey.default: none), with the walk pairs as seat_can_resign reads them. */
+export async function resignSeatIxV3(program: anchor.Program, o: { successor: PublicKey; cold: PublicKey; refund: PublicKey; walkIds: number[] }): Promise<TransactionInstruction> {
+  const remaining = o.walkIds.flatMap((id) => [
+    { pubkey: PDA.epoch(id), isSigner: false, isWritable: false },
+    { pubkey: PDA_V3.extraEpoch(id), isSigner: false, isWritable: false },
+  ]);
+  return methods(program).resignSeat(o.successor).accountsPartial({
+    config: PDA.config(), seat: PDA_V3.oracleSeat(), rewardVault: PDA.rewardVault(), refund: o.refund, cold: o.cold,
+  }).remainingAccounts(remaining).instruction();
+}
+
+export interface ColdOptsV3 {
+  yes: boolean;
+  /** dry run only: simulate as this public key (the cold key's address, no secret needed) */
+  as?: string;
+  log?: (s: string) => void;
+}
+
+/** The common tail of the cold operations: simulated as the actor, sent only with --yes and a signer, with its CU limit. */
+async function coldSendV3(connection: Connection, program: anchor.Program, signer: Keypair | null, actor: PublicKey, ix: TransactionInstruction, yes: boolean, what: string, log: (s: string) => void): Promise<string | null> {
+  const sim = await simulateAsV3(connection, actor, [ix]);
+  log(`  simulation as ${actor.toBase58()}: ${sim === null ? "the node cannot simulate" : sim.ok ? `accepted by the program${sim.units ? ` (${sim.units} compute units)` : ""}` : `REFUSED: ${sim.err}`}`);
+  if (!yes) {
+    log("  dry: nothing signed, nothing sent (add --yes to send it)");
+    return null;
+  }
+  if (sim && !sim.ok) throw new Error(`refusing to send: the program refuses ${what} in simulation (${sim.err})`);
+  return sendWithCuV3(program.provider, [ix], [signer!], { payer: actor, plan: cuPlanOfUnitsV3(sim?.units, [ix]) });
+}
+
+/**
+ * `npm run rotate-hot -- --new-hot <pubkey> [--as <cold pubkey>] [--yes]` (COLD_PRIVATE_KEY): the seat's cold key replaces
+ * the hot key at once and wipes any pending hand-over (the theft response). Dry by default; never in a workflow.
+ */
+export async function rotateHotCli(connection: Connection, program: anchor.Program, signer: Keypair | null, o: ColdOptsV3 & { newHot: string }): Promise<string | null> {
+  const log = o.log ?? console.log;
+  if (!o.newHot) throw new Error("usage: rotate-hot --new-hot <pubkey> [--as <cold pubkey>] [--yes]");
+  const newHot = new PublicKey(o.newHot); // throws on a malformed key
+  if (o.yes && !signer) throw new Error("--yes needs COLD_PRIVATE_KEY (the seat's cold key)");
+  await requireUpgraded(connection, program, "rotate-hot");
+  const seat = await readSeat(connection, program);
+  if (!seat) throw new Error("there is no OracleSeat");
+  const cfg = await fetchAs(trustedConnectionFor(connection), program, "Config", PDA.config());
+  if (!cfg) throw new Error("Config could not be read");
+  const actor = actorOf(signer, o.as);
+  const err = rotateHotErrorV3({ cold: seat.cold, actor: actor ? actor.toBase58() : null, newHot: newHot.toBase58(), architect: (cfg.architect as PublicKey).toBase58() });
+  const pending = (cfg.pendingOracle as PublicKey).toBase58();
+  log(`rotate-hot plan: hot key ${(cfg.oracle as PublicKey).toBase58()} → ${newHot.toBase58()}${pending !== DEFAULT_KEY ? `; the pending hand-over to ${pending} is wiped` : ""}; cold key ${seat.cold}`);
+  log(`  decision: ${err ? `REFUSED: ${err}` : "ROTATE"}`);
+  if (err) {
+    if (o.yes) throw new Error(`refusing to rotate the hot key: ${err}`);
+    return null;
+  }
+  if (!actor) {
+    log("  dry: no COLD_PRIVATE_KEY and no --as <pubkey>: not simulated, nothing sent");
+    return null;
+  }
+  const sig = await coldSendV3(connection, program, signer, actor, await rotateHotIxV3(program, { newHot, cold: actor }), o.yes, "rotate_hot", log);
+  if (sig) log(`  rotated: ${sig}; next: put the new hot key in the ORACLE_PRIVATE_KEY secret and its address in the ORACLE_PUBKEY variable`);
+  return sig;
+}
+
+/**
+ * `npm run resign-seat -- --successor <pubkey>|none [--as <cold pubkey>] [--yes]` (COLD_PRIVATE_KEY): the cold key hands
+ * the seat back: its bond goes to the refund key, the seat opens, the named successor may take it first for 24 h (then
+ * anyone, with take-seat and no forfeit). Only for a seat that served (resignDecisionV3). Dry by default.
+ */
+export async function resignSeatCli(connection: Connection, program: anchor.Program, signer: Keypair | null, o: ColdOptsV3 & { successor: string }): Promise<string | null> {
+  const log = o.log ?? console.log;
+  if (!o.successor) throw new Error("usage: resign-seat --successor <pubkey>|none [--as <cold pubkey>] [--yes]");
+  const successor = o.successor === "none" ? PublicKey.default : new PublicKey(o.successor);
+  if (o.yes && !signer) throw new Error("--yes needs COLD_PRIVATE_KEY (the seat's cold key)");
+  await requireUpgraded(connection, program, "resign-seat");
+  const now = await chainNowV3(connection);
+  const seat = await readSeat(connection, program);
+  if (!seat) throw new Error("there is no OracleSeat");
+  const cfg = await fetchAs(trustedConnectionFor(connection), program, "Config", PDA.config());
+  if (!cfg) throw new Error("Config could not be read");
+  const actor = actorOf(signer, o.as);
+  const pairs = await readPairs(connection, program, num(cfg.lastEpoch));
+  const d = resignDecisionV3(seat, num(cfg.lastEpoch), (id) => pairs.get(id) ?? null, now);
+  const refund = seat.refund === DEFAULT_KEY ? PDA.rewardVault() : new PublicKey(seat.refund);
+  log(`resign-seat plan: seat generation ${seat.generation}, bond ${xnt(seat.bond)} to ${seat.refund === DEFAULT_KEY ? "the reward pool (no refund key)" : seat.refund}; successor ${successor.equals(PublicKey.default) ? "none (anyone may take the open seat)" : `${successor.toBase58()} (first for 24 h)`}`);
+  log(`  decision: ${d.ok ? "RESIGN" : "REFUSED"}: ${d.reason}`);
+  if (actor && actor.toBase58() !== seat.cold) log(`  note: ${actor.toBase58()} is not the seat's cold key ${seat.cold}: the program refuses it (OnlyCold)`);
+  if (!d.ok) {
+    if (o.yes) throw new Error(`refusing to resign the seat: ${d.reason}`);
+    return null;
+  }
+  if (!actor) {
+    log("  dry: no COLD_PRIVATE_KEY and no --as <pubkey>: not simulated, nothing sent");
+    return null;
+  }
+  const sig = await coldSendV3(connection, program, signer, actor, await resignSeatIxV3(program, { successor, cold: actor, refund, walkIds: d.walkIds }), o.yes, "resign_seat", log);
+  if (sig) log(`  resigned: ${sig}; the seat is open: take-seat by the successor, or by anyone after 24 h`);
   return sig;
 }

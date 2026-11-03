@@ -621,10 +621,13 @@ async function main() {
   });
 
   await test("keeper.yml's feed reads the same chains as the epoch build (oracle.yml) and serves the file where the site reads it", () => {
-    const vars = (t: string) => [...t.matchAll(/^\s+((?:PORTAL|START)_[A-Z]+): \$\{\{ vars\.([A-Z_]+) \}\}$/gm)].map((m) => `${m[1]}=${m[2]}`).sort();
-    const oracle = vars(wf("oracle.yml"));
-    assert(oracle.length >= 10);
-    assert.deepStrictEqual(vars(wf("keeper.yml")), oracle);
+    // r9 (a): the chains come from deployments/portals.json in every workflow; no PORTAL_/START_ variable is passed (an
+    // unset repository variable arrives as "", which skips the chain); both pass the same endpoint overrides
+    for (const f of ["oracle.yml", "keeper.yml", "health.yml", "announce.yml"]) assert(!/^\s+(?:PORTAL|START)_[A-Z]+:/m.test(wf(f)), `${f} passes no PORTAL_/START_ variable`);
+    const rpcs = (t: string) => [...new Set([...t.matchAll(/^\s+([A-Z0-9]+_RPC_URLS?): \$\{\{ vars\.([A-Z0-9_]+) \}\}/gm)].map((m) => `${m[1]}=${m[2]}`))].sort();
+    const oracle = rpcs(wf("oracle.yml"));
+    assert.deepStrictEqual(oracle, ["AVAX_RPC_URL=AVAX_RPC_URL", "BASE_RPC_URL=BASE_RPC_URL", "BSC_RPC_URL=BSC_RPC_URL", "OP_RPC_URL=OP_RPC_URL", "POLYGON_RPC_URL=POLYGON_RPC_URL", "X1_RPC_URL=X1_RPC_URL", "X1_RPC_URLS=X1_RPC_URLS"]);
+    assert.deepStrictEqual(rpcs(wf("keeper.yml")), oracle);
     assert(wf("keeper.yml").includes("frontend/dist/feed/week-so-far.json"));
     assert(wf("keeper.yml").includes("npm run --silent feed -- --gate-only"));
   });
