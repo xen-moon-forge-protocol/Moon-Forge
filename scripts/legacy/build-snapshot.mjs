@@ -16,8 +16,10 @@
  * block: no burn can be missed) are found by binary search on block timestamps (block headers only, no archive state;
  * --from overrides the start, for instance with the exact deploy block). When the RPC serves historical state, the XEN
  * contract must have no code at fromBlock − 1 and code at the cutoff block. The logs are read in chunks the RPC accepts
- * (the oracle's strategy: a range the provider refuses is halved down to 50 blocks, a failing chunk is retried with a
- * backoff, then read from the next RPC, every chunk already read is kept), growing again after quiet chunks.
+ * (the oracle's strategy: a range the provider refuses is halved down to 50 blocks, a range that times out is halved and
+ * read from the next RPC, a failing chunk is retried with a backoff, then read from the next RPC, every chunk already
+ * read is kept), growing again after quiet chunks. An RPC that does not answer eth_chainId at the start is left out; a
+ * block header a node does not serve (null) is asked of the next RPC.
  *
  * The merged file is deterministic: { cutoff, chains: [{ chainId, xen, fromBlock, toBlock, events, addresses }],
  * addresses: [lowercase, ascending, unique], sha256 }, where sha256 is the sha256 of the canonical JSON (keys sorted,
@@ -33,14 +35,20 @@ export const TRANSFER_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11
 export const ZERO_TOPIC = '0x' + '0'.repeat(64);
 const ZERO_ADDRESS = '0x' + '0'.repeat(40);
 
-/** The source chains (oracle/src/legacy.ts LEGACY_SOURCES; the five XEN addresses are oracle/src/config.ts's). */
+/**
+ * The source chains (oracle/src/legacy.ts LEGACY_SOURCES; the five XEN addresses are oracle/src/config.ts's). The RPC
+ * lists are keyless public endpoints only (never one that needs an API key or an account): the oracle's lists
+ * (oracle/src/config.ts, without its keyed BSC endpoint) plus other well-known keyless gateways. An endpoint that does
+ * not answer at the start is skipped; one that fails later is failed over chunk by chunk. polygon-rpc.com (now keyed),
+ * eth.llamarpc.com (a browser challenge) and bsc-dataseed (no eth_getLogs) were dropped.
+ */
 export const SOURCES = Object.freeze([
-  { chainId: 1, name: 'Ethereum', xen: '0x06450dee7fd2fb8e39061434babcfc05599a6fb8', chunk: 2_000, rpcs: ['https://eth.drpc.org', 'https://ethereum-rpc.publicnode.com', 'https://eth.llamarpc.com', 'https://1rpc.io/eth'] },
-  { chainId: 10, name: 'Optimism', xen: '0xeb585163debb1e637c6d617de3bef99347cd75c8', chunk: 10_000, rpcs: ['https://mainnet.optimism.io', 'https://optimism.gateway.tenderly.co', 'https://optimism-rpc.publicnode.com'] },
-  { chainId: 56, name: 'BSC', xen: '0x2ab0e9e4ee70fff1fb9d67031e44f6410170d00e', chunk: 5_000, rpcs: ['https://bsc.rpc.blxrbdn.com', 'https://bsc-rpc.publicnode.com', 'https://bsc-dataseed.bnbchain.org'] },
-  { chainId: 137, name: 'Polygon', xen: '0x2ab0e9e4ee70fff1fb9d67031e44f6410170d00e', chunk: 3_000, rpcs: ['https://polygon.gateway.tenderly.co', 'https://polygon-bor-rpc.publicnode.com', 'https://polygon-rpc.com'] },
-  { chainId: 8453, name: 'Base', xen: '0xffcbf84650ce02dafe96926b37a0ac5e34932fa5', chunk: 1_000, rpcs: ['https://base.gateway.tenderly.co', 'https://mainnet.base.org', 'https://base-rpc.publicnode.com'] },
-  { chainId: 43114, name: 'Avalanche', xen: '0xc0c5aa69dbe4d6dddfbc89c0957686ec60f24389', chunk: 2_000, rpcs: ['https://api.avax.network/ext/bc/C/rpc', 'https://avalanche-c-chain-rpc.publicnode.com'] },
+  { chainId: 1, name: 'Ethereum', xen: '0x06450dee7fd2fb8e39061434babcfc05599a6fb8', chunk: 2_000, rpcs: ['https://ethereum-rpc.publicnode.com', 'https://mainnet.gateway.tenderly.co', 'https://eth.drpc.org', 'https://eth.meowrpc.com', 'https://1rpc.io/eth'] },
+  { chainId: 10, name: 'Optimism', xen: '0xeb585163debb1e637c6d617de3bef99347cd75c8', chunk: 10_000, rpcs: ['https://mainnet.optimism.io', 'https://optimism.gateway.tenderly.co', 'https://optimism-rpc.publicnode.com', 'https://optimism.drpc.org'] },
+  { chainId: 56, name: 'BSC', xen: '0x2ab0e9e4ee70fff1fb9d67031e44f6410170d00e', chunk: 5_000, rpcs: ['https://bsc-rpc.publicnode.com', 'https://bsc.rpc.blxrbdn.com', 'https://bsc.drpc.org', 'https://bsc.meowrpc.com', 'https://1rpc.io/bnb'] },
+  { chainId: 137, name: 'Polygon', xen: '0x2ab0e9e4ee70fff1fb9d67031e44f6410170d00e', chunk: 3_000, rpcs: ['https://polygon-bor-rpc.publicnode.com', 'https://polygon.gateway.tenderly.co', 'https://polygon.drpc.org', 'https://1rpc.io/matic'] },
+  { chainId: 8453, name: 'Base', xen: '0xffcbf84650ce02dafe96926b37a0ac5e34932fa5', chunk: 1_000, rpcs: ['https://base.gateway.tenderly.co', 'https://mainnet.base.org', 'https://base-rpc.publicnode.com', 'https://base.drpc.org'] },
+  { chainId: 43114, name: 'Avalanche', xen: '0xc0c5aa69dbe4d6dddfbc89c0957686ec60f24389', chunk: 2_000, rpcs: ['https://avalanche-c-chain-rpc.publicnode.com', 'https://api.avax.network/ext/bc/C/rpc', 'https://avalanche.drpc.org', 'https://1rpc.io/avax/c'] },
 ]);
 
 const RPC_TIMEOUT_MS = Number(process.env.LEGACY_RPC_TIMEOUT_MS || 60_000);
@@ -72,12 +80,15 @@ export async function rpcCall(url, method, params) {
   }
 }
 
-/** A chain's RPC list: every call tries each RPC (3 tries with a backoff), for up to `rounds` rounds of the list. */
+/**
+ * A chain's RPC list: every call tries each RPC (3 tries with a backoff), for up to `rounds` rounds of the list. An
+ * answer `accept` refuses (a null block from a lagging or pruned node) counts as a failure of that RPC.
+ */
 export function client(rpcs, { tries = 3, rounds = 4, backoffMs = 1_000 } = {}) {
   let first = 0;
   return {
     rpcs,
-    async call(method, params) {
+    async call(method, params, accept = () => true) {
       const errors = [];
       for (let round = 0; round < rounds; round++) {
         for (let k = 0; k < rpcs.length; k++) {
@@ -85,6 +96,7 @@ export function client(rpcs, { tries = 3, rounds = 4, backoffMs = 1_000 } = {}) 
           for (let a = 0; a < tries; a++) {
             try {
               const r = await rpcCall(rpcs[i], method, params);
+              if (!accept(r)) throw new Error(`unusable answer ${JSON.stringify(r)?.slice(0, 80)}`);
               first = i;
               return r;
             } catch (e) {
@@ -109,8 +121,12 @@ const host = (u) => {
 };
 
 async function timestampOf(c, n) {
-  const b = await c.call('eth_getBlockByNumber', [hex(n), false]);
-  if (!b || typeof b.timestamp !== 'string') throw new Error(`block ${n} not served`);
+  // a node that does not serve block n (behind the head, or history pruned) answers null: the next RPC is asked
+  const served = (b) => !!b && typeof b.timestamp === 'string';
+  const b = await c.call('eth_getBlockByNumber', [hex(n), false], served).catch((e) => {
+    throw new Error(`block ${n} not served by any RPC (${String(e?.message ?? e).slice(0, 300)})`);
+  });
+  if (!served(b)) throw new Error(`block ${n} not served`);
   return Number(BigInt(b.timestamp));
 }
 
@@ -142,12 +158,22 @@ async function codeAt(c, address, block) {
 export async function scanChain(o) {
   const cutoff = o.cutoff ?? CUTOFF_TS;
   const xen = o.xen.toLowerCase();
-  const c = client(o.rpcs, { tries: o.tries ?? 3, rounds: o.rounds ?? 4, backoffMs: o.backoffMs ?? 1_000 });
-  // every RPC must be the chain asked for
+  // every RPC that answers must be the chain asked for; one that does not answer (down, keyed, a browser challenge) is
+  // left out, so a single dead endpoint cannot stop the scan; at least one must remain
+  const rpcs = [];
   for (const u of o.rpcs) {
-    const id = await client([u], { tries: o.tries ?? 3, rounds: 1, backoffMs: o.backoffMs ?? 1_000 }).call('eth_chainId', []);
+    let id;
+    try {
+      id = await client([u], { tries: o.tries ?? 3, rounds: 1, backoffMs: o.backoffMs ?? 1_000 }).call('eth_chainId', []);
+    } catch (e) {
+      log(`chain ${o.chainId}: ${host(u)} left out (${String(e?.message ?? e).slice(0, 200)})`);
+      continue;
+    }
     if (Number(BigInt(id)) !== o.chainId) throw new Error(`${host(u)} serves chain ${Number(BigInt(id))}, not ${o.chainId}`);
+    rpcs.push(u);
   }
+  if (rpcs.length === 0) throw new Error(`chain ${o.chainId}: no RPC answered eth_chainId`);
+  const c = client(rpcs, { tries: o.tries ?? 3, rounds: o.rounds ?? 4, backoffMs: o.backoffMs ?? 1_000 });
   const head = Number(BigInt(await c.call('eth_blockNumber', [])));
   if ((await timestampOf(c, head)) < cutoff + 3_600) throw new Error(`chain ${o.chainId}: the head is not an hour past the cutoff yet`);
   const toBlock = (await firstBlockAtOrAfter(c, cutoff, 0, head)) - 1;
@@ -176,14 +202,15 @@ export async function scanChain(o) {
   const backoff = o.backoffMs ?? 1_000;
   // a range the provider refuses, or one it cannot answer in time, is halved (a timeout on a wide range is the same
   // signal as a refusal on a slow node)
-  const shrinkable = (msg) => isRangeError(msg) || /aborted|timeout|timed out/i.test(msg);
+  const slow = (msg) => /aborted|timeout|timed out/i.test(msg);
+  const shrinkable = (msg) => isRangeError(msg) || slow(msg);
   for (let start = fromBlock; start <= toBlock; ) {
     const end = Math.min(toBlock, start + chunk - 1);
     let logs = null;
     let last = '';
     for (let a = 0; a < tries && logs === null; a++) {
       try {
-        logs = await rpcCall(o.rpcs[rpc], 'eth_getLogs', [{ address: xen, topics: [TRANSFER_TOPIC, null, ZERO_TOPIC], fromBlock: hex(start), toBlock: hex(end) }]);
+        logs = await rpcCall(rpcs[rpc], 'eth_getLogs', [{ address: xen, topics: [TRANSFER_TOPIC, null, ZERO_TOPIC], fromBlock: hex(start), toBlock: hex(end) }]);
         if (!Array.isArray(logs)) throw new Error('eth_getLogs did not answer an array');
       } catch (e) {
         logs = null;
@@ -197,12 +224,15 @@ export async function scanChain(o) {
         ceiling = chunk - 1;
         chunk = Math.max(50, Math.floor(chunk / 2));
         quiet = 0;
-        continue; // the same start, a smaller range, the same RPC
+        // a refused range: the same start, a smaller range, the same RPC; a timeout: a smaller range on the next RPC
+        // (a slow or throttled node must not hold the whole scan at a tiny range)
+        if (slow(last) && !isRangeError(last)) rpc = (rpc + 1) % rpcs.length;
+        continue;
       }
       failed++;
-      if (failed >= o.rpcs.length * (o.rounds ?? 4)) throw new Error(`chain ${o.chainId}: logs ${start}-${end}: every RPC failed (last: ${last.slice(0, 200)})`);
-      rpc = (rpc + 1) % o.rpcs.length;
-      if (rpc === 0) await SLEEP(backoff * 10 * Math.ceil(failed / o.rpcs.length));
+      if (failed >= rpcs.length * (o.rounds ?? 4)) throw new Error(`chain ${o.chainId}: logs ${start}-${end}: every RPC failed (last: ${last.slice(0, 200)})`);
+      rpc = (rpc + 1) % rpcs.length;
+      if (rpc === 0) await SLEEP(backoff * 10 * Math.ceil(failed / rpcs.length));
       continue; // the same chunk on the next RPC; every chunk read so far is kept
     }
     failed = 0;

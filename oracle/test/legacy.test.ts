@@ -562,7 +562,9 @@ function mockServer(chains: MockChain[], o: { maxRange: number; flaky: number })
     let body = "";
     req.on("data", (d) => (body += d));
     req.on("end", () => {
-      const m = chains.find((c) => req.url === `/${c.chainId}` || req.url === `/${c.chainId}/b`);
+      const m = chains.find((c) => req.url === `/${c.chainId}` || req.url === `/${c.chainId}/b` || req.url === `/${c.chainId}/lag`);
+      // `/lag`: a node behind the head and without old history (null block headers, a refused getLogs)
+      const lag = req.url!.endsWith("/lag");
       const q = JSON.parse(body);
       const reply = (result: unknown) => res.end(JSON.stringify({ jsonrpc: "2.0", id: q.id, result }));
       const error = (code: number, message: string) => res.end(JSON.stringify({ jsonrpc: "2.0", id: q.id, error: { code, message } }));
@@ -575,11 +577,12 @@ function mockServer(chains: MockChain[], o: { maxRange: number; flaky: number })
           return reply("0x" + m.head.toString(16));
         case "eth_getBlockByNumber": {
           const n = Number(BigInt(p[0]));
-          return reply(n > m.head ? null : { number: p[0], timestamp: "0x" + m.ts(n).toString(16) });
+          return reply(n > m.head || lag ? null : { number: p[0], timestamp: "0x" + m.ts(n).toString(16) });
         }
         case "eth_getCode":
           return reply(Number(BigInt(p[1])) >= m.deploy ? "0x6080" : "0x");
         case "eth_getLogs": {
+          if (lag) return error(-32000, "history has been pruned for this block");
           calls++;
           if (o.flaky && calls % o.flaky === 0 && !req.url!.endsWith("/b")) {
             res.statusCode = 429;
@@ -656,6 +659,16 @@ testAsync("the snapshot script: every source chain scanned from the time bound t
     const wrong = await run(["scan", "--chain", "10", "--out", path.join(dir, "x.json"), "--rpc", `${srv.url}/56`, "--backoff-ms", "1"]);
     assert.notStrictEqual(wrong.code, 0);
     assert.match(wrong.err, /serves chain 56, not 10/);
+    // a dead endpoint is left out at the start, a lagging/pruned node is failed over (headers and logs): same result
+    const c10 = chains[1];
+    const dead = "http://127.0.0.1:9/dead";
+    const fo = await run(["scan", "--chain", "10", "--out", path.join(dir, "fo.json"), "--rpc", `${dead},${srv.url}/10/lag,${srv.url}/10/b`, "--chunk", "1000", "--backoff-ms", "1"]);
+    assert.strictEqual(fo.code, 0, `failover scan: ${fo.err}`);
+    assert.match(fo.err, /127\.0\.0\.1:9 left out/);
+    assert.deepStrictEqual(JSON.parse(fs.readFileSync(path.join(dir, "fo.json"), "utf8")), JSON.parse(fs.readFileSync(path.join(dir, `r0-part-${c10.chainId}.json`), "utf8")), "the same part with a dead and a lagging RPC in the list");
+    const none = await run(["scan", "--chain", "10", "--out", path.join(dir, "n.json"), "--rpc", dead, "--backoff-ms", "1"]);
+    assert.notStrictEqual(none.code, 0);
+    assert.match(none.err, /no RPC answered eth_chainId/);
     const short = await run(["merge", "--out", path.join(dir, "y.json"), ...chains.slice(1).map((c) => path.join(dir, `r0-part-${c.chainId}.json`))]);
     assert.notStrictEqual(short.code, 0);
     assert.match(short.err, /chain 1 \(Ethereum\) is missing/);

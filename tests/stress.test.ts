@@ -444,7 +444,9 @@ async function claimRound() {
     } else {
       const xe = await acc.extraEpoch.fetch(P.extraEpoch(cl.n));
       if (xe.closed) { epochs.skipped++; continue; }
-      const ok = await attempt("claim-extra", ["ClaimOnHold"], () => methods.claimExtra(BN(cl.n), cl.i, BN(cl.s), cl.proof).accountsPartial({
+      // ExtraClaimWindow: on localnet the window is 90 s, so a claim queued during a long round can arrive after it ended
+      // and is rightly refused (re-gate 2026-11-02, run l2): the same outcome as an epoch already closed
+      const ok = await attempt("claim-extra", ["ClaimOnHold", "ExtraClaimWindow"], () => methods.claimExtra(BN(cl.n), cl.i, BN(cl.s), cl.proof).accountsPartial({
         config: P.config, extraState: P.extraState, extraEpoch: P.extraEpoch(cl.n), extraVault: P.extraVault, wallet: cl.p, payer: submitter.publicKey, systemProgram: SYS,
       }).signers(submitter === payer ? [] : [submitter]).rpc());
       if (ok) { ledger.accounted -= cl.s; epochs.claimed++; }
