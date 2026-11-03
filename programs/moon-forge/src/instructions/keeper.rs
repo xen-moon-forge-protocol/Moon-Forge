@@ -3,7 +3,8 @@
 //! At placement the program fixes the anchor block (slot + 1), whose producer does not know the keeper's preimage.
 //! Within 512 slots anyone mixes that block's hash into the bet (anchor_bet). Afterwards the keeper reveals the next
 //! preimage of its committed chain; roll = random_u64(reveal, bet, mixed seed) % 10_000 (utils.rs, frozen).
-//!   arm_keeper        : the keeper commits a chain head (tip) with a bond (>= 20 XNT); only with nothing pending
+//!   arm_keeper        : the keeper commits a chain head (tip) with a bond (>= 20 XNT); only with nothing pending. The
+//!                       first arm creates the seat: INITIAL_KEEPER only before KEEPER_OPEN_TS, any signer from then on
 //!   place_bet_v2      : a house bet, given the next chain position; the bond must cover every pending payout
 //!   anchor_bet        : PERMISSIONLESS: mixes the anchor block's hash into the bet's seed
 //!   settle_bet_v2     : the next preimage, in chain order; PERMISSIONLESS for whoever holds it (a leaked reveal can
@@ -91,7 +92,9 @@ pub fn bet_net_loss(won: bool, stake_in: u64, payout: u64) -> i64 {
 /// Why a v2 bet is refundable (BetRefunded.reason), or None if it is not stalled.
 /// 1 = the keeper skipped its position (index < revealed), or it was anchored and not revealed by
 ///     anchor + KEEPER_STALL_SLOTS: only the keeper could have revealed it and it knew the outcome, so it is a WIN;
-/// 0 = never anchored and its anchor block left SlotHashes (anyone could have anchored it): a refund.
+/// 0 = never anchored and its anchor block left SlotHashes (anyone could have anchored it): a refund. SlotHashes reads
+///     carry the r9 time fallback (utils.rs age_limited): past SLOT_HASH_MAX_AGE the anchor counts as gone even if the
+///     sysvar stopped answering for it.
 pub fn stall_reason(anchored: bool, index: u64, anchor: u64, revealed: u64, slot: u64, anchor_expired: bool) -> Option<u8> {
     if index < revealed || (anchored && slot > anchor.saturating_add(KEEPER_STALL_SLOTS)) {
         Some(1)
@@ -179,6 +182,17 @@ pub fn take_keeper_gate(k: &HouseKeeper, taker: &Pubkey, now: i64) -> Result<u8>
     }
 }
 
+/// Who becomes the keeper when arm_keeper creates the seat (r9 dated opening): INITIAL_KEEPER before KEEPER_OPEN_TS,
+/// the signer from then on (the seat was never armed: anyone may start it with its own chain and bond, the same trust
+/// as take_keeper by anyone after KEEPER_DEAD_DELAY). An existing seat is never affected.
+pub fn first_keeper(signer: Pubkey, now: i64) -> Pubkey {
+    if now >= KEEPER_OPEN_TS {
+        signer
+    } else {
+        INITIAL_KEEPER
+    }
+}
+
 /// The keeper seat's bond as lamports above its rent.
 fn pay_from_seat(seat: &AccountInfo, to: &AccountInfo, amount: u64) -> Result<()> {
     move_lamports(seat, to, amount)
@@ -205,7 +219,8 @@ pub struct HouseKeeperOnly<'info> {
     pub system_program: Program<'info, System>,
 }
 
-/// Same accounts as HouseKeeperOnly; the seat is created on the first arm (its keeper is then INITIAL_KEEPER).
+/// Same accounts as HouseKeeperOnly; the seat is created on the first arm (its keeper is then INITIAL_KEEPER, or from
+/// KEEPER_OPEN_TS whoever signs that first arm: first_keeper).
 #[derive(Accounts)]
 pub struct ArmKeeper<'info> {
     #[account(mut, seeds = [SEED_CONFIG], bump = config.bump)]
@@ -235,7 +250,7 @@ pub fn arm_keeper(ctx: Context<ArmKeeper>, tip: [u8; 32], length: u64, deposit: 
     {
         let k = &mut ctx.accounts.keeper_seat;
         if k.keeper == Pubkey::default() {
-            k.keeper = INITIAL_KEEPER;
+            k.keeper = first_keeper(signer, clock.unix_timestamp);
             k.bump = ctx.bumps.keeper_seat;
         }
         require_keys_eq!(signer, k.keeper, ForgeError::OnlyKeeper);
@@ -1365,6 +1380,30 @@ mod keeper_tests {
         assert_eq!(take_keeper_gate(&k, &stranger, 1_000 + KEEPER_DEAD_DELAY).unwrap(), 1);
         k.pending_keeper = Pubkey::default(); // cancelled: the default key is never a successor
         assert_eq!(code(take_keeper_gate(&k, &Pubkey::default(), 2_000 + KEEPER_NOTICE)), Some(ForgeError::KeeperAlive as u32));
+    }
+
+    /// r9 dated opening: the first arm creates the seat for INITIAL_KEEPER only, up to the second before KEEPER_OPEN_TS
+    /// (2026-12-16 00:00:00 UTC = the 2026-11-18 upgrade window + 28 days); from KEEPER_OPEN_TS for whoever signs it.
+    /// arm_keeper then requires signer == keeper, so before the date a stranger's first arm fails exactly as before.
+    #[test]
+    fn keeper_seat_opens_to_anyone_on_the_date() {
+        #[cfg(not(feature = "localnet"))]
+        {
+            assert_eq!(KEEPER_OPEN_TS, 1_797_379_200);
+            assert_eq!(KEEPER_OPEN_TS, PRICE_LAUNCH_TS + 21 * 86_400); // PRICE_LAUNCH_TS (2026-11-25) + 21 days
+            assert_eq!(KEEPER_OPEN_TS, 1_794_960_000 + KEEPER_DEAD_DELAY); // 2026-11-18 00:00 UTC + 28 days
+        }
+        let stranger = Pubkey::new_unique();
+        for now in [i64::MIN, 0, 1_793_000_000, KEEPER_OPEN_TS - 1] {
+            if now < KEEPER_OPEN_TS {
+                assert_eq!(first_keeper(stranger, now), INITIAL_KEEPER, "before the date: {now}");
+                assert_eq!(first_keeper(INITIAL_KEEPER, now), INITIAL_KEEPER);
+            }
+        }
+        for now in [KEEPER_OPEN_TS, KEEPER_OPEN_TS + 1, i64::MAX] {
+            assert_eq!(first_keeper(stranger, now), stranger, "from the date: {now}");
+            assert_eq!(first_keeper(INITIAL_KEEPER, now), INITIAL_KEEPER, "INITIAL_KEEPER may still create it");
+        }
     }
 
     #[test]

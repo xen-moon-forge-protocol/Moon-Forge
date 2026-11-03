@@ -25,10 +25,10 @@ signed. It holds no secret: keypair files are named by path, and only public key
 | Upgrade authority and IDL authority before S6 | `7PuG8ELKXzvZqVLawFnmjDJqq4KEyRhssKQEq7aQM6Qd` (the deploy wallet, also today's architect payee) | S5 |
 | On-chain IDL account | `CCt3yKzEbfZ1tV9cBVqsryGGSXGojMCtJZhYKHRfxszP`, 16,258 B (16,214 B usable) | measured 2026-10-23 |
 | OD-32 DEPLOY_KEY (new upgrade + IDL authority from S6 to S9), public key | ____ | S0 |
-| OD-25 INITIAL_KEEPER, public key (K-4 default of 2026-10-25: today's keeper key, the one in the `KEEPER_PRIVATE_KEY` repository secret; never the oracle, deploy, cold or payee key; a new key only if the S0 decision sheet records one). It is compiled into the S2 binary and stays the only key that can ever create the keeper seat, so it is named at S0 even though it is **not armed at S7** (F1-b, owner answer of 2026-10-25): no keeper bond is posted, because while no keeper runs anyone could place house bets that nobody anchors, have each refunded in full and make the bond pay the edge and forfeit the stake, so a posted bond could be drained at no cost. The seat is armed later, by `s7.mjs --arm-keeper` (section 5, "Later"), only once a keeper has run continuously with this key for at least 24 hours, as an always-on loop outside GitHub Actions (SPEC 9.5); house games and the Jackpot stay hidden on the site until that keeper has met the published service levels for a week (D-39). keeper.yml keeps running with this key without a seat (role "no-seat"), so the R-1 hand-over risk of a seat held by keeper.yml does not arise | ____ | S0 |
-| OD-16 SEAT_COLD_INITIAL (cold key, generated on the project computer, kept in an encrypted folder there), public key | ____ | S0 |
+| OD-25 INITIAL_KEEPER, public key (K-4 default of 2026-10-25: today's keeper key, the one in the `KEEPER_PRIVATE_KEY` repository secret; never the oracle, deploy, cold or payee key; a new key only if the S0 decision sheet records one). It is compiled into the S2 binary and is the only key that can create the keeper seat until 2026-12-16 00:00 UTC (from then anyone with a bond of at least 20 XNT may create a never-armed seat), so it is named at S0 even though it is **not armed at S7** (F1-b, owner answer of 2026-10-25): no keeper bond is posted, because while no keeper runs anyone could place house bets that nobody anchors, have each refunded in full and make the bond pay the edge and forfeit the stake, so a posted bond could be drained at no cost. The seat is armed later, by `s7.mjs --arm-keeper` (section 5, "Later"), only once a keeper has run continuously with this key for at least 24 hours, as an always-on loop outside GitHub Actions (SPEC 9.5); house games and the Jackpot stay hidden on the site until that keeper has met the published service levels for a week (D-39). keeper.yml keeps running with this key without a seat (role "no-seat"), so the R-1 hand-over risk of a seat held by keeper.yml does not arise | ____ | S0 |
+| OD-16 SEAT_COLD_INITIAL (cold key, kept offline), public key | ____ | S0 |
 | OD-20 SEAT_REFUND_INITIAL, public key | ____ | S0 |
-| OD-22 architect payee (generated on the project computer, kept in an encrypted folder there), public key | ____ | S0 |
+| OD-22 architect payee (kept offline), public key | ____ | S0 |
 
 ## 2. The binary and the IDL
 
@@ -126,7 +126,7 @@ SO=target/deploy/moon_forge.so               # the S2 binary, built from the S2 
 S2_SHA=____                                  # section 2
 NEW=$(stat -c %s "$SO")                      # must equal section 2
 DEPLOY_KEY=____                              # OD-32 public key (section 1)
-DEPLOY_KEY_FILE=____                         # a copy of the deploy key file in RAM only (/dev/shm in WSL), made from its encrypted folder for steps 9-10; never on a disk
+DEPLOY_KEY_FILE=____                         # a copy of the deploy key file in RAM only (/dev/shm in WSL), made from its offline copy for steps 9-10; never on a disk
 ```
 
 | # | Command | Check before the step | Check after the step |
@@ -152,7 +152,7 @@ OD-22 key of section 1), `init_seat`, `init_extra` before any forge is announced
 `arm_keeper` and no `take_keeper`: the house keeper is not armed at S7 and no keeper bond is posted**, F1-b, owner answer
 of 2026-10-25). **S7 needs two signatures:** `set_architect` is signed by the deploy
 wallet 7PuG8… and the new OD-22 payee together, and `lock_collection_royalties` by the OD-22 payee; the payee key file is
-copied from its encrypted folder for these two transactions only. The S7 mainnet client is `scripts/upgrade/s7.mjs`:
+copied from its offline copy for these two transactions only. The S7 mainnet client is `scripts/upgrade/s7.mjs`:
 SPEC 6.3 steps 3-7, one transaction each (`refresh_collection_uri`; `set_architect`; `lock_collection_royalties`, which
 also tops the payee up to 0.001 XNT from the deploy wallet, because Metaplex Core charges the collection's rent
 difference to the payee; `init_seat`; `init_extra`, whose transaction and block time it prints as the OD-9 boundary),

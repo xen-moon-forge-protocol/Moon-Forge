@@ -10,7 +10,7 @@
 //   the IDL on chain equals the final IDL file (if the docs changed, run `anchor idl upgrade` first: the command is printed);
 //   the S7 accounts exist (OracleSeat, ExtraState) and Config.architect is the pinned payee. The HouseKeeper is only
 //   reported: under F1-b it is not armed at S7, and the freeze does not change who can arm it later (arm_keeper needs
-//   no upgrade authority; INITIAL_KEEPER stays the only key that can create the seat).
+//   no upgrade authority; INITIAL_KEEPER is the only key that can create the seat until 2026-12-16 00:00 UTC, anyone with a bond of at least 20 XNT from then).
 // DRY RUN by default (the freeze transaction is simulated without signatures). --send signs with the DEPLOY_KEY file;
 // on X1 mainnet it also needs --mainnet. Then the health pins move to "none" / erased (--pins, written only after a
 // verified freeze). Exit 0 = green / frozen, 1 = a check failed, 2 = usage, 3 = refused.
@@ -99,7 +99,7 @@ async function main() {
   const dec = makeDecoder(loadIdl(IDL_V3_FILE));
   const [seat, extra, keeper] = await conn.getMultipleAccountsInfo([P.oracleSeat, P.extraState, P.houseKeeper], 'confirmed');
   G.check(!!seat && !!extra, 'S7 accounts', 'OracleSeat and ExtraState exist', `missing: ${[!seat && 'OracleSeat', !extra && 'ExtraState'].filter(Boolean).join(', ')}`);
-  G.info('HouseKeeper', keeper ? 'exists (armed by INITIAL_KEEPER after S7)' : 'absent: not armed (F1-b); after the freeze only INITIAL_KEEPER can still create it (arm_keeper needs no upgrade authority)');
+  G.info('HouseKeeper', keeper ? 'exists (armed by INITIAL_KEEPER after S7)' : 'absent: not armed (F1-b); INITIAL_KEEPER can create it until 2026-12-16 00:00 UTC and anyone with a bond of at least 20 XNT from then (KEEPER_OPEN_TS; arm_keeper needs no upgrade authority)');
   const cfg = (await fetchDecoded(conn, dec, P.config))?.value;
   const pins = readPinsFile(args.pins || PINS_FILE).json;
   if (cfg && pins.architect) G.check(cfg.architect.toBase58() === pins.architect, 'Config.architect = the pinned payee', cfg.architect.toBase58(), `${cfg.architect.toBase58()}, pinned ${pins.architect}`);

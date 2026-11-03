@@ -70,7 +70,7 @@ fn vectors_match_the_clients() {
     // market split of a 10 XNT sale
     let (r, p, s) = market_split(10 * XNT).unwrap();
     assert_eq!(vec![r, p, s], list("market_split_10xnt"));
-    // PX (mainnet constants: PRICE_LAUNCH_TS 1,795,478,400, periods 1/3/7/14 days)
+    // PX (mainnet constants: PRICE_LAUNCH_TS 1,795,564,800, periods 1/3/7/14 days)
     let never = config([0; 4], [0; 4], [0; 4]);
     assert_eq!(current_price(&never, 0, PRICE_LAUNCH_TS), n("px_lunar_never_forged_at_launch"));
     assert_eq!(current_price(&never, 0, PRICE_LAUNCH_TS + DAY), n("px_lunar_never_forged_plus_1d"));

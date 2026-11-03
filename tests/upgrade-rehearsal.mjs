@@ -621,9 +621,16 @@ if (MODE === 'b') await step('expire A3', () => expireCheck(3));
 await step('close_receipt', async () => {
   const rc = P.receipt(1, bob.publicKey, 0);
   const r = await B.account.claimReceipt.fetch(rc);
-  const p0 = await bal(r.rentPayer);
-  await B.methods.closeReceipt().accountsPartial({ epoch: P.epoch(1), receipt: rc, rentPayer: r.rentPayer }).rpc();
-  check((await bal(r.rentPayer)) > p0, 'close_receipt of the Phase-A claim receipt returns the rent');
+  const rent = BigInt((await conn.getAccountInfo(rc, 'confirmed')).lamports);
+  const p0 = BigInt(await bal(r.rentPayer));
+  // an explicit compute-unit limit, as every real client must send it: X1 charges about 10 lamports per REQUESTED
+  // unit, so the 200,000-unit default (2,000,000 lamports) would cost more than this receipt's rent (~1,517,280)
+  const sig = await B.methods.closeReceipt().accountsPartial({ epoch: P.epoch(1), receipt: rc, rentPayer: r.rentPayer })
+    .preInstructions([ComputeBudgetProgram.setComputeUnitLimit({ units: 20_000 })]).rpc();
+  const fee = BigInt((await txOf(sig)).meta.fee);
+  const p1 = BigInt(await bal(r.rentPayer));
+  // the rent payer is also the fee payer here: it gets the whole rent back, minus this transaction's fee
+  check(p1 - p0 + fee === rent && p1 > p0, `close_receipt of the Phase-A claim receipt returns the rent (${rent} lamports back, fee ${fee}, net +${p1 - p0})`);
 });
 // STARTING war left > 512 slots: a draw with a full refund (no re-roll, unlike the old binary)
 await step('expired STARTING war', async () => {

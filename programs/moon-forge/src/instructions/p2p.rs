@@ -286,7 +286,9 @@ pub struct SettleJackpotV2<'info> {
 /// ticket = random_u64(keccak("MOONFORGE_JACKPOT_V2" ‖ hash(anchor) ‖ reveal), round, id) % total. If nobody
 /// settled before the anchor block left SlotHashes (~3 min), every entry is refunded and the keeper bond pays
 /// min(bond, pot) to the pool (any entry can be passed). That expiry needs no reveal and no chain order, so a dead
-/// keeper never strands a round (and never blocks take_keeper); the reserved position is skipped later.
+/// keeper never strands a round (and never blocks take_keeper); the reserved position is skipped later. The r9 time
+/// fallback of the SlotHashes read (utils.rs age_limited) makes the round expire once SLOT_HASH_MAX_AGE slots have
+/// passed since its anchor even if SlotHashes stopped answering for it.
 pub fn settle_jackpot_v2(ctx: Context<SettleJackpotV2>, reveal: [u8; 32]) -> Result<()> {
     let now = Clock::get()?.unix_timestamp;
     let round_key = ctx.accounts.round.key();

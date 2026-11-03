@@ -37,7 +37,7 @@ out.market_split_10xnt = msplit(10n * XNT).join(",");
 // 7. PX: per tier base, PRICE_UP num/den, decay period, min bps, cap 10x base, PRICE_MAX_STEPS 180
 const BASE = [10n, 25n, 60n, 200n].map((x) => x * XNT), NUM = [51n, 21n, 21n, 21n], DEN = [50n, 20n, 20n, 20n];
 const PERIOD = [1n, 3n, 7n, 14n].map((d) => d * DAY), MINB = [3000n, 5000n, 5000n, 5000n], MAX_STEPS = 180n;
-const LAUNCH = 1_795_478_400n; // mainnet PRICE_LAUNCH_TS (2026-11-24 00:00 UTC)
+const LAUNCH = 1_795_564_800n; // mainnet PRICE_LAUNCH_TS (2026-11-25 00:00 UTC)
 const minOf = (t) => (BASE[t] * MINB[t]) / BPS;
 // currentPrice(price (0 = never forged), price_ts, alive_full, tier, now)
 const currentPrice = (price, ts, full, t, now) => {

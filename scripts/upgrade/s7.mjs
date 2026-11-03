@@ -61,7 +61,7 @@ const USAGE = `usage: node scripts/upgrade/s7.mjs --payee <pubkey> [options]   (
   --payee <pubkey>               OD-22 architect payee (sign-off section 1)
   --payee-key <file>             its key file, from its encrypted folder (set-architect, lock-royalties)
   --keeper <pubkey>              OD-25 INITIAL_KEEPER (sign-off section 1): at S7 only checked (compiled into the deployed
-                                 binary, distinct from the other keys); it stays the only key that can ever create the seat
+                                 binary, distinct from the other keys); the only key that can create the seat before 2026-12-16
   --seat-cold <pubkey>           OD-16 SEAT_COLD_INITIAL: checked in the deployed ELF before init_seat, and in the seat after
   --seat-refund <pubkey>         OD-20 SEAT_REFUND_INITIAL: checked in the seat after init_seat
   --metadata-base <uri>          METADATA_BASE_URI of the S2 build: refresh-uri is skipped when the collection already has it
@@ -178,9 +178,9 @@ async function main() {
   }
   if (payee.equals(PublicKey.default)) G.fail('payee', 'the default key');
   if (so) {
-    // at S7 too: under F1-b this key stays the only one that can ever create the keeper seat, so the sheet must name it
-    if (keeper) G.check(keyChunks(so, keeper) === 4, 'INITIAL_KEEPER compiled in', `${keeper.toBase58()} is in the deployed ELF${later ? '' : ' (kept for the later arm; the only key that can create the seat)'}`, `${keeper.toBase58()} is not the deployed binary's INITIAL_KEEPER: ${later ? 'arm_keeper would fail (OnlyKeeper)' : 'the sheet names another key than the one that can ever create the keeper seat'}`);
-    else if (!later) G.warn('INITIAL_KEEPER', 'give --keeper to check that the key the owner keeps is the one compiled in (the only key that can ever create the keeper seat)');
+    // at S7 too: under F1-b this key is the only one that can create the keeper seat before 2026-12-16, so the sheet must name it
+    if (keeper) G.check(keyChunks(so, keeper) === 4, 'INITIAL_KEEPER compiled in', `${keeper.toBase58()} is in the deployed ELF${later ? '' : ' (kept for the later arm; the only key that can create the seat until 2026-12-16 00:00 UTC, KEEPER_OPEN_TS)'}`, `${keeper.toBase58()} is not the deployed binary's INITIAL_KEEPER: ${later ? 'arm_keeper would fail (OnlyKeeper)' : 'the sheet names another key than the one that can create the keeper seat before 2026-12-16'}`);
+    else if (!later) G.warn('INITIAL_KEEPER', 'give --keeper to check that the key the owner keeps is the one compiled in (the only key that can create the keeper seat before 2026-12-16 00:00 UTC)');
     if (seatCold) G.check(keyChunks(so, seatCold) === 4, 'SEAT_COLD_INITIAL compiled in', `${seatCold.toBase58()} is in the deployed ELF`, `${seatCold.toBase58()} is not in the deployed ELF: init_seat would write another cold key`);
   }
   const sims = await stepOneSimulations(conn, v3, dec, cfg0);
@@ -191,7 +191,7 @@ async function main() {
   } else G.warn('create_war / place_bet simulations', 'no PlayerState on chain');
   const kNow = (await fetchDecoded(conn, dec, P.houseKeeper))?.value;
   if (!later) {
-    // F1-b: no seat at S7; a seat that exists already was armed outside this plan (only INITIAL_KEEPER can create it)
+    // F1-b: no seat at S7; a seat that exists already was armed outside this plan (only INITIAL_KEEPER can create it before 2026-12-16 00:00 UTC)
     if (kNow) G.warn('HouseKeeper (F1-b: not armed at S7)', `exists already: keeper ${kNow.keeper.toBase58()}, bond ${xnt(kNow.bond)}; this run leaves it alone`);
     else G.ok('HouseKeeper (F1-b: not armed at S7)', 'absent: the program takes no house bets and a Jackpot draw refunds every entry, so no bond is exposed');
   } else {

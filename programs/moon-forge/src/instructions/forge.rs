@@ -76,15 +76,20 @@ pub struct Donate<'info> {
     pub system_program: Program<'info, System>,
 }
 
+/// The vault (seed, bump) a donation goes to: the reward pool or the bankroll. r9: DONATE_DRAW is refused with
+/// LotteryRetired: the Burn Lottery is retired and its prize vault can never pay again, so no XNT is locked there.
+pub fn donate_vault(target: u8, bumps: &[u8; 5]) -> Result<(&'static [u8], u8)> {
+    match target {
+        DONATE_REWARD => Ok((SEED_REWARD_VAULT, bumps[0])),
+        DONATE_BANKROLL => Ok((SEED_BANKROLL_VAULT, bumps[1])),
+        DONATE_DRAW => err!(ForgeError::LotteryRetired),
+        _ => err!(ForgeError::InvalidTarget),
+    }
+}
+
 pub fn donate(ctx: Context<Donate>, target: u8, amount: u64) -> Result<()> {
     require!(amount > 0, ForgeError::AmountTooSmall);
-    let c = &ctx.accounts.config;
-    let (seed, bump): (&[u8], u8) = match target {
-        DONATE_REWARD => (SEED_REWARD_VAULT, c.bumps[0]),
-        DONATE_BANKROLL => (SEED_BANKROLL_VAULT, c.bumps[1]),
-        DONATE_DRAW => (SEED_DRAW_VAULT, c.bumps[2]),
-        _ => return err!(ForgeError::InvalidTarget),
-    };
+    let (seed, bump) = donate_vault(target, &ctx.accounts.config.bumps)?;
     let expected = Pubkey::create_program_address(&[seed, &[bump]], ctx.program_id)
         .map_err(|_| error!(ForgeError::InvalidTarget))?;
     require_keys_eq!(expected, ctx.accounts.vault.key(), ForgeError::InvalidTarget);
@@ -100,7 +105,7 @@ pub fn donate(ctx: Context<Donate>, target: u8, amount: u64) -> Result<()> {
     match target {
         DONATE_REWARD => s.donated_reward = s.donated_reward.saturating_add(amount),
         DONATE_BANKROLL => s.donated_bankroll = s.donated_bankroll.saturating_add(amount),
-        _ => s.donated_draw = s.donated_draw.saturating_add(amount),
+        _ => s.donated_draw = s.donated_draw.saturating_add(amount), // not reached since r9 (donate_vault refuses it)
     }
     emit!(Donated { donor: ctx.accounts.donor.key(), target, amount });
     Ok(())
@@ -823,6 +828,25 @@ mod forge_v3_tests {
             assert_eq!(grant_claim_chips(&mut ps, amount), 0);
         }
         assert_eq!(ps.chips, 7, "legacy chips are left as they were, never increased");
+    }
+
+    /// r9: donations go to the reward pool or the bankroll; the retired Burn Lottery's prize vault (target 2) is refused
+    /// with LotteryRetired (6100, an existing code), any other target with InvalidTarget, as before.
+    #[test]
+    fn donate_refuses_the_retired_lottery() {
+        use anchor_lang::error::ERROR_CODE_OFFSET;
+        let code = |r: Result<(&'static [u8], u8)>| match r {
+            Err(Error::AnchorError(e)) => Some(e.error_code_number - ERROR_CODE_OFFSET),
+            _ => None,
+        };
+        let bumps = [11u8, 12, 13, 14, 15];
+        assert_eq!(donate_vault(DONATE_REWARD, &bumps).unwrap(), (SEED_REWARD_VAULT, 11));
+        assert_eq!(donate_vault(DONATE_BANKROLL, &bumps).unwrap(), (SEED_BANKROLL_VAULT, 12));
+        assert_eq!(code(donate_vault(DONATE_DRAW, &bumps)), Some(ForgeError::LotteryRetired as u32));
+        assert_eq!(ForgeError::LotteryRetired as u32 + ERROR_CODE_OFFSET, 6100);
+        for t in [3u8, 4, 255] {
+            assert_eq!(code(donate_vault(t, &bumps)), Some(ForgeError::InvalidTarget as u32), "target {t}");
+        }
     }
 
     fn proof_for_single_leaf(e: &Epoch, player: &Pubkey, tier: u8, score: u64) -> (Epoch, Vec<[u8; 32]>) {

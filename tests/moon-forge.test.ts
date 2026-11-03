@@ -355,11 +355,36 @@ describe("Moon Forge v3", () => {
     await expectErr(ie().rpc(), "already in use");
     expect((await connection.getAccountInfo(P.extraVault))!.owner.toBase58()).to.equal(pid.toBase58());
 
-    // arm_keeper: only INITIAL_KEEPER, bond >= 20 XNT
+    // arm_keeper: the first arm creates the seat, bond >= 20 XNT. r9 dated opening: from KEEPER_OPEN_TS (2026-12-16
+    // 00:00 UTC on mainnet; 0 in this localnet build, a wall-clock validator cannot reach a real date) a seat that was
+    // never armed may be created by ANY signer, with its own chain and bond, every other check unchanged; before that
+    // date only INITIAL_KEEPER (unit test keeper_seat_opens_to_anyone_on_the_date). An existing seat is never affected.
     newChain(64);
-    await expectErr(armB(stranger, chain.tip, 64, 20 * XNT).rpc(), "OnlyKeeper");
+    const openChain = new KeeperChain(keccak(Buffer.from("r9-open-seat"), stranger.publicKey.toBuffer()), 16);
+    await expectErr(armB(stranger, openChain.tip, 16, 19 * XNT).rpc(), "KeeperBondTooSmall");
+    await expectErr(armB(stranger, Buffer.alloc(32), 16, 20 * XNT).rpc(), "BadReveal");
     await expectErr(armB(keeper, chain.tip, 64, 19 * XNT).rpc(), "KeeperBondTooSmall");
-    const ak = await send(armB(keeper, chain.tip, 64, 20 * XNT));
+    expect(await connection.getAccountInfo(P.keeper), "a refused first arm creates nothing").to.equal(null);
+    const st1 = big(await bal(stranger.publicKey));
+    const openArm = await send(armB(stranger, openChain.tip, 16, 20 * XNT));
+    expect(event(openArm.events, "KeeperArmed").keeper.toBase58(), "the stranger created the seat").to.equal(stranger.publicKey.toBase58());
+    expect([(await ks()).keeper.toBase58(), big((await ks()).bond)]).to.deep.equal([stranger.publicKey.toBase58(), 20n * BigInt(XNT)]);
+    // the opening never replaces a keeper: INITIAL_KEEPER is now refused like anyone else
+    await expectErr(armB(keeper, chain.tip, 64, 20 * XNT).rpc(), "OnlyKeeper");
+    // the seat goes to the fixture keeper (every later suite runs with it) by the named hand-over; the stranger gets its
+    // whole bond back
+    await methods.proposeKeeper(keeper.publicKey).accountsPartial(keeperOnly(stranger)).signers([stranger]).rpc();
+    await T.untilChainTime((await ks()).pendingTs.toNumber() + L.KEEPER_NOTICE + 1); // the notice on the validator clock
+    const takeB = (deposit: number) => methods.takeKeeper(Array.from(chain.tip), BN(64), BN(deposit)).accountsPartial({
+      config: P.config, keeperSeat: P.keeper, oldKeeper: stranger.publicKey, taker: keeper.publicKey, rewardVault: P.reward, systemProgram: SYS,
+    }).signers([keeper]);
+    await expectErr(takeB(19 * XNT).rpc(), "KeeperBondTooSmall");
+    const st2 = big(await bal(stranger.publicKey));
+    const ak = await retry(["KeeperNotice"], () => send(takeB(20 * XNT)));
+    expect(event(ak.events, "KeeperChanged").by).to.equal(0);
+    expect(big(await bal(stranger.publicKey)) - st2, "the stranger's whole bond back").to.equal(20n * BigInt(XNT));
+    expect(st1 - big(await bal(stranger.publicKey)) < BigInt(XNT) / 100n, "it kept only the seat rent and fees").to.equal(true);
+    expect((await ks()).keeper.toBase58()).to.equal(keeper.publicKey.toBase58());
     const ka = event(ak.events, "KeeperArmed");
     expect(big(ka.bond)).to.equal(20n * BigInt(XNT));
     expect(ka.length.toNumber()).to.equal(64);
@@ -1360,6 +1385,14 @@ describe("Moon Forge v3", () => {
       config: P.config, round: P.drawRound(r), entry: P.drawEntry(r, 0), playerState: P.player(alice.publicKey), rewardVault: P.reward, drawVault: P.draw,
       architect: c.architect, signer: alice.publicKey, systemProgram: SYS,
     }).signers([alice]).rpc(), "LotteryRetired");
+    // r9: a donation to the retired lottery's prize vault (target 2) is refused too: that vault can never pay again, so
+    // XNT sent there would be locked for good. The vault, the donor and donated_draw stay as they were.
+    const dd0 = big(c.stats.donatedDraw), a0 = big(await bal(alice.publicKey));
+    await expectErr(methods.donate(2, BN(XNT)).accountsPartial({ config: P.config, donor: alice.publicKey, vault: P.draw, systemProgram: SYS })
+      .signers([alice]).rpc(), "LotteryRetired");
+    await expectErr(methods.donate(3, BN(XNT)).accountsPartial({ config: P.config, donor: alice.publicKey, vault: P.draw, systemProgram: SYS })
+      .signers([alice]).rpc(), "InvalidTarget");
+    expect([big((await cfg()).stats.donatedDraw), big(await bal(alice.publicKey))]).to.deep.equal([dd0, a0]);
     const disc = Buffer.from(idl.accounts.find((a: any) => a.name === "PlayerState").discriminator);
     const all = await connection.getProgramAccounts(pid, { filters: [{ memcmp: { offset: 0, bytes: anchor.utils.bytes.bs58.encode(disc) } }] });
     expect(all.length).to.be.greaterThan(5);

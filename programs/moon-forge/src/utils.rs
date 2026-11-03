@@ -141,12 +141,26 @@ pub(crate) fn lookup_in(data: &[u8], target: u64) -> SlotHashLookup {
     }
 }
 
+/// The SlotHashes time fallback (r9): a target more than SLOT_HASH_MAX_AGE slots before `slot` is Expired, whatever
+/// the sysvar answered. On a working chain the target left SlotHashes long before, so the answer is unchanged.
+pub(crate) fn age_limited(lookup: SlotHashLookup, target: u64, slot: u64) -> SlotHashLookup {
+    if slot > target.saturating_add(SLOT_HASH_MAX_AGE) {
+        SlotHashLookup::Expired
+    } else {
+        lookup
+    }
+}
+
 /// Reads the SlotHashes sysvar without deserializing it (20 KB) and returns the hash of the
 /// earliest slot >= target. The player commits to `target` before that block exists, and
 /// settlement is permissionless, so nobody can choose the outcome after seeing it.
+/// Every caller (anchor_bet, refund_stalled_bet, settle_jackpot_v2 and the legacy settle_bet, settle_jackpot,
+/// settle_draw, start_war, seal_drop) gets the time fallback: a target older than SLOT_HASH_MAX_AGE takes the caller's
+/// existing Expired path even if the sysvar stopped answering for it.
 pub fn slot_hash_at_or_after(sysvar: &AccountInfo, target: u64) -> Result<SlotHashLookup> {
     require_keys_eq!(*sysvar.key, SLOT_HASHES_ID, ForgeError::InvalidTarget);
-    Ok(lookup_in(&sysvar.try_borrow_data()?, target))
+    let lookup = lookup_in(&sysvar.try_borrow_data()?, target);
+    Ok(age_limited(lookup, target, Clock::get()?.slot))
 }
 
 /// Uniform random u64 derived from the slot hash (or the keeper's reveal) and a per-bet salt. FROZEN.
@@ -393,6 +407,48 @@ mod rng_tests {
         let mut short = buffer(&[10, 11, 12]);
         short[0..8].copy_from_slice(&100u64.to_le_bytes());
         assert!(same(&lookup_in(&short, 11), reference(&short, 11)));
+    }
+
+    /// r9 SlotHashes time fallback: (1) on a working chain (a full 512-entry window ending at slot - 1) the fallback
+    /// never changes an answer, whatever the skipped slots; (2) a sysvar that stopped answering (emptied, stale, never
+    /// reaching the target) yields Expired once the clock is more than SLOT_HASH_MAX_AGE past the target, and not one
+    /// slot before.
+    #[test]
+    fn slot_hash_time_fallback() {
+        #[cfg(not(feature = "localnet"))]
+        assert_eq!(SLOT_HASH_MAX_AGE, 235_000); // mainnet: KEEPER_STALL_SLOTS, about a day
+        let max = SLOT_HASH_MAX_AGE;
+        let tag = |l: &SlotHashLookup| match l {
+            SlotHashLookup::Ready(h) => Some(*h),
+            SlotHashLookup::NotYet => None,
+            SlotHashLookup::Expired => Some([0xee; 32]),
+        };
+        // (1) working chain: at clock slot `now` the window holds the 512 produced slots before it
+        for (start, step) in [(10_000_000u64, 1u64), (20_000_000, 3), (30_000_000, 400)] {
+            let slots: Vec<u64> = (0..512u64).map(|i| start + i * step).collect();
+            let now = slots[511] + 1;
+            let data = buffer(&slots);
+            for target in [0, start - 1, start, start + step / 2, slots[300], slots[511], now, now + 5, now.saturating_sub(max + 1)] {
+                let raw = lookup_in(&data, target);
+                let aged = age_limited(lookup_in(&data, target), target, now);
+                assert_eq!(tag(&aged), tag(&raw), "working chain, step {step}, target {target}");
+            }
+        }
+        // (2) the sysvar stopped answering: empty, zero count, or stale (its newest entry before the target)
+        let stale = buffer(&(1000u64..1512).collect::<Vec<_>>());
+        for data in [vec![], 0u64.to_le_bytes().to_vec(), stale.clone()] {
+            let target = 5_000u64;
+            assert!(matches!(lookup_in(&data, target), SlotHashLookup::NotYet));
+            assert!(matches!(age_limited(lookup_in(&data, target), target, target + max), SlotHashLookup::NotYet));
+            assert!(matches!(age_limited(lookup_in(&data, target), target, target + max + 1), SlotHashLookup::Expired));
+            assert!(matches!(age_limited(lookup_in(&data, target), target, u64::MAX), SlotHashLookup::Expired));
+        }
+        // a stale window that still holds the target (no longer updated): Ready until the age limit, then Expired, so a
+        // keeper bet or a Jackpot round anchored there no longer waits on a keeper that may never come
+        assert!(matches!(age_limited(lookup_in(&stale, 1200), 1200, 1200 + max), SlotHashLookup::Ready(_)));
+        assert!(matches!(age_limited(lookup_in(&stale, 1200), 1200, 1200 + max + 1), SlotHashLookup::Expired));
+        // no overflow near u64::MAX
+        assert!(matches!(age_limited(SlotHashLookup::NotYet, u64::MAX - 1, u64::MAX), SlotHashLookup::NotYet));
     }
 
     #[test]

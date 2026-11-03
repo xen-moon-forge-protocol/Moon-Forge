@@ -47,9 +47,10 @@ const SUBS = {
   "health-rules.ts": [
     ["export const KEEPER_STALL_SLOTS = 235_000;", "export const KEEPER_STALL_SLOTS = 40;"],
     ["export const KEEPER_DEAD_DELAY_S = 28 * 86_400;", "export const KEEPER_DEAD_DELAY_S = 28;"],
-    // the breaker's day (constants.rs DAY_SECONDS_FOR_BREAKER = DAY): Config.bankroll_day counts 1-s days on localnet
-    ["const today = Math.floor(now / 86_400);", "const today = Math.floor(now / 1);"],
-    ["new Date(bankrollDay * 86_400_000)", "new Date(bankrollDay * 1_000)"],
+    // the breaker's day (constants.rs DAY_SECONDS_FOR_BREAKER = DAY): Config.bankroll_day counts 1-s days on localnet;
+    // 1 copy in main's oracle, 2 in the final one (bankrollDayVerdict + bankrollDayVerdictV3)
+    ["const today = Math.floor(now / 86_400);", "const today = Math.floor(now / 1);", [1, 2]],
+    ["new Date(bankrollDay * 86_400_000)", "new Date(bankrollDay * 1_000)", [1, 2]],
     // r4-fix: the "our epochs voided" row: an epoch closed before its 90-day (90-s) window, published in the last 30 days (30 s)
     ["export const CLAIM_WINDOW_S = 90 * 86_400;", "export const CLAIM_WINDOW_S = 90;"],
     ["export const VOIDED_LOOKBACK_S = 30 * 86_400;", "export const VOIDED_LOOKBACK_S = 30;"],

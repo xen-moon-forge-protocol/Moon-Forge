@@ -1082,6 +1082,15 @@ describe("Moon Forge v3 — integration gaps (round 3) and the B-13 assertion", 
     const bU = await placeV2(keeper, 0, 0, 1, stake);
     const t = betUnpack(big((await acc.bet.fetch(bU.pk)).targetSlot));
     selfBet = { b: bU, stake, anchor: t.anchor, index: t.index, before };
+    // r9 SlotHashes time fallback on a working chain: KEEPER_STALL_SLOTS (40 here) after its anchor, with the anchor
+    // block still in SlotHashes, the unanchored bet is NOT refundable: the fallback only acts SLOT_HASH_MAX_AGE (2,000
+    // slots here, 235,000 on mainnet) after the anchor, long after SlotHashes itself, so the answer is unchanged
+    await T.waitPastSlot(t.anchor + BigInt(L.KEEPER_STALL_SLOTS) + 1n);
+    const sh = (await connection.getAccountInfo(SYSVAR_SLOT_HASHES_PUBKEY, "confirmed"))!.data;
+    const oldest = sh.readBigUInt64LE(8 + (Number(sh.readBigUInt64LE(0)) - 1) * 40);
+    expect(oldest <= t.anchor, "the anchor block is still in SlotHashes").to.equal(true);
+    await expectErr(refundSB(bU).rpc(), "BetNotStalled");
+    expect(L.SLOT_HASH_MAX_AGE > 512 + L.KEEPER_STALL_SLOTS).to.equal(true);
   });
 
   // ─── B-13 airdrop to exhaustion ────────────────────────────────────────────

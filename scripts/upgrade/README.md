@@ -72,7 +72,7 @@ the gates of its stage:
 
 No step sends `arm_keeper` or `take_keeper` at S7. `--steps arm-keeper` and the keeper flags (`--keeper-key`,
 `--deposit`, `--continuous-keeper-since`) are refused there. `--keeper` is still checked: it must be the key compiled
-into the deployed binary, because INITIAL_KEEPER stays the only key that can ever create the keeper seat.
+into the deployed binary, because INITIAL_KEEPER is the only key that can create the keeper seat until 2026-12-16 00:00 UTC (KEEPER_OPEN_TS; from then anyone with a bond of at least 20 XNT).
 
 Before step 1, the script checks the deployed ELF, the IDL, both authorities, the compiled-in keys, that the roles use
 distinct keys and the step-1 simulations, and it reports whether a HouseKeeper exists (one that exists already was

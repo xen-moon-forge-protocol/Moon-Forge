@@ -2,15 +2,16 @@
 //!                 MOON FORGE PROTOCOL v2 — ANCHOR PROGRAM (X1 SVM)
 //! ═══════════════════════════════════════════════════════════════════════════
 //!
-//! Burn XEN on any EVM chain → receive XNT on X1. Zero protocol fees on that path.
+//! Burn XEN on supported EVM chains → receive XNT on X1. Zero protocol fees on that path.
 //!
 //! WHO CAN DO WHAT (complete list — verify it in this file):
-//!   • Anyone       : donate; claim burns and extra rebates for anyone (XNT goes to the wallet in the leaf) once
-//!                    the 48-h hold is over; anchor bets; settle, refund stalled bets and rounds; time out and pay
+//!   • Anyone       : donate (reward pool or bankroll); claim burns and extra rebates for anyone (XNT goes to the
+//!                    wallet in the leaf) once the 48-h hold is over; anchor bets; settle, refund stalled bets and rounds; time out and pay
 //!                    out matches; lock, settle, pay out and close Prediction rounds; expire epochs; sweep v1
 //!                    accounts; reclaim orphan Artifacts; init accounts (init_seat, init_extra); void an epoch
 //!                    during its hold for a bond paid to the pool; take a dead oracle seat (28 days without a
-//!                    surviving epoch) or a dead keeper seat (28 days inactive) for a bond; close stale listings.
+//!                    surviving epoch) or a dead keeper seat (28 days inactive) for a bond; from 2026-12-16 00:00 UTC
+//!                    (KEEPER_OPEN_TS), create the keeper seat with a bond if it was never armed; close stale listings.
 //!   • Players      : game wallet, house bets through the keeper chain, Jackpot, sealed Duel and Moon Wars (no NFT
 //!                    needed), Predictions, Be the House, forge / recycle / list / buy Artifacts. (Burn Lottery
 //!                    tickets are retired, OD-27.)
@@ -77,7 +78,7 @@ pub mod moon_forge {
     }
 
     // ── Pools ──────────────────────────────────────────────────────────────
-    /// target: 0 = reward pool (burners), 1 = bankroll (games), 2 = Burn Lottery prize
+    /// target: 0 = reward pool (burners), 1 = bankroll (games); 2 (the retired Burn Lottery prize) returns LotteryRetired
     pub fn donate(ctx: Context<Donate>, target: u8, amount: u64) -> Result<()> {
         forge::donate(ctx, target, amount)
     }

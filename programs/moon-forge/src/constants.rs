@@ -95,6 +95,11 @@ const DAY: i64 = 24 * 60 * 60;
 #[cfg(feature = "localnet")]
 const DAY: i64 = 1;
 pub const MPL_CORE_ID: Pubkey = pubkey!("CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d");
+/// The upgradeable BPF loader (loader v3) and Core's ProgramData account under it (PDA [MPL_CORE_ID] of that loader;
+/// X1 mainnet 2026-11-02: Core is owned by this loader, ProgramData 9ZC25K…). Used only by the r9 Core-closed hatch
+/// of recycle_artifact (artifacts.rs core_is_closed).
+pub const BPF_LOADER_UPGRADEABLE_ID: Pubkey = pubkey!("BPFLoaderUpgradeab1e11111111111111111111111");
+pub const MPL_CORE_PROGRAMDATA: Pubkey = pubkey!("9ZC25KLUrfgSoFVgjE1rrydZBbZns58UXi8A8ZhTdGfr");
 pub const SLOT_HASHES_ID: Pubkey = pubkey!("SysvarS1otHashes111111111111111111111111111");
 
 pub const BPS: u64 = 10_000;
@@ -257,6 +262,26 @@ pub const KEEPER_STALL_SLOTS: u64 = 235_000;
 pub const KEEPER_STALL_SLOTS: u64 = 40;
 pub const KEEPER_MAX_CHAIN: u64 = (1 << 24) - 1;
 const _: () = assert!(KEEPER_BOND_MIN >= JACKPOT_MAX_POT);
+/// Dated opening of the keeper seat (r9): if the seat was never created, from this time ANY signer may create it with
+/// arm_keeper and becomes the keeper (its own chain, its own bond >= KEEPER_BOND_MIN, every other check unchanged);
+/// before it only INITIAL_KEEPER can. 2026-12-16 00:00:00 UTC: the 2026-11-18 upgrade window + 28 days, mirroring
+/// KEEPER_DEAD_DELAY. Localnet: open from the start (a wall-clock validator cannot reach a real date); the date itself
+/// is covered by the unit tests, which build with the mainnet constants.
+#[cfg(not(feature = "localnet"))]
+pub const KEEPER_OPEN_TS: i64 = 1_797_379_200;
+#[cfg(feature = "localnet")]
+pub const KEEPER_OPEN_TS: i64 = 0;
+/// SlotHashes time fallback (r9, FUTURE-PROOFING C.1.1): every SlotHashes read treats a target slot more than this many
+/// slots in the past as Expired, whatever the sysvar holds. A working SlotHashes drops a slot after 512 produced
+/// slots, long before this, so on a working chain no answer changes; if the sysvar ever stops answering for a slot
+/// (emptied, reshaped, no longer updated), every bet, round, match or drop waiting on that slot still reaches its
+/// existing expiry path instead of waiting forever. Mainnet: KEEPER_STALL_SLOTS (about a day). Localnet: also far
+/// above the 512-slot window (KEEPER_STALL_SLOTS is compressed to 40 there), so the localnet suites run unchanged.
+#[cfg(not(feature = "localnet"))]
+pub const SLOT_HASH_MAX_AGE: u64 = KEEPER_STALL_SLOTS;
+#[cfg(feature = "localnet")]
+pub const SLOT_HASH_MAX_AGE: u64 = 2_000;
+const _: () = assert!(SLOT_HASH_MAX_AGE >= 2 * 512);
 pub const COINFLIP_CHANCE_BPS: u64 = 5_000;
 pub const MIN_CHANCE_BPS: u64 = 100; // High-Low: 1%..95% win chance
 pub const MAX_CHANCE_BPS: u64 = 9_500;
@@ -450,9 +475,9 @@ pub const MAX_PRICE_MULTIPLE: u64 = 10;
 /// walk ×50/51 from 100 XNT leaves 3,004,481,921 lamports after 177 steps and reaches the 3 XNT minimum at 178;
 /// LB-4/ECO-8). 180 keeps a margin; Cosmic/Solar/Void need 62.
 pub const PRICE_MAX_STEPS: u64 = 180;
-/// Decay start for never-forged tiers: set at S2 to the planned S7 date + 7 days (OD-23). 2026-11-24 00:00 UTC.
+/// Decay start for never-forged tiers: the planned S7 date + 7 days (OD-23). 2026-11-25 00:00 UTC (S7 on 2026-11-18).
 #[cfg(not(feature = "localnet"))]
-pub const PRICE_LAUNCH_TS: i64 = 1_795_478_400;
+pub const PRICE_LAUNCH_TS: i64 = 1_795_564_800;
 /// Localnet: DAY = 1 s on a wall-clock validator, so a real date would put every never-forged tier at its floor
 /// from day one. i64::MAX = 0 decay periods: a never-forged tier sits at base until its first forge (B-7 is
 /// deterministic). Decay from launch is covered by the unit tests, which build with the mainnet constants.
@@ -628,7 +653,7 @@ mod constant_tests {
         assert_eq!(SEAT_WALK_MAX, 5);
         assert_eq!(DROP_BACKING, 5 * XNT);
         #[cfg(not(feature = "localnet"))]
-        assert_eq!(PRICE_LAUNCH_TS, 1_795_478_400); // 2026-11-24 00:00 UTC
+        assert_eq!(PRICE_LAUNCH_TS, 1_795_564_800); // 2026-11-25 00:00 UTC
         assert_eq!(ARTIFACT_WEEKLY_CHIPS, [0, 0, 0, 0]);
     }
 

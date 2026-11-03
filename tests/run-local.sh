@@ -63,18 +63,26 @@ set +e
 RC_MOCHA=$?
 (cd agents/kit && npm install --no-audit --no-fund >/dev/null && IDL="$PWD/../../target/idl/moon_forge.json" node test/e2e-local.mjs)
 RC_KIT=$?
+# the site's rules-3 builders against this same validator (frontend/test/localnet/smoke.localnet.ts, ~2 min): it needs
+# the state the suites above leave behind (Config, ExtraState), so it runs before the validator stops
+(cd frontend && { [ -d node_modules ] || npm ci --ignore-scripts --no-audit --no-fund >/dev/null; } && MF_LOCALNET_RPC=http://127.0.0.1:8899 npm run test:localnet)
+RC_SITE=$?
+# the next steps start validators of their own, so this one stops first
+kill $VALIDATOR 2>/dev/null; wait $VALIDATOR 2>/dev/null; trap - EXIT
+# r9 fallbacks (tests/run-fallbacks.sh, ~3 min): the SlotHashes time fallback and the Core-closed hatch, which a working
+# localnet never reaches (Core loaded upgradeable then closed; a restart warped past SLOT_HASH_MAX_AGE)
+MF_FALLBACK_DIR="${MF_LEDGER_DIR:+${MF_LEDGER_DIR}-fallbacks}" bash tests/run-fallbacks.sh; RC_FALLBACK=$?
 # optional, E2E_ORACLE=1: the REAL oracle CLI end to end across the upgrade (tests/e2e-oracle-v3.sh, ~10 min). It starts
-# its own validators (the old binary, then the in-place upgrade to the build above), so this one stops first.
+# its own validators (the old binary, then the in-place upgrade to the build above).
 RC_E2E=0
 if [ "${E2E_ORACLE:-0}" = 1 ]; then
-  kill $VALIDATOR 2>/dev/null; wait $VALIDATOR 2>/dev/null; trap - EXIT
   bash tests/e2e-oracle-v3.sh; RC_E2E=$?
 fi
 set -e
-echo "suites: mocha (moon-forge + stress + v3-gaps) exit $RC_MOCHA, kit e2e-local exit $RC_KIT${E2E_ORACLE:+, oracle e2e exit $RC_E2E}"
+echo "suites: mocha (moon-forge + stress + v3-gaps) exit $RC_MOCHA, kit e2e-local exit $RC_KIT, site localnet smoke exit $RC_SITE, fallbacks exit $RC_FALLBACK${E2E_ORACLE:+, oracle e2e exit $RC_E2E}"
 
 # Rebuild the mainnet binary afterwards (the localnet build must never be deployed). Until OD-25 / OD-16 / the
 # Arweave manifest (S2) are filled, the compile guards block it: accepted only when the placeholder guards are
 # the ONLY errors ("mainnet build blocked by OD-25/OD-16/S2 placeholders (expected)"); any other error fails.
 bash tests/check-mainnet-guards.sh --quick
-[ "$RC_MOCHA" -eq 0 ] && [ "$RC_KIT" -eq 0 ] && [ "$RC_E2E" -eq 0 ]
+[ "$RC_MOCHA" -eq 0 ] && [ "$RC_KIT" -eq 0 ] && [ "$RC_SITE" -eq 0 ] && [ "$RC_FALLBACK" -eq 0 ] && [ "$RC_E2E" -eq 0 ]

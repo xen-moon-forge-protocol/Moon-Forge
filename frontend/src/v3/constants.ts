@@ -23,8 +23,8 @@ export const PRICE_DECAY_PERIOD: readonly number[] = [DAY, 3 * DAY, 7 * DAY, 14 
 export const MIN_PRICE_BPS: readonly bigint[] = [3_000n, 5_000n, 5_000n, 5_000n];
 export const MAX_PRICE_MULTIPLE = 10n;
 export const PRICE_MAX_STEPS = 180;
-/** 2026-11-24 00:00 UTC: a never-forged tier decays from here. */
-export const PRICE_LAUNCH_TS = 1_795_478_400;
+/** 2026-11-25 00:00 UTC: a never-forged tier decays from here. */
+export const PRICE_LAUNCH_TS = 1_795_564_800;
 export const ARTIFACT_WEEKLY_CHIPS: readonly number[] = [0, 0, 0, 0];
 
 /** Claims: tip, tip minimum, the 48 h hold after a publication (base and extra). */

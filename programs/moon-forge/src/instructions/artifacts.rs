@@ -384,18 +384,36 @@ pub struct RecycleArtifact<'info> {
     pub extra_state: Box<Account<'info, ExtraState>>,
 }
 
+/// r9 Core-closed hatch (FUTURE-PROOFING C.1.4): true only if Metaplex Core was CLOSED under the upgradeable loader: its
+/// program account is still owned by that loader (a loader migration changes that owner, so a migrated, working Core
+/// never matches) and its ProgramData account no longer belongs to the loader (a closed ProgramData has no lamports and
+/// no data; only the loader can own that address, and a live loader-v3 program always has it). A closed program never
+/// runs again, so its asset accounts are frozen for good: their owner bytes are final.
+pub(crate) fn core_is_closed(core: &AccountInfo, programdata: &AccountInfo) -> bool {
+    *core.key == MPL_CORE_ID
+        && *core.owner == BPF_LOADER_UPGRADEABLE_ID
+        && *programdata.key == MPL_CORE_PROGRAMDATA
+        && *programdata.owner != BPF_LOADER_UPGRADEABLE_ID
+}
+
 /// Burn the NFT and get its floor back (record lamports = floor + rent).
+/// r9 hatch: the holder may pass Core's ProgramData account as the one remaining account. If it proves Core was closed
+/// (core_is_closed), the asset can never be burned or moved again and the floor is paid without the burn; the record is
+/// closed as always, so a floor is paid once. Without that account, or with Core alive, nothing changes.
 pub fn recycle_artifact(ctx: Context<RecycleArtifact>) -> Result<()> {
     let holder = live_asset_owner(&ctx.accounts.asset, &ctx.accounts.collection.key()).ok_or(ForgeError::InvalidArtifact)?;
     require_keys_eq!(holder, ctx.accounts.owner.key(), ForgeError::NotArtifactOwner);
-    burn_asset(
-        &ctx.accounts.core_program,
-        &ctx.accounts.asset,
-        &ctx.accounts.collection,
-        &ctx.accounts.owner.to_account_info(),
-        &ctx.accounts.owner.to_account_info(),
-        &ctx.accounts.system_program.to_account_info(),
-    )?;
+    let core_closed = ctx.remaining_accounts.first().is_some_and(|pd| core_is_closed(&ctx.accounts.core_program, pd));
+    if !core_closed {
+        burn_asset(
+            &ctx.accounts.core_program,
+            &ctx.accounts.asset,
+            &ctx.accounts.collection,
+            &ctx.accounts.owner.to_account_info(),
+            &ctx.accounts.owner.to_account_info(),
+            &ctx.accounts.system_program.to_account_info(),
+        )?;
+    }
     let (tier, backing, origin) = (ctx.accounts.record.tier, ctx.accounts.record.backing, ctx.accounts.record.origin);
     let now = Clock::get()?.unix_timestamp;
     release_slot(&mut ctx.accounts.config, tier as usize, now);
@@ -827,5 +845,30 @@ mod orphan_guard_tests {
         assert!(!asset_is_gone(&MPL_CORE_ID, &live_asset(&ours, 9, 2))); // unknown key byte
         assert!(!asset_is_gone(&MPL_CORE_ID, &live_asset(&ours, 1, 0))); // UA tag != 2
         assert!(!asset_is_gone(&MPL_CORE_ID, &[1, 2])); // Core-owned, 2 bytes, non-zero key
+    }
+
+    /// r9 Core-closed hatch: the burn is skipped only for Core's own program account still under the upgradeable loader
+    /// AND its own ProgramData address no longer owned by that loader (closed). A live Core, a Core migrated to another
+    /// loader, or any other account passed as either never matches.
+    #[test]
+    fn core_closed_only_when_its_programdata_is_gone() {
+        let loader_v4 = pubkey!("LoaderV411111111111111111111111111111111111");
+        let sys = anchor_lang::system_program::ID;
+        assert_eq!(Pubkey::find_program_address(&[MPL_CORE_ID.as_ref()], &BPF_LOADER_UPGRADEABLE_ID).0, MPL_CORE_PROGRAMDATA);
+        let check = |core_key: Pubkey, core_owner: Pubkey, pd_key: Pubkey, pd_owner: Pubkey| {
+            let (mut l1, mut l2) = (1u64, 0u64);
+            let (mut d1, mut d2) = (vec![2u8, 0, 0, 0], Vec::<u8>::new());
+            let core = AccountInfo::new(&core_key, false, false, &mut l1, &mut d1, &core_owner, true, 0);
+            let pd = AccountInfo::new(&pd_key, false, false, &mut l2, &mut d2, &pd_owner, false, 0);
+            core_is_closed(&core, &pd)
+        };
+        let (core, pd, ld3) = (MPL_CORE_ID, MPL_CORE_PROGRAMDATA, BPF_LOADER_UPGRADEABLE_ID);
+        assert!(check(core, ld3, pd, sys), "closed: the ProgramData address is an empty system account");
+        assert!(check(core, ld3, pd, Pubkey::new_unique()), "closed, whatever now sits at the address");
+        assert!(!check(core, ld3, pd, ld3), "alive: ProgramData still owned by the loader");
+        assert!(!check(core, loader_v4, pd, sys), "migrated to loader v4: Core works, no hatch");
+        assert!(!check(core, sys, pd, sys), "Core account not under the upgradeable loader");
+        assert!(!check(Pubkey::new_unique(), ld3, pd, sys), "another program account");
+        assert!(!check(core, ld3, Pubkey::new_unique(), sys), "another ProgramData address");
     }
 }
