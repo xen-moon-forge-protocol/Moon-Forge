@@ -38,7 +38,7 @@ Details for every step: [DEPLOY.md](DEPLOY.md). Status as of 2026-10-22. The v2 
 - [ ] Genesis notice published before the first of the 120 claims (what a Genesis Lunar Dust is after the final upgrade: a collectible with no floor and a cosmetic badge; the claimant pays the account rent)
 
 ## Communication
-- [ ] Post in XEN communities of the five supported chains: "XEN Prime is for ETH-XEN; Base, Optimism, Polygon, BSC and Avalanche XEN → Moon Forge"; official links only; warn about clones; no paid promotion, nobody posting as someone else
+- [ ] Post in XEN communities of the five supported chains: "One more path for XEN on Base, Optimism, Polygon, BSC and Avalanche → XNT on X1"; official links only; warn about clones; no paid promotion, nobody posting as someone else
 - [x] Test period and the conditions for burning the upgrade authority published ([IMMUTABILITY.md](IMMUTABILITY.md#when-the-upgrade-authority-will-be-burned)); rewritten on 2026-10-22 (proof plan + 14 stable days, with or without external users; no later than 2026-12-31)
 - [ ] v3 switch notice: the date of the first v3 epoch (planned for November 2026) and the last v2 publish transaction, published at least one full epoch ahead
 - [ ] Final-upgrade announcement ≥ 7 days before the upgrade (`docs/UPGRADE-2026-11.md`: commit, hash procedure, changelog)

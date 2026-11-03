@@ -1,6 +1,6 @@
 # Moon Forge Protocol — Whitepaper v2.0
 
-> **Any XEN, on any supported chain → XNT on X1.** Zero protocol fees on the burn path. Recomputable by anyone.
+> **Side-chain XEN → XNT on X1** (Base, Optimism, Polygon, BSC, Avalanche). Zero protocol fees on the burn path. Recomputable by anyone.
 
 *October 2026. This document replaces whitepaper v12.0, which described mechanisms that were never implemented and contained claims (immutability, NFT boosts, game fairness) that were not true of the code. See [REVIEW-2026-10](REVIEW-2026-10.md) (internal, not independent; method and scope at its top).*
 
@@ -10,14 +10,14 @@
 
 ## 1. Why
 
-XEN exists on many EVM chains. X1 (an SVM chain whose token is XNT) was widely discussed in the XEN community as a future home for XEN, including a proposed "Moon Party" for XEN burners; as of 2026-10-07 no such event has taken place. Market facts as of 2026-10-07:
+XEN exists on many EVM chains. X1 (an SVM chain whose token is XNT) grew out of the XEN community. Everyone working around XEN and X1 is after the same goal, a real use for XEN holders; not everyone takes the same path. Market facts as of 2026-10-07:
 
-- **XEN cannot be bridged to X1.** X1's official Warp Bridge connects only Solana and X1, and no XEN of any kind is bridged. Reaching XNT means selling XEN, bridging USD and buying through thin pools.
-- **XEN Prime (announced June 2026, not launched)** will accept only **Ethereum** XEN. Holders on BSC, Polygon, Avalanche, Optimism, Base and PulseChain are excluded. (Moonbeam XEN is excluded too, and Moon Forge does not support it either: it has no XEN market to value burns against.)
+- **Reaching XNT through the market** means selling XEN, moving USD to X1 and buying XNT through thin pools.
+- **Ethereum XEN has its own path** in the XEN ecosystem; Moon Forge adds one for XEN on Base, Optimism, Polygon, BSC and Avalanche. (Moonbeam XEN is not supported: it has no XEN market to value burns against.)
 - **Buying XNT is hard.** The main XNT/USDC.X pool holds ~$10–14k. A holder with less than ~$11 of XEN cannot practically reach XNT through the market (the USDC bridge needs $10 minimum plus a $1 fee and has a $10k daily cap); larger holders get roughly 40–90% of spot after fees and slippage.
 - **Side-chain XEN is hard to sell even when its price rises.** Its pools are thin: a holder who sells a real amount moves the price against themselves, then still has to bridge to reach X1.
 
-Moon Forge offers another path: **burn XEN where it lives, receive XNT on X1**, with rules enforced by code and data anyone can re-check. It complements XEN Prime rather than competing with it: for the supported side chains (Base, Optimism, Polygon, BSC, Avalanche) Moon Forge is an option where XEN Prime is not. Portals are live on Base, Optimism, Polygon, BSC and Avalanche (`0x7b00f314aB48D223bee567181CA89c65126Bf6E9`, the same address on every chain). Ethereum and PulseChain have no portal, and none is planned by this project.
+Moon Forge offers another path: **burn XEN where it lives, receive XNT on X1**, with rules enforced by code and data anyone can re-check. It is one more option alongside the other paths in the XEN and X1 ecosystem; holders can use several with different parts of their XEN. Portals are live on Base, Optimism, Polygon, BSC and Avalanche (`0x7b00f314aB48D223bee567181CA89c65126Bf6E9`, the same address on every chain). Ethereum and PulseChain have no portal, and none is planned by this project.
 
 ## 2. Flow
 
@@ -31,7 +31,7 @@ portal.enterForge(amount,       reads MissionStarted after finality   ──► 
  └─ MissionStarted event                                                    claim (permissionless) → XNT
 ```
 
-1. **Burn.** `MoonForgePortal` calls XEN's own `burn()` through the official `IBurnRedeemable` callback (the same mechanism XEN Prime uses): XEN's total supply decreases and the burn is recorded in XEN's own `userBurns` ledger. The portal has no owner, admin, fee, pause, upgrade or trusted forwarder. The X1 destination is the raw 32-byte public key, so an EVM address can never be used by mistake.
+1. **Burn.** `MoonForgePortal` calls XEN's own `burn()` through the official `IBurnRedeemable` callback (XEN's standard burn callback): XEN's total supply decreases and the burn is recorded in XEN's own `userBurns` ledger. The portal has no owner, admin, fee, pause, upgrade or trusted forwarder. The X1 destination is the raw 32-byte public key, so an EVM address can never be used by mistake.
 2. **Epoch.** Weekly (Sundays 00:00 UTC; the program requires at least 6 days between epochs) the oracle reads every `MissionStarted` event after finality, values each burn, and publishes one Merkle root per epoch together with the epoch `rate_cap`. Every input (block ranges, events, prices, liquidity, Artifact snapshot) is saved in `epochs/epoch-N.json`, whose SHA-256 is stored on-chain.
 3. **Claim.** Claims are permissionless: a keeper (or anyone) submits them and the XNT always goes to the X1 key inside the Merkle leaf. When the public keeper is running, Launchpad burners usually receive XNT without doing anything on X1. For Orbit / Moon Landing, the claim starts the vesting; vested XNT is withdrawn with "Withdraw vested" (anyone can push it; the keeper does not do it automatically).
 
@@ -202,7 +202,7 @@ These numbers are compile-time constants (`programs/moon-forge/src/constants.rs`
 |---|---|---|
 | **Oracle key** | Publishes epoch roots and the epoch `rate_cap`; can hand its role to a new key | ≤ 10% of the free pool per epoch (Forge Drops included, plus a luck overrun bounded by max(reserve, 15 XNT)), ≥ 6 days between epochs, no leaf above the epoch total, `rate_cap` must be > 0; every epoch's data published and hash-committed; anyone can recompute it, including `rate_cap` (`npm run verify -- epoch-N.json --full`); it cannot predict the drop seed. A dishonest oracle could still direct up to an epoch's budget to false burns; the verifier would show it |
 | **Architect key** | Sets the airdrop list once | Nothing else in the program |
-| **Upgrade authority** | Held by the architect wallet (one key held by the anonymous operator outside GitHub, never in its secrets; from the final upgrade to the freeze it moves to a new deploy key, generated on the project computer and kept there in an encrypted folder, with an optional encrypted offline copy on USB sticks) during the public test period; can replace the program | Burned (`anchor idl erase-authority` + `solana program set-upgrade-authority --final`) once the final upgrade is live with its announced hash, the mainnet proof plan is complete, 14 consecutive daily health runs show no failure (with or without external users) and the Artifact metadata is on Arweave: earliest 2026-12-02, no later than 2026-12-31 ([IMMUTABILITY.md](../IMMUTABILITY.md#when-the-upgrade-authority-will-be-burned)); the Transparency page reads it live |
+| **Upgrade authority** | Held by the architect wallet (one key held by the anonymous operator outside GitHub, never in its secrets; from the final upgrade to the freeze it moves to a new deploy key, kept offline, never in GitHub) during the public test period; can replace the program | Burned (`anchor idl erase-authority` + `solana program set-upgrade-authority --final`) once the final upgrade is live with its announced hash, the mainnet proof plan is complete, 14 consecutive daily health runs show no failure (with or without external users) and the Artifact metadata is on Arweave: earliest 2026-12-02, no later than 2026-12-31 ([IMMUTABILITY.md](../IMMUTABILITY.md#when-the-upgrade-authority-will-be-burned)); the Transparency page reads it live |
 | **Keeper** | Submits claims, settlements, Forge Drop deliveries, Moon Wars starts / timeouts / payouts and Prediction locks / settlements / payouts | Permissionless; anyone can run it; it can only trigger outcomes that are already determined; funds always go to the player recorded on-chain |
 | **Session keys** | Play house games from the owner's game balance | Cannot withdraw, cannot enter P2P games or Duels, limited by expiry and max stake |
 | **EVM portals** | None — no owner, admin, fee, pause or upgrade function | Code fixed at deploy; see `deployments/portals.json` |

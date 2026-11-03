@@ -18,6 +18,7 @@ import { AddrLink, Notice, TxStatus, Xnt } from '../ui';
 import KnownIssues from './KnownIssues';
 import { ELEMENT_ICONS, type GameCtx } from './types';
 import { useRules3 } from '../../v3/detect';
+import { isSealedWar } from '../../v3/sealed';
 
 const STATE_LABEL = ['Waiting for an opponent', 'Starting (waiting for the seed block)', 'In progress', 'Finished, waiting for payout'];
 
@@ -139,9 +140,9 @@ function Match({ ctx, w, onDone }: { ctx: GameCtx; w: { publicKey: PublicKey; ac
 }
 
 /** `exitsOnly` (R1): only this wallet's existing matches (moves, start, cancel, timeout, payout); no create and no join.
- *  Under rules 3 (the upgraded program; src/v3/detect.ts) only that exits view is ever rendered: real matches stay paused on
- *  this site until a keeper meets its service level for a week, and the live program's rake, shuffle and ticket texts
- *  below no longer describe the program. False on the live program, which keeps this panel as it is. */
+ *  Under rules 3 (the upgraded program; src/v3/detect.ts) only that exits view is ever rendered, for matches created before
+ *  the upgrade: sealed matches have their own panel (src/v3/ui/WarsV3.tsx), and the live program's rake, shuffle and ticket
+ *  texts below no longer describe the program. False on the live program, which keeps this panel as it is. */
 export default function MoonWarsReal({ ctx, exitsOnly: exitsOnlyProp = false }: { ctx: GameCtx; exitsOnly?: boolean }) {
     const rules3 = useRules3();
     const exitsOnly = exitsOnlyProp || rules3;
@@ -156,7 +157,8 @@ export default function MoonWarsReal({ ctx, exitsOnly: exitsOnlyProp = false }: 
     const canCreate = NEXT_UPGRADE_LIVE && !WARS_REAL_PAUSED && !!provider && !!ticket && stakeNum >= WAR.minStakeXnt && Math.round(stakeNum * 1e9) <= balance && !tx.busy;
     const reload = () => { wars.reload(); refresh(); };
     const list = wars.data ?? [];
-    const mine = list.filter((w) => owner && (w.account.creator.equals(owner) || (w.account.state > 0 && w.account.opponent.equals(owner))));
+    // rules 3: sealed matches (created by the upgraded program) have their own panel (src/v3/ui/WarsV3.tsx); this one keeps the older ones
+    const mine = list.filter((w) => owner && (w.account.creator.equals(owner) || (w.account.state > 0 && w.account.opponent.equals(owner))) && !(rules3 && isSealedWar(w.account.targetSlot.toString())));
     const open = list.filter((w) => w.account.state === WAR.state.OPEN && !(owner && w.account.creator.equals(owner)));
 
     if (exitsOnly) {

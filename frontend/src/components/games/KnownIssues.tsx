@@ -70,7 +70,7 @@ export const KNOWN_ISSUES = {
         severity: 'Live bug',
         title: 'Moon Wars: the browser move key runs dry',
         text: 'The move key is funded with 0.005 XNT and each move costs about 0.002 XNT, so a match can be lost on time after two moves, and the leftover is not returned. Creating and joining real-XNT matches is paused on this site; moves, cancels, timeout claims and payouts of existing matches still work.',
-        fix: 'the wallet pays move fees and the leftover is refunded in the final upgrade; real matches reopen only after the keeper service has met its service levels for a week.',
+        fix: 'with the final upgrade every match starts sealed and needs no keeper; this site then funds the move key with 0.05 XNT (about 250 moves) and returns the leftover at payout or cancel, and real matches reopen.',
     },
     'GAM-6': {
         severity: 'Low',

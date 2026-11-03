@@ -18,6 +18,7 @@ import { buyArtifactV3, closeListingV3, delistArtifactV3, fetchListings, forgeAr
 import { marketSplit, MARKET_FEES_LINE, minListPriceForFloor } from '../market';
 import { artifactRulesS7, forgeSplitS7 } from '../facts-s7';
 import TwoPotCard from '../ui/TwoPotCard';
+import { CORE_CLOSED_NOTICE, readCoreClosed } from '../core-hatch';
 import type { ListingView } from '../layout';
 import lunarPreview from '../../assets/nft/lunar_dust_preview.jpg';
 import cosmicPreview from '../../assets/nft/cosmic_shard_preview.jpg';
@@ -38,6 +39,8 @@ export default function ArtifactsV3() {
     const proto = useProtocol(30_000);
     const ready = usePoll(() => fetchArtifactsReady(), [], 120_000);
     const extra = usePoll(() => readRules().then((r) => r.extraState), [], 60_000);
+    // r9 hatch: Metaplex Core closed on X1 (its program still under the upgradeable loader, its ProgramData gone)
+    const coreClosed = usePoll(() => readCoreClosed(readConnection), [], 300_000);
     const owner = x1Connected && x1Address ? new PublicKey(x1Address) : null;
     const mine = usePoll(() => (owner ? fetchMyArtifacts(owner) : Promise.resolve(null)), [x1Address, x1Connected], 60_000);
     const listings = usePoll(() => fetchListings(), [], 60_000);
@@ -70,6 +73,7 @@ export default function ArtifactsV3() {
             </div>
 
             {proto.error && <Notice kind="warn" className="mb-4">Live data unavailable: {proto.error}</Notice>}
+            {coreClosed.data === true && <Notice kind="warn" className="mb-4">{CORE_CLOSED_NOTICE}</Notice>}
             {cfg && ready.data === false && <Notice kind="warn" className="mb-4">The Artifacts collection does not exist on X1 yet: forging opens once it does.</Notice>}
             {!x1Connected && (
                 <div className="glass-card text-center mb-6">

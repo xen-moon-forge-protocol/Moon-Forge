@@ -35,8 +35,8 @@
 import { ethers } from "hardhat";
 
 // XEN token addresses by chainId — each one verified on-chain (name/symbol/AUTHORS) on 2026-10-06.
-// Do NOT use the @faircrypto/xen-crypto npm artifact: its Optimism (0xac8b…, zero supply) and
-// Base (0x4dfD…, a test token "LULU") entries are wrong.
+// Do NOT use the address map of the published XEN npm package: its Optimism (0xac8b…, zero supply) and
+// Base (0x4dfD…, a test token "LULU") entries do not match the deployed XEN contracts.
 const XEN_BY_CHAIN: Record<number, string> = {
     1:     "0x06450dEe7FD2Fb8E39061434BAbCFC05599a6Fb8", // Ethereum   (XEN)
     10:    "0xeB585163DEbB1E637c6D617de3bEF99347cd75c8", // Optimism   (opXEN)

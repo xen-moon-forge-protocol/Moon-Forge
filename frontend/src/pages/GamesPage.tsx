@@ -57,8 +57,8 @@ export default function GamesPage() {
         proto: proto.data,
         refresh: () => { player.reload(); proto.reload(); },
     };
-    // rules 3: the Moon Wars tab is the free practice plus the exits of the wallet's own matches (WarsTabV3), outside the gate
-    const practice = tab === 'wars' && (rules3 || warsMode === 'practice');
+    // the free practice never needs the play notice; real-XNT matches (sealed under rules 3) sit behind it like every stake
+    const practice = tab === 'wars' && warsMode === 'practice';
     const needsWallet = !practice;
 
     const panels = (
@@ -73,18 +73,17 @@ export default function GamesPage() {
                     {tab === 'duel' && (rules3 ? <DuelTabV3 ctx={ctx} /> : <DuelPanel ctx={ctx} />)}
                     {tab === 'lottery' && (rules3 ? <LotteryTabV3 ctx={ctx} /> : <LotteryPanel ctx={ctx} />)}
                     {tab === 'bank' && (rules3 ? <BankTabV3 ctx={ctx} /> : <BeTheHouse ctx={ctx} />)}
-                    {tab === 'wars' && rules3 && <WarsTabV3 ctx={ctx} />}
-                    {tab === 'wars' && !rules3 && (
+                    {tab === 'wars' && (
                         <>
                             <div className="flex gap-2">
                                 {(['practice', 'real'] as const).map((m) => (
                                     <button key={m} onClick={() => setWarsMode(m)}
                                         className={`px-3 py-1.5 rounded-lg border text-sm ${warsMode === m ? 'border-forge-gold bg-forge-gold/10 text-white' : 'border-white/10 text-lunar-300'}`}>
-                                        {m === 'practice' ? 'Free practice' : `Real XNT${NEXT_UPGRADE_LIVE ? (WARS_REAL_PAUSED ? ' (paused)' : '') : ' (next upgrade)'}`}
+                                        {m === 'practice' ? 'Free practice' : rules3 ? 'Real XNT (sealed)' : `Real XNT${NEXT_UPGRADE_LIVE ? (WARS_REAL_PAUSED ? ' (paused)' : '') : ' (next upgrade)'}`}
                                     </button>
                                 ))}
                             </div>
-                            {warsMode === 'practice' ? <MoonWarsBattle /> : <MoonWarsReal ctx={ctx} />}
+                            {rules3 ? <WarsTabV3 ctx={ctx} mode={warsMode} /> : warsMode === 'practice' ? <MoonWarsBattle /> : <MoonWarsReal ctx={ctx} />}
                         </>
                     )}
                 </div>

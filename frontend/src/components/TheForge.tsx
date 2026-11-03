@@ -480,7 +480,7 @@ export default function TheForge() {
                             {v2Path && fair && (fair.fits ? (
                                 <Notice kind="success" className="mb-4">
                                     Fits this week's fair capacity ({money(fair.remainingUsd)} left). This burn counts for about {money(fair.counted)}{tierInfo.multiplier > 1 ? ` (×${tierInfo.multiplier} for ${tierInfo.name})` : ''};
-                                    at today's numbers the epoch should pay about {money(fair.estimateUsd)} in XNT, at least what selling it would return{rules3 ? '. ' : ', plus (under the current rules) a chance at a Forge Drop. '}
+                                    at today's numbers the estimate is about {money(fair.estimateUsd)} in XNT, about what selling it would bring; nothing is promised{rules3 ? '. ' : '. Under the current rules it also enters the Forge Drops draw (a random draw: 18+, where legal). '}
                                     It can still drop if others burn before Sunday, and other people's Orbit / Moon Landing burns weigh 2× / 3×.
                                     {' '}Gas is paid separately (two transactions: approve, then burn) and your wallet shows it before you sign: if it is more than {money(fair.estimateUsd)}, this burn costs more than it pays.
                                 </Notice>
@@ -506,8 +506,8 @@ export default function TheForge() {
                             <label className="flex items-start gap-3 mb-5 cursor-pointer text-sm text-lunar-300">
                                 <input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} className="mt-1" disabled={busy} />
                                 <span>
-                                    I understand the burn is <strong className="text-white">irreversible</strong> (it cannot be used in XEN Prime or any other program and will not count in any
-                                    future snapshot), the XNT amount is <strong className="text-white">not fixed and can be small</strong> (it is my share of an epoch budget, paid only if the
+                                    I understand the burn is <strong className="text-white">irreversible</strong> (it is paid only under Moon Forge's rules, and Moon Forge does not promise that it counts in
+                                    any other program), the XNT amount is <strong className="text-white">not fixed and can be small</strong> (it is my share of an epoch budget, paid only if the
                                     oracle publishes the epoch), and the X1 address above is correct and its key is mine.
                                 </span>
                             </label>
@@ -550,7 +550,7 @@ export default function TheForge() {
                             <li>When the public keeper is running it may submit your claim for you (its runs are irregular and can be hours or days late); its tip ({P.keeperTip} XNT per claim of at least {rules3 ? Number(KEEPER_TIP_MIN_CLAIM_V3) / 1e9 : P.keeperTipMinClaim} XNT) is paid by the pool, never from your amount.</li>
                             <li className="text-lunar-500">
                                 {DATED}: these are the current oracle rules. They are scheduled to be replaced ({INTERIM.rulesChangeWhen}); every burn made before that
-                                date is scored under the rules of the epoch it falls in. What replaces them is published with the announcement, not before.
+                                date is scored under the rules of the epoch it falls in. What replaces them is already published (docs/HOW-IT-WORKS.md in the repository).
                             </li>
                         </ul>
                     </div> : null}

@@ -1,7 +1,9 @@
 /**
  * Donations — the program's `donate(target, amount)` moves 100% of the amount into the chosen vault.
- *   0 = reward pool (burners) · 1 = game bankroll · 2 = Burn Lottery prize vault
+ *   0 = reward pool (burners) · 1 = game bankroll · 2 = Burn Lottery prize vault (live program only)
  * Live balances are read from chain (balance − rent − reserved).
+ * Rules 3 (src/v3/detect.ts): the upgraded program refuses donations to the Burn Lottery vault (no instruction pays it out
+ * after the last legacy round), so that target is not offered; false on the live program, which keeps all three.
  */
 
 import { useEffect, useState } from 'react';
@@ -12,6 +14,10 @@ import { useProtocol, useTx } from '../lib/hooks';
 import { donate, donateWxnt, fetchWxnt, PDA } from '../lib/protocol';
 import { PROJECT_LINKS } from '../lib/constants';
 import { AddrLink, Notice, TxStatus, X1Gate, Xnt } from './ui';
+import { useRules3 } from '../v3/detect';
+
+/** Rules 3: the reward pool text under the upgraded program (each base epoch spends at most 10% of the free pool). */
+const REWARD_POOL_V3 = 'Funds the weekly epochs that pay burners: each base epoch can spend at most 10% of the free pool, a bound the program enforces; what an epoch does not pay stays in the pool.';
 
 const TARGETS = [
     { id: 0 as const, name: 'Reward pool', who: 'Burners', desc: 'Funds future epochs. Each epoch budget is at most 10% of the free pool (less when the epoch rate cap — 1.25× the liquidity-adjusted value burned, by tier — is lower).', vault: () => PDA.rewardVault() },
@@ -25,6 +31,11 @@ export default function DonationPanel() {
     const tx = useTx();
     const [target, setTarget] = useState<0 | 1 | 2>(0);
     const [amount, setAmount] = useState('');
+    const rules3 = useRules3();
+    const targets = rules3 ? TARGETS.filter((t) => t.id !== 2).map((t) => (t.id === 0 ? { ...t, desc: REWARD_POOL_V3 } : t)) : TARGETS;
+    // a target the upgraded program refuses is never sent
+    useEffect(() => { if (rules3 && target === 2) setTarget(0); }, [rules3, target]);
+    const chosen = targets.find((t) => t.id === target) ?? targets[0];
 
     const [wxnt, setWxnt] = useState<number | null>(null);
     useEffect(() => {
@@ -40,8 +51,8 @@ export default function DonationPanel() {
 
     return (
         <div className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                {TARGETS.map((t) => (
+            <div className={`grid grid-cols-1 ${rules3 ? 'md:grid-cols-2' : 'md:grid-cols-3'} gap-4`}>
+                {targets.map((t) => (
                     <button
                         key={t.id}
                         onClick={() => setTarget(t.id)}
@@ -64,7 +75,7 @@ export default function DonationPanel() {
                 <div className="glass-card">
                     <div className="flex items-center gap-2 mb-4">
                         <Heart className="w-5 h-5 text-forge-orange" />
-                        <h3 className="font-space text-lg">Donate to the {TARGETS[target].name}</h3>
+                        <h3 className="font-space text-lg">Donate to the {chosen.name}</h3>
                     </div>
                     <div className="flex gap-2 mb-3">
                         <input
@@ -76,8 +87,8 @@ export default function DonationPanel() {
                         />
                         <button
                             className="btn-forge whitespace-nowrap"
-                            disabled={!valid || !!tx.busy || !x1Provider}
-                            onClick={() => x1Provider && tx.run(`Donating ${value} XNT`, () => donate(x1Provider, target, value), () => { setAmount(''); proto.reload(); })}
+                            disabled={!valid || !!tx.busy || !x1Provider || (rules3 && target === 2)}
+                            onClick={() => x1Provider && tx.run(`Donating ${value} XNT`, () => donate(x1Provider, chosen.id, value), () => { setAmount(''); proto.reload(); })}
                         >
                             Donate
                         </button>
@@ -88,7 +99,7 @@ export default function DonationPanel() {
                             <button
                                 className="btn-outline whitespace-nowrap !py-1"
                                 disabled={!!tx.busy || !x1Provider}
-                                onClick={() => x1Provider && tx.run('Unwrapping and donating all WXNT', () => donateWxnt(x1Provider, target), () => proto.reload())}
+                                onClick={() => x1Provider && tx.run('Unwrapping and donating all WXNT', () => donateWxnt(x1Provider, chosen.id), () => proto.reload())}
                             >
                                 Donate all WXNT
                             </button>
@@ -98,9 +109,15 @@ export default function DonationPanel() {
                     <p className="text-xs text-lunar-500 mt-3">
                         100% of the amount is transferred to the vault by the program (see <code>donate</code> in
                         {' '}<a href={`${PROJECT_LINKS.github}/blob/main/programs/moon-forge/src/instructions/forge.rs`} target="_blank" rel="noopener noreferrer" className="text-forge-orange hover:underline">forge.rs</a>).
+                        {rules3 ? <>
+                            Nobody can withdraw a donation: reward-pool XNT only leaves through epoch claims and keeper tips; bankroll XNT only through
+                            game payouts and house-LP withdrawals. The Burn Lottery takes no donations since the final upgrade. Whether the program can
+                            still be upgraded is shown on the Transparency page.
+                        </> : <>
                         Nobody can withdraw a donation: reward-pool XNT only leaves through epoch claims, Forge Drops and keeper tips; bankroll XNT
                         only through game payouts and house-LP withdrawals; lottery XNT only to round winners (or to the reward pool when a draw
                         expires). Note: the program is still upgradeable during the test period (see Transparency).
+                        </>}
                     </p>
                 </div>
             </X1Gate>

@@ -163,7 +163,7 @@ export default function FairValueEngine({ compact = false }: { compact?: boolean
             </p>
             <div className="text-xs text-lunar-500">
                 {compare ? (
-                    <>Ethereum and PulseChain are shown for comparison only: Moon Forge has no portal there and none is planned (XEN Prime is announced for Ethereum XEN only).{' '}
+                    <>Ethereum and PulseChain are shown for comparison only: Moon Forge has no portal there and none is planned (Ethereum XEN has its own path).{' '}
                         <button className="text-forge-orange hover:underline" onClick={() => setCompare(false)}>Hide them</button></>
                 ) : (
                     <>Only the five chains with a live portal are read.{' '}

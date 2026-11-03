@@ -1,31 +1,25 @@
 /**
  * Games after the final upgrade (rules 3 only; pages/GamesPage.tsx keeps the live panels otherwise):
- *  - house games: new bets stay hidden on the site until a keeper that runs continuously meets its published service levels
- *    for a week (KEEPER_SLA_MET, F1-b: no keeper is armed at the upgrade); placed bets keep their exits;
- *  - Jackpot: hidden (exits only) until the same service-level week, and then offered only while the keeper seat holds a
- *    bond ≥ 20 XNT (src/v3/keeper.ts jackpotOffered); the keeper draws and settles;
- *  - Burn Lottery: no new entries; only the exits of a round that was open at the upgrade;
- *  - Duel: no new duels from this site yet (sealed joins); own duels keep their exits;
- *  - Moon Wars real matches: still paused (WarsTabV3: the free practice and the exits of the wallet's own matches only);
- *    Predictions: still off the site.
+ *  - house games (place_bet_v2) and the Jackpot: offered only while the chain shows a live keeper (src/v3/keeper.ts
+ *    keeperLiveness, read by KeeperGate every 30 s); otherwise the page says which check failed and how anyone can become
+ *    the keeper; bets and entries already made keep their exits;
+ *  - Artifact Duel and Moon Wars: sealed real-XNT games that need no keeper (DuelV3, WarsV3), with the secrets kept in
+ *    this browser and an explicit backup;
+ *  - Burn Lottery: no new entries; only the exits of a round that was open at the upgrade; Predictions: still off the site.
  */
 import { Notice } from '../../components/ui';
-import { usePoll } from '../../lib/hooks';
-import { readConnection } from '../../lib/protocol';
 import JackpotPanel from '../../components/games/JackpotPanel';
 import LotteryPanel from '../../components/games/LotteryPanel';
-import DuelPanel from '../../components/games/DuelPanel';
 import BeTheHouse from '../../components/games/BeTheHouse';
-import MoonWarsReal from '../../components/games/MoonWarsReal';
 import MoonWarsBattle from '../../components/MoonWarsBattle';
 import { PendingHouseBets } from '../../components/games/HouseGames';
 import type { GameCtx } from '../../components/games/types';
-import { fetchHouseKeeper, houseNoBetsNoticeShown, jackpotOffered, KEEPER_SLA_MET } from '../keeper';
+import { houseNoBetsNoticeShown, jackpotOffered, newHouseBetsOffered } from '../keeper';
 import { gamesS7 } from '../facts-s7';
-
-export function useHouseKeeper() {
-    return usePoll(() => fetchHouseKeeper(readConnection), [], 60_000);
-}
+import { gateLiveness, KeeperStatusCard, useKeeperGate } from './KeeperGate';
+import HouseV3, { MyKeeperBets } from './HouseV3';
+import DuelV3 from './DuelV3';
+import WarsV3 from './WarsV3';
 
 export function GamesNoticeV3() {
     return (
@@ -44,24 +38,25 @@ export function GamesNoticeV3() {
 }
 
 export function HouseTabV3({ ctx }: { ctx: GameCtx }) {
+    const gate = useKeeperGate();
+    const offered = newHouseBetsOffered(gateLiveness(gate));
+    const seat = gate.data?.seat ?? null;
     return (
         <>
-            <Notice kind="warn">{gamesS7.house}</Notice>
+            <KeeperStatusCard gate={gate} what="house games" />
+            {offered && seat ? <HouseV3 ctx={ctx} seat={seat} /> : <Notice kind="warn">{gamesS7.house}</Notice>}
+            {ctx.owner && <MyKeeperBets ctx={ctx} seat={seat} />}
             {ctx.owner && <PendingHouseBets ctx={ctx} />}
         </>
     );
 }
 
 export function JackpotTabV3({ ctx }: { ctx: GameCtx }) {
-    const k = useHouseKeeper();
-    // F1-b: before the announced service-level week the Jackpot is hidden whatever the seat holds, so the exits never wait for the seat read
-    if (KEEPER_SLA_MET) {
-        if (k.loading && !k.data && !k.error) return <div className="glass-card text-sm text-lunar-400">Reading the keeper seat…</div>;
-        if (k.error) return <Notice kind="warn">Could not read the keeper seat on X1 ({k.error}): the Jackpot is not offered until it can be checked.</Notice>;
-    }
-    const offered = jackpotOffered(k.data ?? null);
+    const gate = useKeeperGate();
+    const offered = jackpotOffered(gateLiveness(gate));
     return (
         <>
+            <KeeperStatusCard gate={gate} what="the Jackpot" />
             <Notice kind={offered ? 'info' : 'warn'}>{offered ? gamesS7.jackpot : gamesS7.jackpotOff}</Notice>
             {offered ? <JackpotPanel ctx={ctx} keeperDraws /> : <JackpotPanel ctx={ctx} exitsOnly keeperDraws />}
         </>
@@ -81,29 +76,41 @@ export function DuelTabV3({ ctx }: { ctx: GameCtx }) {
     return (
         <>
             <Notice kind="info">{gamesS7.duel}</Notice>
-            <DuelPanel ctx={ctx} exitsOnly />
+            <DuelV3 ctx={ctx} />
         </>
     );
 }
 
 export function BankTabV3({ ctx }: { ctx: GameCtx }) {
     // the withdrawal window, the limits and the breaker of the upgraded program are in the panel's own notice (BeTheHouse, rules 3);
-    // r7 audit F8: until the service-level week no house bet is accepted, so a depositor is told before depositing
+    // while no live keeper is shown no house bet reaches the bankroll, so a depositor is told before depositing
+    const gate = useKeeperGate();
     return (
         <>
-            {houseNoBetsNoticeShown() && <Notice kind="warn">{gamesS7.houseNoBets}</Notice>}
+            {houseNoBetsNoticeShown(gateLiveness(gate)) && <Notice kind="warn">{gamesS7.houseNoBets}</Notice>}
             <BeTheHouse ctx={ctx} />
         </>
     );
 }
 
-/** Moon Wars under rules 3: real matches stay paused on this site (gamesS7.wars); the free practice and the exits of the wallet's own matches. */
-export function WarsTabV3({ ctx }: { ctx: GameCtx }) {
+/** Moon Wars under rules 3: the free practice (outside the play notice) or sealed real-XNT matches (inside it). */
+export function WarsTabV3({ ctx, mode }: { ctx: GameCtx; mode: 'practice' | 'real' }) {
     return (
         <>
             <Notice kind="info">{gamesS7.wars}</Notice>
-            <MoonWarsBattle />
-            {ctx.owner && <MoonWarsReal ctx={ctx} exitsOnly />}
+            {mode === 'practice' ? <MoonWarsBattle /> : <WarsV3 ctx={ctx} />}
+        </>
+    );
+}
+
+/** The wallet's own rules-3 exits (ExitsPanel): open house bets, sealed duels and matches, and the secrets backup. */
+export function ExitsV3({ ctx }: { ctx: GameCtx }) {
+    const gate = useKeeperGate();
+    return (
+        <>
+            <MyKeeperBets ctx={ctx} seat={gate.data?.seat ?? null} />
+            <DuelV3 ctx={ctx} exitsOnly />
+            <WarsV3 ctx={ctx} exitsOnly />
         </>
     );
 }

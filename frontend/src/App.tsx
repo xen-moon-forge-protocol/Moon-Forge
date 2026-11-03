@@ -1,6 +1,6 @@
 /**
  * Moon Forge - Main Application
- * Any XEN, any chain → XNT on X1.
+ * Side-chain XEN → XNT on X1 (Base, Optimism, Polygon, BSC, Avalanche).
  */
 
 import { lazy, Suspense } from 'react';
@@ -78,11 +78,11 @@ function Home() {
                     <span className="bg-gradient-to-r from-forge-orange to-forge-gold bg-clip-text text-transparent">MOON FORGE</span>
                 </h1>
                 <p className="text-xl md:text-2xl text-lunar-200 mb-4">
-                    Any XEN, any chain <span className="text-forge-gold">→ XNT on X1.</span>
+                    Side-chain XEN <span className="text-forge-gold">→ XNT on X1.</span>
                 </p>
                 <p className="text-lunar-400 max-w-2xl mx-auto mb-3">
                     Burn XEN on Base, Optimism, Polygon, BSC or Avalanche and receive XNT on X1,
-                    with zero protocol fees on that path. XEN Prime is announced for Ethereum XEN only; Moon Forge is built for the side chains.
+                    with zero protocol fees on that path. Moon Forge is one more path, for XEN on the side chains.
                 </p>
                 <p className="text-lunar-500 text-sm max-w-2xl mx-auto mb-10">
                     Every epoch, score and payout is published and can be recomputed by anyone.

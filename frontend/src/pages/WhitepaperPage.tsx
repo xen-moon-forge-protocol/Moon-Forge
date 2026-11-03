@@ -22,7 +22,7 @@ export default function WhitepaperPage() {
         <div className="max-w-4xl mx-auto space-y-6">
             <div className="text-center mb-4">
                 <h1 className="font-space text-4xl font-bold mb-2"><BookOpen className="inline w-8 h-8 text-forge-gold mr-2" />Whitepaper v2</h1>
-                <p className="text-lunar-400">Any XEN, on any chain → XNT on X1. Zero protocol fees on the burn path. Verifiable by anyone.</p>
+                <p className="text-lunar-400">Side-chain XEN (Base, Optimism, Polygon, BSC, Avalanche) → XNT on X1. Zero protocol fees on the burn path. Verifiable by anyone.</p>
                 <a href={PROJECT_LINKS.whitepaperMd} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-forge-orange hover:underline text-sm mt-2">
                     Full text: docs/WHITEPAPER.md <ExternalLink className="w-3 h-3" />
                 </a>
@@ -30,9 +30,9 @@ export default function WhitepaperPage() {
 
             <Section n={1} title="Problem">
                 <p>
-                    XEN lives on many EVM chains; X1 is an SVM chain whose token is XNT. XEN cannot be bridged to X1: reaching XNT means selling XEN,
-                    bridging USD and buying through thin pools, which is expensive for small holders. XEN Prime is announced for Ethereum XEN only.
-                    Moon Forge offers one path for the side chains (Base, Optimism, Polygon, BSC, Avalanche): burn XEN where it lives,
+                    XEN lives on many EVM chains; X1 is an SVM chain whose token is XNT. Reaching XNT through the market means selling XEN,
+                    moving USD to X1 and buying through thin pools, which is expensive for small holders. Ethereum XEN already has its own path.
+                    Moon Forge offers one more path, for the side chains (Base, Optimism, Polygon, BSC, Avalanche): burn XEN where it lives,
                     receive XNT on X1. Portals are live on Base, Optimism, Polygon, BSC and Avalanche. Ethereum and PulseChain have no portal and none is planned by this project.
                 </p>
             </Section>

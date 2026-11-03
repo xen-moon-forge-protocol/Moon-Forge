@@ -8,7 +8,7 @@ import * as anchor from '@coral-xyz/anchor';
 import { Connection, Keypair, PublicKey, SystemProgram } from '@solana/web3.js';
 import { parseV3Idl } from '../../src/v3/program';
 import { claimExtraAccounts, extraLeafStatus, proofBytes, V3_PDA } from '../../src/v3/extra';
-import { jackpotOffered, keeperSeatReady, newHouseBetsOffered } from '../../src/v3/keeper';
+import { jackpotOffered, keeperLiveness, keeperSeatReady, newHouseBetsOffered } from '../../src/v3/keeper';
 import { extraLeaf, hashPair, toHex } from '../../src/lib/verify-leaf';
 import { KEEPER_BOND_MIN, V3_PDAS } from '../../src/v3/constants';
 import { decodeHouseKeeper } from '../../src/v3/layout';
@@ -95,20 +95,19 @@ describe('keeper gating and extra-leaf status', () => {
         bond: new anchor.BN(bond.toString()), pending_bets: 0, last_active_ts: new anchor.BN(0), armed_slot: new anchor.BN(0), week_start_ts: new anchor.BN(0), week_start_bankroll: new anchor.BN(0),
         week_net_loss: new anchor.BN(0), penalties: new anchor.BN(0), jackpot_reserved: new anchor.BN(0), withdraw_ts: new anchor.BN(0), bump: 255,
     })));
-    it('Jackpot and house bets never before the announced SLA (F1-b); after it, only with a keeper and a bond of at least 20 XNT', async () => {
-        // a decoded seat: before the service-level week nothing is offered, whatever the bond
+    it('Jackpot and house bets only while the chain shows a live keeper (r9: no constant); a bonded seat with no chain is not live', async () => {
+        // a decoded seat with a bond but no armed chain (length 0) and no activity: nothing is offered, whatever the bond
+        const live = async (bond: bigint, key?: PublicKey) => keeperLiveness(await seat(bond, key), [], 1_000n, 1_000);
         expect(jackpotOffered(null)).toBe(false);
-        expect(jackpotOffered(await seat(KEEPER_BOND_MIN))).toBe(false);
-        expect(jackpotOffered(await seat(KEEPER_BOND_MIN * 10n))).toBe(false);
-        expect(newHouseBetsOffered(await seat(KEEPER_BOND_MIN * 10n))).toBe(false);
-        // the seat check the later release relies on
+        expect(jackpotOffered(await live(KEEPER_BOND_MIN))).toBe(false);
+        expect(newHouseBetsOffered(await live(KEEPER_BOND_MIN * 10n))).toBe(false);
+        expect((await live(KEEPER_BOND_MIN * 10n)).failed.map((c) => c.id)).toContain('armed');
+        // the seat check (key + bond) the gate starts from
         expect(keeperSeatReady(null)).toBe(false);
         expect(keeperSeatReady(await seat(KEEPER_BOND_MIN - 1n))).toBe(false);
         expect(keeperSeatReady(await seat(KEEPER_BOND_MIN))).toBe(true);
         expect(keeperSeatReady(await seat(KEEPER_BOND_MIN, PublicKey.default))).toBe(false);
-        expect(jackpotOffered(await seat(KEEPER_BOND_MIN), true)).toBe(true);
-        expect(jackpotOffered(await seat(KEEPER_BOND_MIN - 1n), true)).toBe(false);
-        expect(jackpotOffered(await seat(KEEPER_BOND_MIN, PublicKey.default), true)).toBe(false);
+        expect((await live(KEEPER_BOND_MIN, PublicKey.default)).failed.map((c) => c.id)).toEqual(['seat']);
     });
     it('an extra leaf is claimable only when the file root is the on-chain root and the proof walks to it', () => {
         const w = [Keypair.generate().publicKey.toBase58(), Keypair.generate().publicKey.toBase58()];

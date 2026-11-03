@@ -54,7 +54,8 @@ const ROUTE_SLIPPAGE = 0.03;
 /** C-14: after the boundary and before the upgraded program is live there is no feed and no quote; the burn waits for v3. */
 const UPGRADE_PENDING = 'The final program upgrade is not live yet. A burn made now keeps its own time and waits for the first epoch built under the v3 rules: no epoch under the current rules pays it. No binding quote exists until the upgraded program and the hourly week-so-far file are live, so this page does not offer the burn.';
 
-async function loadState(newestEpoch: number | null, rules: 2 | 3 | 'unknown') {
+/** The week state and this hour's readings for a v3 quote (also used by BurnVsSell under rewards 3); throws why not. */
+export async function loadWeekQuoteState(newestEpoch: number | null, rules: 2 | 3 | 'unknown') {
     if (rules === 2) throw new Error(UPGRADE_PENDING);
     if (rules !== 3) throw new Error('This page could not confirm the upgraded program on X1 yet (the read is pending or failed), so no binding quote is computed. It checks again every few minutes.');
     if (!WEEK_SO_FAR_URL) throw new Error('The hourly week-so-far file is not published yet, so no binding quote can be computed.');
@@ -95,7 +96,7 @@ export function QuotePanel({ chainKey, chainId, amountWei, tier, busy, onGate, x
 
     const compute = useCallback(async (): Promise<QuoteResult> => {
         if (!amountWei) return { ok: false, reason: 'Enter an amount.' };
-        const { state, readings } = await loadState(det.newestEpoch, det.rules);
+        const { state, readings } = await loadWeekQuoteState(det.newestEpoch, det.rules);
         setHeld(state.anomalyHold === true);
         return quoteFromWeek(state, readings, { chainId, amountWei, tier, x1 }, Math.floor(Date.now() / 1000));
     }, [amountWei, chainId, tier, x1, det.rules, det.newestEpoch]);

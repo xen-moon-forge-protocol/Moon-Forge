@@ -13,9 +13,10 @@ import { fetchXntUsd } from '../components/BurnVsSell';
 import { useChainMarkets, weekCapacity } from '../lib/market';
 import { money } from '../components/FairValueEngine';
 import { AddrLink, Notice, Xnt } from '../components/ui';
+import PublicCounter from '../components/PublicCounter';
 import { DATED, INTERIM } from '../content/interim';
 import { LINKS, LINKS_URL, officialLink, PUBLIC_PLACES } from '../lib/links';
-import { faq as FAQ } from '../facts';
+import { faq as FAQ, officialLinks, SCALE_DATE, startQa } from '../facts';
 
 const WEEK = 7 * 86_400;
 const SUNDAY_0 = 3 * 86_400; // 1970-01-04 00:00 UTC
@@ -95,10 +96,15 @@ export default function StartPage() {
                     bounded oracle (it can only publish within the program's caps) and, until it is burned, the upgrade key. This page shows what it can really pay
                     this week, how to use it, and how to check it yourself.
                 </p>
+                <p className="text-sm text-amber-300 max-w-2xl mx-auto">
+                    The scale is small: on {SCALE_DATE} the reward pool held about 6.5 XNT, so one week can pay at most about 0.65 XNT to all burners together,
+                    however much is burned (the live figure is below). No payout is promised. Burning needs no NFT and no game: those are optional.
+                </p>
                 <p className="text-xs text-lunar-500">
                     Independent and open-source, run by one anonymous builder who receives only the disclosed cuts (Artifact sales and game edges). Not run by the XEN or
-                    X1 teams; not XEN Prime, not Moon Party, not X1 Forge.
+                    X1 teams, and separate from every other XEN or X1 project: one more path for XEN holders, alongside the others.
                 </p>
+                <PublicCounter compact />
             </header>
 
             {/* ── what is changing (dated interim notice) ── */}
@@ -107,7 +113,7 @@ export default function StartPage() {
                 <ul className="list-disc list-inside space-y-1 text-xs">
                     <li>
                         <strong>Oracle rules change</strong>, {INTERIM.rulesChangeWhen}. Until that date every burn is scored under the current rules described on this page
-                        (linear shares, Artifact boost, Forge Drops). What replaces them is published with the announcement, not before.
+                        (linear shares, Artifact boost, Forge Drops). What replaces them is already published: see the quick answers below and How Moon Forge works.
                     </li>
                     <li>
                         <strong>Final program upgrade</strong>, {INTERIM.upgradeWhen}. The upgrade key is to be burned {INTERIM.freezeWhen}. Until then forging Artifacts and the Genesis claim
@@ -115,11 +121,22 @@ export default function StartPage() {
                     </li>
                     <li>
                         <strong>Already decided:</strong> only the five live portal chains ({live.map((c) => c.name).join(', ')}) are supported; burns made before Moon Forge or
-                        elsewhere are not counted; Predictions are in the program but not offered on this site; real-XNT Moon Wars matches are paused; house games stay open.
+                        elsewhere are not counted; Predictions are in the program but not offered on this site; real-XNT Moon Wars matches are paused; house games stay open until the final upgrade, and from then the site shows them only while
+                        the chain shows a live house keeper (none is armed at the upgrade).
                         Burning, claiming and vesting are not affected by the pause.
                     </li>
                 </ul>
             </Notice>
+
+            {/* ── quick answers: the key questions marked `start` in src/facts.ts (the static /start/ page and its FAQPage JSON-LD carry the same list) ── */}
+            <section className="glass-card" aria-labelledby="quick-answers">
+                <h2 id="quick-answers" className="font-space text-xl mb-2">Quick answers</h2>
+                {startQa.map((f) => <Faq key={f.q} q={f.q}>{f.a}</Faq>)}
+                <p className="text-xs text-lunar-500 mt-3">
+                    Answers that name the final upgrade or the v3 rules describe published, dated plans. The long form, with worked examples:{' '}
+                    <a className="text-forge-orange hover:underline" href={officialLinks.howItWorks} target="_blank" rel="noopener noreferrer">How Moon Forge works</a>.
+                </p>
+            </section>
 
             {/* ── this week, in real numbers ── */}
             <section className="glass-card space-y-4">
@@ -150,8 +167,8 @@ export default function StartPage() {
                 )}
                 {cap && (
                     <p className="text-sm text-lunar-300">
-                        <strong className="text-white">Fair capacity left this week: {money(cap.remainingUsd)}</strong> of counted value. Within it, a burn should pay at least what selling
-                        that XEN would return, in XNT alone (the liquidity discount is the same math as selling into the pool); beyond it, burns are paid pro-rata and likely pay less.
+                        <strong className="text-white">Fair capacity left this week: {money(cap.remainingUsd)}</strong> of counted value. Within it, the rule aims to pay about what selling
+                        that XEN would bring, in XNT (the liquidity discount is the same math as selling into the pool); nothing is promised. Beyond it, burns are paid pro rata and likely receive less.
                         Vesting tiers count 2× / 3× toward it.
                         The Forge checks your burn against it before you sign.
                         {cap.unread.length > 0 && <> Not counted right now: {cap.unread.join(', ')} (could not be read), so what is left may be lower.</>}
@@ -168,11 +185,11 @@ export default function StartPage() {
             <section className="grid md:grid-cols-3 gap-4">
                 <div className="glass-card text-sm">
                     <div className="text-white font-medium mb-2">Your XEN is on a side chain</div>
-                    <p className="text-lunar-400">Portals are live on {live.map((c) => c.name).join(', ')}. XEN Prime is announced for Ethereum XEN only, and side-chain pools are thin. Each chain's XEN is valued at its own market price.</p>
+                    <p className="text-lunar-400">Portals are live on {live.map((c) => c.name).join(', ')}. Side-chain pools are thin, so each chain's XEN is valued at its own market price.</p>
                 </div>
                 <div className="glass-card text-sm">
                     <div className="text-white font-medium mb-2">You hold a small amount</div>
-                    <p className="text-lunar-400">Your share is linear in value: no bonus for whales, nothing gained by splitting wallets. Forge Drops give every burner a chance at a {P.dropBackingXnt} XNT Lunar Dust, in proportion to what they burned.</p>
+                    <p className="text-lunar-400">Your share is linear in value: no bonus for whales, nothing gained by splitting wallets. Under the current rules a tenth of each week's budget is drawn at random among that week's burners as Lunar Dust NFTs (Forge Drops), with odds in proportion to what each burned: a random draw, 18+ and only where legal.</p>
                 </div>
                 <div className="glass-card text-sm">
                     <div className="text-white font-medium mb-2">You want to check first</div>
@@ -180,12 +197,12 @@ export default function StartPage() {
                 </div>
             </section>
 
-            {/* ── every path feeds the others ── */}
+            {/* ── what each part does; only the burn is needed to burn ── */}
             <section className="glass-card space-y-4">
-                <h2 className="font-space text-xl">Pick your path: every one feeds the others</h2>
+                <h2 className="font-space text-xl">What each part does</h2>
                 <p className="text-sm text-lunar-400">
-                    The reward pool that pays burners is filled by everything else people do here, and what burners receive can flow back into the rest.
-                    Nobody has to do everything: use the part that suits you.
+                    Burning needs no NFT and no game: those are optional. The reward pool that pays burners is filled by Artifact sales, game fees, early-exit penalties
+                    and donations. Use only the part that suits you.
                 </p>
                 <div className="flex flex-wrap items-center justify-center gap-2 text-xs font-mono text-lunar-300 bg-space-700/40 rounded-xl p-3">
                     <span className="px-2 py-1 rounded bg-space-600">games · Artifacts · penalties · donations</span><span>→</span>
@@ -202,7 +219,7 @@ export default function StartPage() {
                     </div>
                     <div className="bg-space-700/40 rounded-xl p-4">
                         <div className="text-white font-medium mb-1">I hold XNT and want to play</div>
-                        <p className="text-lunar-400 mb-2">House games and player-vs-player games, with a house edge and a rake you can read on the Games page. {P.edgeToPoolPct}% of every house stake and {P.rakeToPoolPct}% of every P2P pot go to the burners' pool. Stake only what you can lose.</p>
+                        <p className="text-lunar-400 mb-2">House games and player-vs-player games, with a house edge and a rake you can read on the Games page. {P.edgeToPoolPct}% of every house stake and {P.rakeToPoolPct}% of every P2P pot go to the burners' pool. 18+ only and only where such games are legal; you can lose the whole stake.</p>
                         <Link className="text-forge-orange hover:underline" to="/games">Games →</Link>
                     </div>
                     <div className="bg-space-700/40 rounded-xl p-4">
@@ -217,7 +234,7 @@ export default function StartPage() {
                     </div>
                     <div className="bg-space-700/40 rounded-xl p-4">
                         <div className="text-white font-medium mb-1">I just want to help</div>
-                        <p className="text-lunar-400 mb-2">A donation to the reward pool goes 100% to burners, through the weekly budget. Nothing is taken on the way.</p>
+                        <p className="text-lunar-400 mb-2">A donation goes to the reward pool, which pays burners through the weekly budget and small running costs (keeper tips). The architect receives nothing from it.</p>
                         <Link className="text-forge-orange hover:underline" to="/donate">Donate →</Link>
                     </div>
                     <div className="bg-space-700/40 rounded-xl p-4">

@@ -8,18 +8,27 @@
  *                 burners of the same epoch (alone it gains nothing). The real payout is your share of the epoch
  *                 budget and can be lower.
  *
+ * Rewards v3 (src/v3/detect.ts rewards = 3): the Moon Forge side is the v3 quote itself (lib/quote.ts, the oracle's own
+ * math, through the hourly week-so-far feed: each chain's liquidity curve with memory, the counted value × 1.25 / 2.5 /
+ * 3.75 by tier, the week's capacity in daily tranches, first come first served), never the v2 cap; with no feed there is
+ * no number (fail-closed). The card says plainly that what a burn is paid depends on the weekly capacity.
+ *
  * Prices: XEN from GeckoTerminal (same source the oracle uses), XNT from x1report.com.
  * If a price cannot be fetched, the corresponding numbers show "--".
  */
 
 import { useEffect, useState } from 'react';
+import { ethers } from 'ethers';
 import { Calculator } from 'lucide-react';
 import { ARTIFACTS, P } from '../lib/protocol';
 import { CHAINS, EVM_CHAINS, formatNumber, formatUSD, normalizeAmountInput } from '../lib/constants';
 import { useProtocol } from '../lib/hooks';
 import { Row } from './ui';
 import { xenMarketLive } from '../lib/market';
-import { useRules3 } from '../v3/detect';
+import { useDetection, useRules3 } from '../v3/detect';
+import { quoteFromWeek, type QuoteResult } from '../lib/quote';
+import { loadWeekQuoteState } from '../v3/ui/QuotePanel';
+import { rewardsV3 } from '../v3/facts-v3';
 
 const WARP_FEE_USD = 1;
 const WARP_MIN_USD = 10;
@@ -59,6 +68,11 @@ export default function BurnVsSell({ chainKey: chainProp, xenAmount: amountProp,
     // rules 3: Artifacts give no burn boost and the upgraded program reserves no Forge Drop for a new epoch, so the boost
     // selector and the boost / drop sentences are not shown. False on the live program, which keeps this card as it is.
     const rules3 = useRules3();
+    // rewards 3: the Moon Forge side is the v3 quote (per-chain curve, tiers 1.25× / 2.5× / 3.75×, the week's capacity)
+    const det = useDetection();
+    const v3 = det.rewards === 3;
+    const [q3, setQ3] = useState<QuoteResult | null>(null);
+    const [q3Err, setQ3Err] = useState<string | null>(null);
 
     // follow the parent form when embedded in The Forge
     useEffect(() => { if (chainProp) setChainKey(chainProp); }, [chainProp]);
@@ -82,6 +96,22 @@ export default function BurnVsSell({ chainKey: chainProp, xenAmount: amountProp,
     }, []);
 
     const xen = Number(normalizeAmountInput(amount) ?? 0) || 0;
+    useEffect(() => {
+        if (!v3) { setQ3(null); setQ3Err(null); return; }
+        let alive = true;
+        setQ3(null);
+        setQ3Err(null);
+        const norm = normalizeAmountInput(amount);
+        let wei: bigint | null = null;
+        try { wei = norm ? ethers.parseUnits(norm, 18) : null; } catch { wei = null; }
+        if (!wei || wei <= 0n) return;
+        loadWeekQuoteState(det.newestEpoch, det.rules)
+            .then(({ state, readings }) => { if (alive) setQ3(quoteFromWeek(state, readings, { chainId: CHAINS[chainKey].chainId, amountWei: wei!, tier, x1: null }, Math.floor(Date.now() / 1000))); })
+            .catch((e) => { if (alive) setQ3Err(String(e?.message ?? e)); });
+        return () => { alive = false; };
+    }, [v3, amount, chainKey, tier, det.newestEpoch, det.rules]);
+    const q3ok = q3 && q3.ok ? q3 : null;
+    const q3Xnt = q3ok ? Number(q3ok.paidAtArrival) / 1e9 : null;
     const s = Math.min(50, Math.max(0, Number(slippage) || 0)) / 100;
     const value = xenUsd !== null && xen > 0 ? xen * xenUsd : null;
     const boost = !rules3 && boostTier >= 0 ? ARTIFACTS[boostTier].boostPct / 100 : 0;
@@ -100,7 +130,7 @@ export default function BurnVsSell({ chainKey: chainProp, xenAmount: amountProp,
     // the boost part is reachable only when other, unboosted burners share the epoch — alone it gains nothing)
     const capUsd = realValue !== null ? realValue * P.rateCapK * mult * (1 + boost) : null;
     const capXnt = capUsd !== null && xntUsd ? capUsd / xntUsd : null;
-    const ratio = capXnt !== null && marketXnt ? capXnt / marketXnt : null;
+    const ratio = v3 ? (q3Xnt !== null && marketXnt ? q3Xnt / marketXnt : null) : capXnt !== null && marketXnt ? capXnt / marketXnt : null;
 
     return (
         <div className="glass-card">
@@ -121,7 +151,7 @@ export default function BurnVsSell({ chainKey: chainProp, xenAmount: amountProp,
                     </label>
                     <label className="text-xs text-lunar-400">Tier
                         <select className="input-forge mt-1" value={tier} onChange={(e) => setTier(Number(e.target.value))}>
-                            {P.tiers.map((t) => <option key={t.id} value={t.id}>{t.name} ({t.multiplier}×)</option>)}
+                            {P.tiers.map((t) => <option key={t.id} value={t.id}>{t.name} ({v3 ? P.rateCapK * t.multiplier : t.multiplier}×)</option>)}
                         </select>
                     </label>
                 </div>
@@ -147,6 +177,15 @@ export default function BurnVsSell({ chainKey: chainProp, xenAmount: amountProp,
             <Row label="Market route (sell → Warp → buy XNT)">
                 {belowMin ? <span className="text-amber-400">below the $10 Warp minimum</span> : marketXnt !== null ? `≈ ${formatNumber(marketXnt)} XNT` : '--'}
             </Row>
+            {v3 ? <>
+                <Row label={`Moon Forge: paid at arrival if it fits today's capacity (${P.rateCapK * mult}× the counted value, ${P.tiers[tier].name})`}>
+                    {q3Xnt !== null ? `≤ ${formatNumber(q3Xnt)} XNT` : xen > 0 ? <span className="text-amber-400">no quote now</span> : '--'}
+                </Row>
+                {q3ok && <Row label="Counted value (this chain's curve, at most until the chain-hour closes)">{formatUSD(Number(q3ok.value) / 1e6)}</Row>}
+                {q3ok && <Row label="Today's capacity left / this week's">{formatNumber(Number(q3ok.roomToday) / 1e9)} / {formatNumber(Number(q3ok.roomWeek) / 1e9)} XNT</Row>}
+                {ratio !== null && <Row label="Quote vs market route">{ratio.toFixed(2)}×</Row>}
+                {xen > 0 && (q3Err || (q3 && !q3.ok)) && <p className="text-xs text-amber-300 mt-1">{q3Err ?? (q3 as { reason: string }).reason}</p>}
+            </> : <>
             <Row label={`Moon Forge cap (${P.rateCapK} × real value × ${mult}${boost ? ` × up to ${1 + boost}` : ''})`}>
                 {capXnt !== null ? `≤ ${formatNumber(capXnt)} XNT` : '--'}
             </Row>
@@ -156,8 +195,13 @@ export default function BurnVsSell({ chainKey: chainProp, xenAmount: amountProp,
             <Row label="Next epoch budget (max, all burners)">
                 {proto ? `${formatNumber(proto.nextEpochBudget / 1e9)} XNT` : '--'}
             </Row>
+            </>}
 
-            <p className="text-xs text-lunar-500 mt-3">
+            {v3 ? <p className="text-xs text-lunar-500 mt-3">
+                Estimate only. What a burn is paid depends on the weekly capacity: {rewardsV3.capacity} {rewardsV3.tiers} {rewardsV3.valuation}
+                {' '}The market route ignores gas and uses your slippage guess. Prices: XEN markets from GeckoTerminal, XNT from x1report.com.
+                {priceErr && ` (${priceErr})`}
+            </p> : <p className="text-xs text-lunar-500 mt-3">
                 Estimate only. The market route ignores gas and uses your slippage guess. Moon Forge pays your share of the epoch budget,
                 never more than the cap above; if many burners share a small budget, or others burn on the same chain, you receive less.
                 The oracle prices each burn at the burn-hour price of this chain's XEN (a 24 h median), which can differ from the spot price.
@@ -166,7 +210,7 @@ export default function BurnVsSell({ chainKey: chainProp, xenAmount: amountProp,
                 {' '}Prices: XEN markets from GeckoTerminal, XNT from x1report.com.
                 {tier > 0 && ` ${P.tiers[tier].name} pays over ${P.tiers[tier].vestingDays} days.`}
                 {priceErr && ` (${priceErr})`}
-            </p>
+            </p>}
         </div>
     );
 }

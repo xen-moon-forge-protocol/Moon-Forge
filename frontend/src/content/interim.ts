@@ -21,12 +21,12 @@ export const INTERIM = {
     /** false until the final program upgrade is live. */
     programUpgraded: false,
     /** When the oracle rules change: a planned window, announced ahead, never a promise. */
-    rulesChangeWhen: 'planned for November 2026 and announced on this page and on the project\u2019s X account at least one full epoch ahead, with the date and the last publish transaction under the current rules',
+    rulesChangeWhen: 'planned with the first epoch under the v3 rules (Sunday 2026-11-22) and announced on this site and in the GitHub repository at least one full epoch ahead, with the date and the last publish transaction under the current rules',
     /**
      * When the final program upgrade happens (round 4, option B of 2026-10-25: the source and changelog at least 7 days
      * ahead, the binary hash at least 48 hours ahead; this notice said 7 days for the hash until then).
      */
-    upgradeWhen: 'not before mid-November 2026; its source and full changelog are published at least 7 days before it, and its binary hash at least 48 hours before; earlier versions of this notice said 7 days for the hash too',
+    upgradeWhen: 'planned for 2026-11-18, 16:00–20:00 UTC (moved from 2026-11-11 on 2026-11-02; the same hours a week later if a gate is not green); its source and full changelog are published at least 7 days before it, and its binary hash at least 48 hours before; earlier versions of this notice said 7 days for the hash too',
     /** When the upgrade key is burned (IMMUTABILITY.md: a separate, conditional step after the final upgrade). */
     freezeWhen: 'after the final upgrade, on the published freeze conditions (no later than 2026-12-31)',
 } as const;
@@ -37,11 +37,11 @@ export const INTERIM = {
  */
 export const NEUTRAL = {
     /** Oracle rules (Artifact boost, Forge Drops). */
-    oracleRules: `Forge Drops and the Artifact boost are rules of the current oracle and apply to every epoch it builds. They are scheduled to be replaced at the oracle rules change (${INTERIM.rulesChangeWhen}); what replaces them is published with that announcement, not before.`,
+    oracleRules: `Forge Drops and the Artifact boost are rules of the current oracle and apply to every epoch it builds. They are scheduled to be replaced at the oracle rules change (${INTERIM.rulesChangeWhen}); the rules that replace them are already published (docs/HOW-IT-WORKS.md, docs/UPGRADE-2026-11.md).`,
     /** Program rules (chips, weekly Artifact chips, arena ticket). */
-    programRules: `Chips, the weekly Artifact chips and the arena ticket are rules of the live program and keep working as described until the final upgrade (${INTERIM.upgradeWhen}); what changes is published with the upgrade changelog, not before.`,
+    programRules: `Chips, the weekly Artifact chips and the arena ticket are rules of the live program and keep working as described until the final upgrade (${INTERIM.upgradeWhen}); what changes is already published in the upgrade changelog (docs/UPGRADE-2026-11.md).`,
     /** Genesis claim deadline while the claim is paused. */
-    genesisDeadline: 'Claims close on 31 December 2026 (00:00 UTC on 1 January 2027) under the live program; the deadline may be extended by the final upgrade, and any new date is published with its changelog.',
+    genesisDeadline: 'Claims close on 31 December 2026 (00:00 UTC on 1 January 2027) under the live program; the published changelog of the final upgrade (planned 2026-11-18) extends it to 31 March 2027 (00:00 UTC on 1 April 2027).',
 } as const;
 
 /** Prefix for every interim notice. */

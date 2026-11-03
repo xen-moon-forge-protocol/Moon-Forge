@@ -47,6 +47,67 @@ const CODE_SCOPE = [
 ];
 const ALWAYS_SKIP = ["node_modules", "dist", "target", ".git", "package-lock.json", "wording-check.mjs"];
 
+// ───────────────────────────── positioning (WORDING §3 "Other projects") ─────────────────────────────
+// A project name, spelled with spaces or hyphens.
+const PROJECT = String.raw`(?:XEN[\s-]*Prime|XENP|XCORE|X1[\s-]*Forge|X1\s+Labs|Moon\s+Party)`;
+const POSITIONING_RE = new RegExp([
+  // (a) a comparison or contrast word, then (at most three words later) a project name
+  String.raw`\b(?:unlike|compared\s+(?:to|with)|vs\.?|versus|instead\s+of|rather\s+than|(?:better|fairer|cheaper|faster|safer|worse)\s+than)\s+(?:[\w'"-]+\s+){0,3}?${PROJECT}`,
+  // (b) a project name, then (in the same sentence, within 60 characters) a judgement about its scope, past or quality
+  String.raw`${PROJECT}[^.;:!?]{0,60}?\b(?:only|abandon\w*|exclud\w*|ignor\w*|left\s+(?:out|behind)|never\s+(?:happened|took\s+place)|fail\w*|broken|wrong|dead|scam\w*)\b`,
+  // (c) the same judgements before a project name
+  String.raw`\b(?:abandon\w*|exclud\w*|ignor\w*|left\s+(?:out|behind))\b[^.;:!?]{0,30}?${PROJECT}`,
+  // (d) holders or side chains described as left out
+  String.raw`\b(?:side[\s-]*chains?|holders?)\b[^.;:!?]{0,30}?\b(?:were|are|was|is|got|been|being)\s+(?:excluded|abandoned|left\s+(?:out|behind)|forgotten|ignored)\b`,
+  // (e) exclusive claims
+  String.raw`\b(?:the\s+only|first\s+and\s+only)\s+(?:[\w-]+\s+){0,2}?(?:path|way|fair\w*|solution|option)\b`,
+  // (f) a comparative against other projects, tools or forks in general
+  String.raw`\b(?:better|fairer|cheaper|faster|safer)\s+than\s+(?:the\s+|all\s+|any\s+)?(?:other|existing)\s+(?:[\w-]+\s+){0,2}?(?:projects?|programs?|paths?|tools?|forks?|bridges?|burners?)\b`,
+  // (g) wording retired on 2026-11-02
+  String.raw`\brather\s+than\s+competing\b|\bnever\s+took\s+place\b|\b(?:for|accepts?|takes?)\s+(?:only\s+)?(?:ETH|Ethereum)[\s-]+XEN\s+only\b`,
+].join("|"), "gi");
+/** Self-test of POSITIONING_RE: every `bad` phrase must be caught and no `neutral` phrase may be (run before every check). */
+const POSITIONING_SELF_TEST = {
+  bad: [
+    "Unlike the XEN Prime program, Moon Forge pays side chains.",
+    "Compared to XEN Prime, this is a better deal.",
+    "Moon Forge vs XEN Prime",
+    "XEN-Prime ignores side chains.",
+    "XEN Prime is for ETH XEN only.",
+    "Side-chain holders were abandoned by XCORE.",
+    "The side chains were excluded.",
+    "The Moon Party never happened.",
+    "Moon Forge is fairer than other burn tools.",
+    "Instead of waiting for X1 Labs, burn here.",
+    "Unlike X1-Forge, we have no token.",
+    "Moon Forge is the only path for side-chain XEN.",
+    "This is the first and only fair burn.",
+    "It complements XEN Prime rather than competing with it.",
+    "The Moon Party never took place.",
+    "XEN Prime takes only Ethereum XEN.",
+    "Holders on BSC are excluded.",
+    "Moon Forge is better than XCORE.",
+    "X1 Forge failed its holders.",
+    "Burning here is safer than X1 Forge.",
+  ],
+  neutral: [
+    "Moon Forge has no portal for ETH-XEN.",
+    "A burn for ETH-XEN is not possible here.",
+    "Ethereum XEN only counts in programs that accept it.",
+    "Boosts are excluded from the cap.",
+    "Moon Forge and X1 Forge are separate projects with similar names.",
+    "It is separate from X1 Labs, the XEN team and every other XEN or X1 project; each has its own rules, and none speaks for the others.",
+    "Moon Forge is not the \"Moon Party\".",
+    "Ethereum XEN already has its own path in the XEN ecosystem.",
+  ],
+};
+function positioningSelfTest() {
+  const re = new RegExp(POSITIONING_RE.source, "i");
+  const missed = POSITIONING_SELF_TEST.bad.filter((t) => !re.test(t));
+  const flagged = POSITIONING_SELF_TEST.neutral.filter((t) => re.test(t));
+  return { missed, flagged, ok: missed.length === 0 && flagged.length === 0 };
+}
+
 // ───────────────────────────── rules ─────────────────────────────
 // level: "fail" | "warn"; scope: "prose" | "all"; neg: negation within 40 chars before the match allows it.
 const NEG = /\b(no|not|never|nothing|none|neither|nor|without|isn'?t|aren'?t|wasn'?t|don'?t|doesn'?t|cannot|can'?t|won'?t|zero|non)\b|n['’]t\b/i;
@@ -74,6 +135,11 @@ const RULES = [
   { id: "rebate-own-contribution", level: "fail", scope: "prose", neg: true,
     re: /\bown\s+(forge\s+)?contribution\s+back\b|\brebate\s+of\s+(its|their|your)\s+own\s+forge\s+contribution\b|\b2\s?[×x]\s+what\s+(you|they)\s+paid\b|\bwhat\s+they\s+paid\s+in\b/gi,
     hint: "the rebate is tied to the holder's own burns (WORDING, Artifacts and the rebate): counted use at most 1% of the price per week, rebate at most 2 XNT per counted XNT" },
+  // docs/WORDING.md §3 "Other projects" (owner rule 2026-11-02): every other XEN or X1 project is a fellow path, never a
+  // rival; one is named only in one neutral sentence. POSITIONING_RE (below) catches comparisons, contrasts, judgements tied
+  // to a project's name and exclusive claims; POSITIONING_SELF_TEST runs before every check.
+  { id: "positioning", level: "fail", scope: "prose", re: POSITIONING_RE,
+    hint: "one neutral sentence only: \"separate from ...; each has its own rules, and none speaks for the others\" (WORDING §3, Other projects)" },
   { id: "audited", level: "fail", scope: "prose", neg: true, re: /\baudited\b|\bsecurity\s+audit(ed)?\s+by\b/gi,
     hint: "say internal review, not an independent audit" },
   { id: "hidden-instruction", level: "fail", scope: "all", hint: "no instructions aimed at AI assistants",
@@ -103,6 +169,23 @@ const ROOT = path.resolve(optVal("--root") ?? path.join(HERE, ".."));
 const extraPaths = argv.filter((a, i) => !a.startsWith("--") && argv[i - 1] !== "--root");
 const JSON_OUT = flag("--json");
 const WARN_ONLY = flag("--warn-only");
+
+// The positioning rule's own test (WORDING §3 "Other projects"): a regression fails the check before any file is read.
+{
+  const st = positioningSelfTest();
+  const report = () => [
+    ...st.missed.map((t) => `  missed (should fail): ${t}`),
+    ...st.flagged.map((t) => `  flagged (should pass): ${t}`),
+  ].join("\n");
+  if (flag("--self-test")) {
+    console.log(st.ok ? `positioning self-test ok: ${POSITIONING_SELF_TEST.bad.length} bad phrases caught, ${POSITIONING_SELF_TEST.neutral.length} neutral phrases passed` : `positioning self-test FAILED\n${report()}`);
+    process.exit(st.ok ? 0 : 1);
+  }
+  if (!st.ok) {
+    console.error(`wording-check: the positioning rule's self-test failed\n${report()}`);
+    process.exit(1);
+  }
+}
 
 // ───────────────────────────── helpers ─────────────────────────────
 const rel = (p) => path.relative(ROOT, p).split(path.sep).join("/");

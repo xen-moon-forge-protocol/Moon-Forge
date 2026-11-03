@@ -11,7 +11,7 @@ import { keccak_256 } from '@noble/hashes/sha3';
 import idl from '../idl/moon_forge.json';
 import { PROGRAM_ID_B58 } from './constants';
 import { applyCu, withCu, type CuBuilder } from './cu';
-import { v3ErrorFor } from './errors';
+import { staticErrorFor, v3ErrorFor } from './errors';
 
 /** Re-exported for callers that build their own transactions: measured compute-unit limits (lib/cu.ts). */
 export { withCu, applyCu };
@@ -242,6 +242,9 @@ export const explorerAddress = (a: PublicKey | string) => `${X1_EXPLORER}/addres
 /** Human-readable message for Anchor / RPC / wallet errors. */
 export function errorMessage(e: any): string {
   if (!e) return 'Unknown error';
+  // a code the site states itself (lib/errors.ts STATIC_V3_ERRORS, e.g. 6100 LotteryRetired) wins over the IDL text
+  const fixed = staticErrorFor(e);
+  if (fixed) return fixed;
   if (e.error?.errorMessage) return `${e.error.errorMessage}${e.error.errorCode?.code ? ` (${e.error.errorCode.code})` : ''}`;
   // codes added by the final upgrade (6064+): known only once rules 3 loaded the new IDL (lib/errors.ts); never before
   const v3 = v3ErrorFor(e);

@@ -2,10 +2,9 @@
  * Round 4 defaults on the boundary (C-14) and the games (D-39), as the site states them under rules 3:
  *  - the boundary notice names the planned release that ends the Forge's hold, and says that a burn made after the last
  *    v2 publish transaction is never paid under the current rules (a late upgrade only delays it to the first v3 epoch);
- *  - house games and the Jackpot stay hidden on the site until a keeper that runs continuously has met its published
- *    service levels for a week (F1-b, owner answers of 2026-10-25: no keeper is armed at the upgrade, because a bond posted
- *    while no keeper runs could be drained at no cost); the Jackpot then also needs a keeper bond of at least 20 XNT
- *    (src/v3/keeper.ts);
+ *  - house games and the Jackpot are offered only while the chain shows a live keeper (r9: src/v3/keeper.ts keeperLiveness,
+ *    read from X1 on every visit; no constant a later release has to flip, since nobody may change the site after the
+ *    freeze); a seat needs a keeper key and a bond of at least 20 XNT among the other checks;
  *  - the keeper texts follow the round-4 program: a house stall is paid from the keeper bond, and the settle tip is a
  *    running cost of the pool.
  */
@@ -14,7 +13,7 @@ import { readFileSync } from 'node:fs';
 import { PublicKey } from '@solana/web3.js';
 import { boundaryText, V3_BOUNDARY } from '../../src/v3/facts-v3';
 import { artifactRulesS7, gamesS7 } from '../../src/v3/facts-s7';
-import { houseNoBetsNoticeShown, jackpotOffered, KEEPER_SLA_MET, keeperSeatReady, newHouseBetsOffered } from '../../src/v3/keeper';
+import { houseNoBetsNoticeShown, jackpotOffered, keeperSeatReady, newHouseBetsOffered, type Liveness } from '../../src/v3/keeper';
 import { KEEPER_BOND_MIN } from '../../src/v3/constants';
 
 describe('C-14: the boundary texts', () => {
@@ -38,31 +37,25 @@ describe('C-14: the boundary texts', () => {
 
 describe('D-39: house games and the Jackpot after the upgrade', () => {
     const seat = (bond: bigint) => ({ keeper: new PublicKey('11111111111111111111111111111112'), bond } as any);
-    it('F1-b: house games and the Jackpot stay hidden until the service-level week is announced, whatever bond a seat holds', () => {
-        expect(KEEPER_SLA_MET).toBe(false);
+    const L = (live: boolean): Liveness => ({ live, checks: [], failed: [] });
+    it('r9: house games and the Jackpot follow the chain-read liveness only (no announced switch)', () => {
         expect(KEEPER_BOND_MIN).toBe(20_000_000_000n);
-        for (const k of [null, seat(0n), seat(KEEPER_BOND_MIN - 1n), seat(KEEPER_BOND_MIN), seat(KEEPER_BOND_MIN * 10n)]) {
-            expect(jackpotOffered(k)).toBe(false);
-            expect(newHouseBetsOffered(k)).toBe(false);
+        for (const l of [null, L(false)]) {
+            expect(jackpotOffered(l)).toBe(false);
+            expect(newHouseBetsOffered(l)).toBe(false);
         }
+        expect(jackpotOffered(L(true))).toBe(true);
+        expect(newHouseBetsOffered(L(true))).toBe(true);
         expect(keeperSeatReady(seat(KEEPER_BOND_MIN))).toBe(true);
+        expect(keeperSeatReady(seat(KEEPER_BOND_MIN - 1n))).toBe(false);
+        expect(keeperSeatReady({ keeper: PublicKey.default, bond: KEEPER_BOND_MIN } as any)).toBe(false);
     });
-    it('after the service-level week (a later release): the Jackpot needs a 20 XNT bond and a keeper key', () => {
-        expect(jackpotOffered(seat(KEEPER_BOND_MIN), true)).toBe(true);
-        expect(newHouseBetsOffered(seat(KEEPER_BOND_MIN), true)).toBe(true);
-        expect(jackpotOffered(seat(KEEPER_BOND_MIN - 1n), true)).toBe(false);
-        expect(jackpotOffered(null, true)).toBe(false);
-        expect(jackpotOffered({ keeper: PublicKey.default, bond: KEEPER_BOND_MIN } as any, true)).toBe(false);
-    });
-    it('the texts state the F1-b rule and its reason, and never the bond alone as the Jackpot rule', () => {
-        const until = 'until a keeper that runs continuously has met its published service levels for a week';
-        const why = 'no keeper was armed at the upgrade, because a keeper bond posted while no keeper runs could be drained at no cost';
-        for (const t of [gamesS7.house, gamesS7.jackpotOff, gamesS7.intro, gamesS7.wars]) expect(t).toContain(until);
-        expect(gamesS7.jackpot).toContain('only after a keeper that runs continuously has met its published service levels for a week');
-        expect(gamesS7.house).toContain(why);
-        expect(gamesS7.jackpotOff).toContain(why);
-        expect(gamesS7.jackpotOff).toContain('20 XNT');
+    it('the texts state the chain-read gate (armed, 20 XNT bond, recent, service levels) and that the sealed games need no keeper', () => {
+        const gate = 'only while the chain shows a live keeper: armed, bonded with at least 20 XNT, not idle for 28 days and keeping its service levels on the bets pending now';
+        for (const t of [gamesS7.house, gamesS7.jackpot, gamesS7.intro, gamesS7.houseNoBets]) expect(t).toContain(gate);
         expect(gamesS7.jackpotOff).toContain('a Jackpot round that ends refunds every entry');
+        for (const t of [gamesS7.duel, gamesS7.wars]) expect(t).toContain('No Artifact and no keeper are needed');
+        for (const t of Object.values(gamesS7)) expect(t).not.toMatch(/service levels for a week|KEEPER_SLA_MET/);
         expect(gamesS7.house).toContain('without a keeper seat the program takes no house bet');
         for (const t of Object.values(gamesS7)) {
             expect(t).not.toMatch(/offers it only while a keeper seat holds/);
@@ -96,15 +89,14 @@ describe('r7 audit F1/F17: the Artifact rebate and Genesis texts after the upgra
     });
 });
 
-describe('r7 audit F8: Be the House tells a depositor that no house bet is accepted yet', () => {
-    it('the notice is shown while KEEPER_SLA_MET is false, and only then', () => {
-        expect(KEEPER_SLA_MET).toBe(false);
-        expect(houseNoBetsNoticeShown()).toBe(true);
-        expect(houseNoBetsNoticeShown(false)).toBe(true);
-        expect(houseNoBetsNoticeShown(true)).toBe(false);
+describe('r7 audit F8: Be the House tells a depositor when no house bet is accepted', () => {
+    it('the notice is shown whenever house games are not offered (no live keeper, or the read is pending or failed)', () => {
+        expect(houseNoBetsNoticeShown(null)).toBe(true);
+        expect(houseNoBetsNoticeShown({ live: false, checks: [], failed: [] })).toBe(true);
+        expect(houseNoBetsNoticeShown({ live: true, checks: [], failed: [] })).toBe(false);
     });
     it('the notice states the gate, that it may not happen, and the withdrawal path', () => {
-        expect(gamesS7.houseNoBets).toContain('No house bet is accepted until a house keeper is armed');
+        expect(gamesS7.houseNoBets).toContain('No house bet is accepted while no house keeper is armed');
         expect(gamesS7.houseNoBets).toContain('that may not happen');
         expect(gamesS7.houseNoBets).toContain('request, wait 24 h, withdraw within the next 24 h');
         expect(gamesS7.houseNoBets).not.toMatch(/closed for good|earn|yield|return/i);
@@ -112,7 +104,7 @@ describe('r7 audit F8: Be the House tells a depositor that no house bet is accep
     it('BankTabV3 renders the notice above the panel', () => {
         const src = readFileSync(new URL('../../src/v3/ui/GamesV3.tsx', import.meta.url), 'utf8');
         const tab = src.slice(src.indexOf('export function BankTabV3'), src.indexOf('export function WarsTabV3'));
-        expect(tab).toContain('{houseNoBetsNoticeShown() && <Notice kind="warn">{gamesS7.houseNoBets}</Notice>}');
-        expect(tab.indexOf('houseNoBetsNoticeShown()')).toBeLessThan(tab.indexOf('<BeTheHouse'));
+        expect(tab).toContain('{houseNoBetsNoticeShown(gateLiveness(gate)) && <Notice kind="warn">{gamesS7.houseNoBets}</Notice>}');
+        expect(tab.indexOf('houseNoBetsNoticeShown(')).toBeLessThan(tab.indexOf('<BeTheHouse'));
     });
 });

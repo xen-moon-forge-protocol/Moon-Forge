@@ -4,7 +4,8 @@
  *
  *   node scripts/prerender.mjs                 writes dist/<route>/index.html for every route in src/facts.ts (static HTML
  *                                              inside #root for readers without JavaScript; React's createRoot replaces it),
- *                                              dist/404.html, dist/llms.txt, dist/llms-full.txt, dist/sitemap.xml
+ *                                              dist/404.html, dist/llms.txt, dist/llms-full.txt, dist/sitemap.xml, and
+ *                                              dist/counter.json (the public counter, from public/epochs; src/lib/counter.ts)
  *   node scripts/prerender.mjs --write-public  regenerates public/llms.txt, public/llms-full.txt, public/sitemap.xml from facts
  *   node scripts/prerender.mjs --check         regenerates them in memory and fails if the public/ copies differ (drift check)
  *
@@ -34,6 +35,28 @@ async function loadFacts() {
     const mod = await import(pathToFileURL(outfile).href);
     try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* temp dir, best effort */ }
     return mod.facts;
+}
+
+/**
+ * The public counter (src/lib/counter.ts) from the epoch files in public/epochs: XEN removed from supply per chain and the
+ * XNT the published epochs set aside. Never blocks a build: a missing or malformed file is reported and no counter.json
+ * is written (the site then recomputes it in the browser from the files it can read).
+ */
+async function loadCounter() {
+    try {
+        const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mf-counter-'));
+        const outfile = path.join(tmp, 'counter.mjs');
+        await build({ entryPoints: [path.join(ROOT, 'src', 'lib', 'counter.ts')], bundle: true, format: 'esm', platform: 'node', outfile, logLevel: 'silent' });
+        const lib = await import(pathToFileURL(outfile).href);
+        try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* temp dir, best effort */ }
+        const dir = path.join(PUBLIC, 'epochs');
+        const index = JSON.parse(fs.readFileSync(path.join(dir, 'index.json'), 'utf8'));
+        const files = (index.epochs ?? []).map((e) => JSON.parse(fs.readFileSync(path.join(dir, `epoch-${e.epoch}.json`), 'utf8')));
+        return lib.summarizeEpochFiles(files);
+    } catch (e) {
+        console.warn(`prerender: WARNING the public counter was not built (${String(e?.message ?? e).slice(0, 200)}); no counter.json is written`);
+        return null;
+    }
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -89,7 +112,10 @@ function verifyBlock(F) {
 </ul><p class="muted">Any other program ID, portal, collection, site or "claim" page is not Moon Forge.</p>`);
 }
 
-const faqHtml = (F) => F.faq.map((f) => `<details><summary>${esc(f.q)}</summary><p>${esc(f.a)}</p></details>`).join('');
+const qaHtml = (list) => list.map((f) => `<details><summary>${esc(f.q)}</summary><p>${esc(f.a)}</p></details>`).join('');
+const faqHtml = (F) => qaHtml(F.faq);
+/** The questions a page shows (and its FAQPage JSON-LD carries): the Start page's short block, or every key question, then the FAQ. */
+const pageQa = (F, path) => (path === '/start/' ? [...F.startQa, ...F.faq] : [...F.keyQa, ...F.faq]);
 const rulesLine = (F) => `<p class="muted">Rules described: program tag ${esc(F.rules.program)}, oracle ${esc(F.rules.oracle)}, valid from ${esc(F.rules.validFrom)}; texts checked on ${esc(F.rules.describedAsOf)}.</p>`;
 
 function bodyHome(F) {
@@ -104,8 +130,9 @@ ${rulesLine(F)}`;
 
 function bodyStart(F) {
     return `<h1>Start here</h1><p>Moon Forge burns XEN that is hard to sell and pays XNT on X1. Every rule is public and every payout can be recomputed; trust is limited to a bounded oracle and, until it is burned, the upgrade key. This page shows how to use it and how to check it yourself; the live numbers (this week’s budget, fair capacity, XNT price) need JavaScript.</p>
-<p class="muted">Independent, open-source, run by one anonymous builder who receives only the disclosed cuts. Not run by the XEN or X1 teams, not XEN Prime, not X1 Forge.</p>
-${section('How much can it pay', `<p>An epoch pays at most ${F.epochRules.budgetPctOfFreePool}% of the free reward pool and at most ${F.epochRules.rateCapK}× the liquidity-adjusted value burned (×2 Orbit, ×3 Moon Landing). That keeps the pool from ever being emptied, and it means nobody can promise you an amount. We don’t.</p>`)}
+<p class="muted">Independent, open-source, run by one anonymous builder who receives only the disclosed cuts. Not run by the XEN or X1 teams, and separate from every other XEN or X1 project.</p>
+<section id="quick"><h2>Quick answers</h2>${qaHtml(F.startQa)}<p class="muted">The long form: <a href="${esc(F.officialLinks.howItWorks)}">How Moon Forge works</a>.</p></section>
+${section('How much can it pay', `<p>An epoch pays at most ${F.epochRules.budgetPctOfFreePool}% of the free reward pool and at most ${F.epochRules.rateCapK}× the liquidity-adjusted value burned (×2 Orbit, ×3 Moon Landing). That keeps the pool from ever being emptied, and it means nobody can promise you an amount. We don’t.</p><p><strong>${esc(F.scale)}</strong></p>`)}
 ${section('How to do it, step by step', `<ol>${F.steps.map((s) => `<li><strong>${esc(s.title)}.</strong> ${esc(s.text)}</li>`).join('')}</ol>`)}
 ${section('Verify it yourself', `<ul>${F.verifyChecklist.map((c) => `<li><strong>${esc(c.title)}.</strong> ${esc(c.text)}</li>`).join('')}</ul>`)}
 ${verifyBlock(F)}
@@ -117,7 +144,7 @@ ${rulesLine(F)}`;
 }
 
 function bodyFaq(F) {
-    return `<h1>Questions people ask</h1>${faqHtml(F)}
+    return `<h1>Questions people ask</h1>${qaHtml(F.keyQa)}${faqHtml(F)}
 ${section('Not to be confused with', `<ul>${li(F.disambiguation)}</ul><p>${esc(F.oldBurns)}</p>`)}
 ${noticesHtml(F)}${rulesLine(F)}`;
 }
@@ -141,7 +168,7 @@ ${noticesHtml(F, ['forge-paused', 'genesis', 'forge-drops', 'rules-v2', 'upgrade
 
 function bodyGames(F) {
     const G = F.gameRules;
-    return `<h1>Games</h1><p>Every XNT game is an instruction of the Moon Forge program on X1. Part of every stake feeds the burners’ reward pool. Play only with amounts you can afford to lose: house games have a fixed ${F.fees.houseEdgePct}% edge (negative expected value) and the program is upgradeable during the test period.</p>
+    return `<h1>Games</h1><p>Every XNT game is an instruction of the Moon Forge program on X1. Part of every stake feeds the burners’ reward pool. Play only with amounts you can afford to lose: house games have a fixed ${F.fees.houseEdgePct}% edge (negative expected value) and the program is upgradeable during the test period.</p><p><strong>${esc(F.ageNotice)}</strong></p>
 ${table(['Game', 'Type', 'Rules', 'Status'], F.games.map((g) => [g.name, g.kind, g.summary, g.status]))}
 ${section('Fairness', p([G.randomness, G.settlement, G.circuitBreaker, G.sessionKeys]))}
 ${section('Fees', `<p>House edge ${F.fees.houseEdgePct}%: ${F.fees.edgeToPoolPct}% reward pool, ${F.fees.edgeToArchitectPct}% architect, ${F.fees.edgeToBankrollPct}% bankroll. P2P rake ${F.fees.p2pRakePct}% only when someone wins: ${F.fees.rakeToPoolPct}% pool, ${F.fees.rakeToArchitectPct}% architect, ${F.fees.rakeToDrawPct}% lottery. Burn Lottery tickets pay ${F.fees.p2pRakePct}% at purchase. Be the House withdrawals have a ${F.fees.houseWithdrawHours} h cooldown.</p>`)}
@@ -178,7 +205,7 @@ ${noticesHtml(F, ['rules-v2', 'forge-drops'])}${rulesLine(F)}`;
 function bodyApp(F, route) {
     const extra = route.path === '/forge/'
         ? `<p>${esc(F.oldBurns)}</p><p>Before signing: the burn is irreversible, your only cost is gas on that chain, Moon Forge takes no fee on this path, and the burn transaction links your EVM address to your X1 address publicly and forever.</p>`
-        : route.path === '/donate/' ? `<p>Donations go to the reward pool <code>${esc(F.identity.rewardVaultPda)}</code>; 100% reaches burners through the weekly budget (at most ${F.epochRules.budgetPctOfFreePool}% of the free pool per epoch). Nothing is taken on the way.</p>`
+        : route.path === '/donate/' ? `<p>Donations go to the reward pool <code>${esc(F.identity.rewardVaultPda)}</code>; the pool pays burners through the weekly budget (at most ${F.epochRules.budgetPctOfFreePool}% of the free pool per epoch) and small running costs (keeper tips). The architect receives nothing from it.</p>`
             : `<p>Claims stay open ${F.epochRules.claimWindowDays} days after an epoch is published; the public keeper usually submits them. Vested XNT is pushed with "Withdraw vested".</p>`;
     return `<h1>${esc(route.title.replace(/ \|.*$/, ''))}</h1><p>${esc(route.description)}</p>${extra}<p class="muted">This page needs JavaScript and a wallet. New here? Read <a href="${href('/start/')}">Start here</a> first.</p>${rulesLine(F)}`;
 }
@@ -217,7 +244,7 @@ function jsonLd(F, route, site) {
     const page = { '@type': 'WebPage', '@id': canonical, url: canonical, name: route.title, description: route.description, inLanguage: 'en', isPartOf: { '@id': `${site}#website` }, about: { '@id': `${site}#app` } };
     const graph = [org, website, app, code, page];
     if (route.path === '/start/' || route.path === '/faq/') {
-        graph.push({ '@type': 'FAQPage', '@id': `${canonical}#faq`, url: canonical, mainEntity: F.faq.map((f) => ({ '@type': 'Question', name: f.q, acceptedAnswer: { '@type': 'Answer', text: f.a } })) });
+        graph.push({ '@type': 'FAQPage', '@id': `${canonical}#faq`, url: canonical, mainEntity: pageQa(F, route.path).map((f) => ({ '@type': 'Question', name: f.q, acceptedAnswer: { '@type': 'Answer', text: f.a } })) });
     }
     return JSON.stringify({ '@context': 'https://schema.org', '@graph': graph }).replace(/<\//g, '<\\/');
 }
@@ -263,17 +290,23 @@ function llmsTxt(F) {
 
 > ${I.description}
 
+${F.scale}
+
 Program: ${I.programId} (X1 mainnet, RPC ${I.x1Rpc}; source tag ${F.rules.program}). Burn portals: ${I.portal} (the same address on ${F.liveChains.map((c) => c.name).join(', ')}; Ethereum and PulseChain have no portal). Artifacts collection: ${I.collectionPda}. Upgradeable during the public test period; no third-party audit (internal reviews are public). ${F.disambiguation[0]} ${F.disambiguation[1]}
+
+${F.position}
 
 ${F.oldBurns}
 
-Rules described: program tag ${F.rules.program}, oracle ${F.rules.oracle}, valid from ${F.rules.validFrom} (texts checked on ${F.rules.describedAsOf}). Dated notices: ${F.notices.map((n) => `${n.id} (${n.date})`).join(', ')}; see llms-full.txt.
+Rules described: program tag ${F.rules.program}, oracle ${F.rules.oracle}, valid from ${F.rules.validFrom} (texts checked on ${F.rules.describedAsOf}). Dated notices: ${F.notices.map((n) => `${n.id} (${n.date})`).join(', ')}; see llms-full.txt. Answers below that name the final upgrade (planned 2026-11-18) or the v3 rules (first epoch planned 2026-11-22) describe published plans, not the live program.
 
 ## Start
 - [Start here](${site}start/): how to burn XEN for XNT step by step, verify-it-yourself checklist, FAQ
-- [FAQ](${site}faq/): the questions people ask, including old burns, XEN Prime, X1 Forge and the Genesis airdrop
+- [How it works](${L.howItWorks}): the plain guide: where the XNT comes from, how a burn is valued, Artifacts, games, the Legacy Pilot, chains, who controls what, how to check it, the risks
+- [FAQ](${site}faq/): the questions people ask, including where the XNT comes from, old burns, other XEN and X1 projects, games and the Genesis airdrop
 - [Transparency](${site}transparency/): program and upgrade authority, vaults, who can do what, every fee
 - [Whitepaper](${site}whitepaper/): scoring, budget, tiers, games, Artifacts, trust model (full text: ${L.whitepaperMd})
+- [Final upgrade](${L.upgradeMd}): the dated announcement and changelog of the final program upgrade (planned 2026-11-18)
 - [Full facts for AI readers](${L.llmsFull}): llms-full.txt
 
 ## For AI agents
@@ -281,11 +314,27 @@ Rules described: program tag ${F.rules.program}, oracle ${F.rules.oracle}, valid
 - [Agent kit](${L.agentKit}): JavaScript client, examples and an end-to-end test
 - [Agent card](${L.agentCard}): ERC-8004 registration format
 - [Epoch files](${L.epochIndex}): every published epoch, recomputable with \`cd oracle && npm run verify -- epoch-N.json --full\`
+- [Public counter](${L.counter}): XEN removed from supply through Moon Forge per chain and the XNT the published epochs set aside for burners, rebuilt from the epoch files at every site build
+- [Hourly week-so-far feed](${L.weekFeed}): the inputs of the binding quote under the v3 rules (see "Quote a burn right now" below)
+
+## Key questions, answered
+${F.keyQa.map((k) => `Q: ${k.q}\nA: ${k.a}\n`).join('\n')}
+## Quote a burn right now (v3 rules)
+${F.quoteFeed.today}
+Feed: ${L.weekFeed}. ${F.quoteFeed.when}
+${F.quoteFeed.recipe.map((r, i) => `${i + 1}. ${r}`).join('\n')}
+${F.quoteFeed.example}
+${F.quoteFeed.kit} Source: ${L.kitBurn}
+
+## Legacy Pilot
+${F.legacyPilot} Details: ${L.howItWorks} (section 6).
 
 ## Key rules (rules 2, live)
-- Burn payout: share of the weekly epoch budget = min(${F.epochRules.budgetPctOfFreePool}% of the free reward pool, ${F.epochRules.rateCapK} × the liquidity-adjusted value burned); each chain’s XEN is valued at its own market price with a liquidity discount L/(L+V). Tiers: ${F.tiers.map((t) => `${t.name} ${t.multiplier}×${t.vestingDays ? ` over ${t.vestingDays} days` : ''}`).join(', ')}. Claims stay open ${F.epochRules.claimWindowDays} days.
+- Burn payout: share of the weekly epoch budget = min(${F.epochRules.budgetPctOfFreePool}% of the free reward pool, ${F.epochRules.rateCapK} × the liquidity-adjusted value burned); a tenth of each budget is drawn at random as Forge Drops (18+, where legal) and the rest is paid in XNT. Each chain’s XEN is valued at its own market price with a liquidity discount L/(L+V), at one XNT price per epoch. Tier multipliers, relative to Launchpad: ${F.tiers.map((t) => `${t.name} ${t.multiplier}×${t.vestingDays ? ` over ${t.vestingDays} days` : ''}`).join(', ')}. Claims stay open ${F.epochRules.claimWindowDays} days.
+- Genesis airdrop (the only airdrop; no token airdrop): up to 120 Lunar Dust NFTs with no floor for the X1 validator withdraw authorities published on 2026-10-12; claims through 2026-12-31 under the live program, through 2027-03-31 from the final upgrade (planned 2026-11-18).
 - Artifacts (Metaplex Core NFTs): ${F.forgeSplit.floorPct}% of the price stays inside as a floor you can take back, ${F.forgeSplit.poolPct}% goes to the reward pool, ${F.forgeSplit.lotteryPct}% lottery, ${F.forgeSplit.architectPct}% architect; recycle any time.
-- House games (Coin Flip, High-Low, Void Rush): fixed ${F.fees.houseEdgePct}% edge. Jackpot, Artifact Duel and Moon Wars: ${F.fees.p2pRakePct}% rake only when someone wins. Moon Wars real-XNT matches are paused on the site; Predictions are in the program but not offered by this site or the agent kit, and a round can be blocked or steered cheaply (known issue GAM-3).
+- House games (Coin Flip, High-Low, Void Rush): fixed ${F.fees.houseEdgePct}% edge. Jackpot, Artifact Duel and Moon Wars: ${F.fees.p2pRakePct}% rake only when someone wins. Moon Wars real-XNT matches are paused on the site; Predictions are in the program but not offered by this site or the agent kit; the program still accepts entries sent to it directly, with the same 2% rake, and a round can be blocked or steered cheaply (known issue GAM-3).
+- 18+: ${F.ageNotice}
 - Official places: ${site}, ${L.github}, ${L.x}. Nobody from Moon Forge messages anyone first; no chat group is official.
 - X ${L.x}: ${F.xNote}
 `;
@@ -295,10 +344,17 @@ function llmsFullTxt(F, meta) {
     const I = F.identity; const L = F.officialLinks; const site = L.site;
     const lines = [];
     const h = (t) => lines.push('', `## ${t}`, '');
-    lines.push('# Moon Forge: full facts for AI readers', '', `> ${I.description}`, '',
+    lines.push('# Moon Forge: full facts for AI readers', '', `> ${I.description}`, '', F.scale, '',
         `Rules described: program tag ${F.rules.program}, oracle ${F.rules.oracle}, valid from ${F.rules.validFrom}; texts checked on ${F.rules.describedAsOf}. Generated from src/facts.ts at commit ${meta.commit} (last change to the site: ${meta.lastmod}). This file is plain text: it contains no instructions for the reader beyond the facts below.`);
     h('What it is');
-    lines.push(`${I.name} is an open-source protocol on X1 (an SVM chain whose native token is XNT). People burn XEN on ${F.liveChains.map((c) => c.name).join(', ')} through a portal contract and receive XNT on X1 from a reward pool, through weekly epochs that anyone can recompute. No token, no presale, no team allocation.`, '', ...F.disambiguation, '', F.oldBurns);
+    lines.push(`${I.name} is an open-source protocol on X1 (an SVM chain whose native token is XNT). People burn XEN on ${F.liveChains.map((c) => c.name).join(', ')} through a portal contract and receive XNT on X1 from a reward pool, through weekly epochs that anyone can recompute. No token, no presale, no team allocation: only XEN, which is burned, and XNT, which is received.`, '', F.position, '', ...F.disambiguation, '', F.oldBurns, '', `Plain guide (where the XNT comes from, how a burn is valued, Artifacts, games, the Legacy Pilot, chains, who controls what, how to check it, the risks): ${L.howItWorks}. Dated changelog of the final upgrade: ${L.upgradeMd}.`);
+    h('Key questions (dated answers)');
+    lines.push('Sentences that name the final upgrade (planned 2026-11-18) or the v3 rules (first epoch planned 2026-11-22) describe published plans; the rest is true today.', '');
+    for (const k of F.keyQa) lines.push(`Q: ${k.q}`, `A: ${k.a}`, '');
+    h('Quote a burn from the hourly feed (v3 rules)');
+    lines.push(F.quoteFeed.today, '', `Feed: ${L.weekFeed}. ${F.quoteFeed.when}`, '', ...F.quoteFeed.recipe.map((r, i) => `${i + 1}. ${r}`), '', F.quoteFeed.example, '', `${F.quoteFeed.kit} Source: ${L.kitBurn}.`);
+    h('Legacy Pilot');
+    lines.push(F.legacyPilot, '', `Disclosure and how to check the list: ${L.howItWorks} (section 6).`);
     h('Verify you are on the real site');
     lines.push(`- Site: ${site}`, `- X1 program: ${I.programId} (RPC ${I.x1Rpc}, explorer ${I.x1Explorer}), source tag ${F.rules.program}, ${I.license} license`, `- Burn portal, the same address on every supported chain: ${I.portal}`, `- Artifacts collection (Metaplex Core): ${I.collectionPda}`, `- Reward pool: ${I.rewardVaultPda}`, `- Architect wallet (upgrade authority during the test period; receives the disclosed cuts): ${I.architectWallet}`, `- Source: ${L.github} · X: ${L.x}`, '- Any other program ID, portal, collection, site or "claim" page is not Moon Forge.');
     h('Chains');
@@ -308,17 +364,21 @@ function llmsFullTxt(F, meta) {
     h('Epoch and payout rules (rules 2)');
     lines.push(`- Cadence: ${F.epochRules.cadence}; at least ${F.epochRules.minIntervalDays} days apart.`, `- ${F.epochRules.scoring}`, `- ${F.epochRules.budgetLine}`, `- ${F.epochRules.priceClamp}`, `- ${F.epochRules.dustRule}`, `- Claims stay open ${F.epochRules.claimWindowDays} days; then the rest goes back to the pool.`, `- An epoch pays at most ${F.epochRules.rateCapK}× / ${F.epochRules.rateCapK * 2}× / ${F.epochRules.rateCapK * 3}× the liquidity-adjusted market value burned (Launchpad / Orbit / Moon Landing). Nobody can promise an amount: what a week pays depends on the pool and on how much others burn.`);
     h('Tiers and vesting');
+    lines.push('Rules 2 (live): multipliers relative to Launchpad. From the first epoch under the v3 rules (planned 2026-11-22) Launchpad receives 1.25× the counted value, Orbit 2.5× and Moon Landing 3.75× (see the key questions).', '');
     for (const t of F.tiers) lines.push(`- ${t.name}: ${t.multiplier}×, ${t.vestingDays ? `linear vesting over ${t.vestingDays} days, ${t.penaltyPct}% penalty on the unvested part if ejected early (to the pool)` : 'paid at claim'}`);
     h('Fees and splits (compile-time constants of the program)');
     lines.push(`- Burn → claim → vesting → withdrawal: ${F.fees.burnPathPct}%`, `- House edge: ${F.fees.houseEdgePct}% (${F.fees.edgeToPoolPct}% reward pool, ${F.fees.edgeToArchitectPct}% architect, ${F.fees.edgeToBankrollPct}% bankroll)`, `- P2P rake (Jackpot, Artifact Duel, Moon Wars), only when someone wins: ${F.fees.p2pRakePct}% (${F.fees.rakeToPoolPct}% pool, ${F.fees.rakeToArchitectPct}% architect, ${F.fees.rakeToDrawPct}% lottery)`, `- Burn Lottery ticket: ${F.fees.p2pRakePct}% at purchase; the winner gets 50% of the vault`, `- Artifact forge price: ${F.forgeSplit.floorPct}% floor kept inside the NFT, ${F.forgeSplit.poolPct}% reward pool, ${F.forgeSplit.lotteryPct}% lottery, ${F.forgeSplit.architectPct}% architect`, `- Secondary royalty where honored: ${F.fees.secondaryRoyaltyPct}%`, `- Keeper tips, paid by the pool: ${F.fees.keeperTipXnt} XNT per claim ≥ ${F.fees.keeperTipMinClaimXnt} XNT; ${F.fees.dropKeeperTipXnt} XNT per Forge Drop`, `- A bet can win at most ${F.fees.maxExposurePct}% of the free bankroll; unsettled payouts stay under ${F.fees.maxTotalExposurePct}% of it; daily circuit breaker at ${F.fees.maxDailyLossPct}%`);
     h('Artifacts (Metaplex Core NFTs)');
+    lines.push('Rules of the live program and the current oracle (boost, chips, ticket, split); the planned rules from the final upgrade are in the key question on Artifacts above.', '');
     for (const a of F.artifacts) lines.push(`- ${a.name} (${a.element}): max ${a.supply} alive, base price ${a.basePriceXnt} XNT, burn boost +${a.boostPct}%, ${a.weeklyChips} weekly chips`);
     lines.push('', F.artifactRules.pricing, F.artifactRules.floors, F.artifactRules.boost, F.artifactRules.trading, F.artifactRules.genesis);
     h('Games');
+    lines.push(`18+: ${F.ageNotice}`, '');
     for (const g of F.games) lines.push(`- ${g.name} (${g.kind}): ${g.summary} Status: ${g.status}.`);
     lines.push('', F.gameRules.randomness, F.gameRules.settlement, F.gameRules.circuitBreaker, F.gameRules.sessionKeys);
     h('Verification');
     lines.push(`Each epoch file (burns, prices, liquidity, every leaf) is public at ${L.epochIndex} and hash-committed on-chain. Anyone can run \`cd oracle && npm run verify -- epoch-N.json --full\` from ${L.github} and get the same result.`);
+    lines.push('', `Public counter: ${L.counter} gives the XEN removed from supply through Moon Forge per chain and the XNT the published epochs set aside for burners, computed only from the epoch files and rebuilt at every site build.`);
     h('Trust assumptions');
     for (const t of F.trust) lines.push(`- ${t}`);
     h('Risks');
@@ -353,6 +413,8 @@ const meta = {
 const generated = { 'llms.txt': llmsTxt(F), 'llms-full.txt': llmsFullTxt(F, meta), 'sitemap.xml': sitemapXml(F, meta) };
 for (const [name, text] of Object.entries(generated)) lint(name, text);
 lintSources();
+const counter = await loadCounter();
+if (counter) lint('counter.json', JSON.stringify(counter));
 
 if (CHECK) {
     const volatile = (s) => s.replace(/<lastmod>[^<]*<\/lastmod>/g, '<lastmod/>').replace(/Generated from src\/facts\.ts at commit [^\n]*/g, 'Generated').replace(/\r\n/g, '\n');
@@ -399,6 +461,7 @@ for (const route of F.routes) {
 }
 fs.writeFileSync(path.join(DIST, '404.html'), pageHtml(F, template, { ...F.routes[0], title: 'Page not found | Moon Forge', description: F.identity.description }, site, { notFound: true }));
 for (const [name, text] of Object.entries(generated)) fs.writeFileSync(path.join(DIST, name), text);
+if (counter) fs.writeFileSync(path.join(DIST, 'counter.json'), JSON.stringify(counter, null, 1) + '\n');
 const robots = fs.readFileSync(path.join(DIST, 'robots.txt'), 'utf8');
 if (!robots.includes(`Sitemap: ${site}sitemap.xml`)) { console.error('prerender: dist/robots.txt has no Sitemap line'); process.exit(1); }
-console.log(`prerender: ${written} routes + 404.html, llms.txt, llms-full.txt, sitemap.xml written to dist/ (rules ${F.rules.oracle}, tag ${F.rules.program}, lastmod ${meta.lastmod})`);
+console.log(`prerender: ${written} routes + 404.html, llms.txt, llms-full.txt, sitemap.xml${counter ? ', counter.json' : ''} written to dist/ (rules ${F.rules.oracle}, tag ${F.rules.program}, lastmod ${meta.lastmod})`);

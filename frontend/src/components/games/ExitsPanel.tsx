@@ -16,6 +16,7 @@ import PredictionExits from './PredictionsPanel';
 import { PendingHouseBets } from './HouseGames';
 import type { GameCtx } from './types';
 import { useRules3 } from '../../v3/detect';
+import { ExitsV3 } from '../../v3/ui/GamesV3';
 
 export default function ExitsPanel({ ctx }: { ctx: GameCtx }) {
     // rules 3 (src/v3/detect.ts): the Jackpot is closed and drawn by the house keeper; false on the live program
@@ -39,7 +40,8 @@ export default function ExitsPanel({ ctx }: { ctx: GameCtx }) {
                     <GameWallet ctx={ctx} exitsOnly />
                     <PendingHouseBets ctx={ctx} />
                     <BeTheHouse ctx={ctx} exitsOnly />
-                    <DuelPanel ctx={ctx} exitsOnly />
+                    {/* rules 3: sealed duels, matches and keeper bets (src/v3/ui/GamesV3.tsx ExitsV3); MoonWarsReal keeps matches from before the upgrade */}
+                    {rules3 ? <ExitsV3 ctx={ctx} /> : <DuelPanel ctx={ctx} exitsOnly />}
                     <MoonWarsReal ctx={ctx} exitsOnly />
                     <JackpotPanel ctx={ctx} exitsOnly keeperDraws={rules3} />
                     <LotteryPanel ctx={ctx} exitsOnly />

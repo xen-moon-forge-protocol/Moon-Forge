@@ -16,6 +16,7 @@ import { MARKET_MAX_LISTING_SECONDS, MARKET_MIN_PRICE } from './constants';
 import { accountFilters, decodeListing, type ListingView } from './layout';
 import { PROGRAM_PK } from './detect';
 import { marketSplit } from './market';
+import { coreClosedOrFalse, recycleRemainingAccounts } from './core-hatch';
 
 const bn = (n: number | bigint | string) => new anchor.BN(n.toString());
 const me = (p: X1Provider) => new PublicKey(p.publicKey.toString());
@@ -42,13 +43,22 @@ export async function forgeArtifactV3(p: X1Provider, tier: number, shownPrice: b
     }));
 }
 
-/** recycle_artifact under rules 3 (extra_state appended): the floor comes back, the slot is freed. */
+/**
+ * recycle_artifact under rules 3 (extra_state appended): the floor comes back, the slot is freed. r9 hatch: when Metaplex
+ * Core is closed on X1 (src/v3/core-hatch.ts), Core's ProgramData is passed as the one remaining account and the program
+ * pays the floor without the burn; otherwise no remaining account (the normal path). Pure: every account explicit.
+ */
+export function buildRecycleArtifactV3(program: anchor.Program, owner: PublicKey, asset: PublicKey, coreClosed: boolean) {
+    return program.methods.recycleArtifact().accountsPartial({
+        config: V3_PDA.config(), asset, record: V3_PDA.artifact(asset), collection: V3_PDA.collection(), owner, coreProgram: MPL_CORE,
+        systemProgram: SystemProgram.programId, extraState: V3_PDA.extraState(),
+    }).remainingAccounts(recycleRemainingAccounts(coreClosed));
+}
 export async function recycleArtifactV3(p: X1Provider, asset: PublicKey) {
     const program = await getProgramV3(p, readConnection);
-    return send(p, 'recycle_artifact', program.methods.recycleArtifact().accountsPartial({
-        config: V3_PDA.config(), asset, record: V3_PDA.artifact(asset), collection: V3_PDA.collection(), owner: me(p), coreProgram: MPL_CORE,
-        systemProgram: SystemProgram.programId, extraState: V3_PDA.extraState(),
-    }));
+    // a failed read keeps the normal path (no remaining account), never a guess
+    const closed = await coreClosedOrFalse(readConnection);
+    return send(p, 'recycle_artifact', buildRecycleArtifactV3(program, me(p), asset, closed));
 }
 
 /** claim_extra: one verified extra leaf (src/v3/extra.ts refuses anything not verified against the on-chain root). */

@@ -13,6 +13,7 @@ import { CHAINS, formatNumber, PROJECT_LINKS } from '../lib/constants';
 import { LINKS, LINKS_URL } from '../lib/links';
 import { AddrLink, Notice, Row, Xnt } from '../components/ui';
 import FairValueEngine from '../components/FairValueEngine';
+import PublicCounter from '../components/PublicCounter';
 import { INTERIM } from '../content/interim';
 import { lazy, Suspense } from 'react';
 import { useRules3 } from '../v3/detect';
@@ -66,6 +67,9 @@ export default function TransparencyPage() {
                 </div>
                 <p className="text-xs text-lunar-500 mt-2">Any other program ID, portal, collection, site or "claim" page is not Moon Forge. {LINKS.notOfficial}</p>
             </section>
+
+            {/* Public counter: XEN removed per chain and XNT set aside, from the published epoch files only (also dist/counter.json) */}
+            <PublicCounter />
 
             {/* Program & upgrade authority */}
             <section className="glass-card">

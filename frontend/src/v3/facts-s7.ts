@@ -7,7 +7,7 @@
  * Wording: docs/WORDING.md (no earn/yield/profit/guarantee/invest; the rebate is tied to the holder’s own burns, not promised,
  * can stop (WORDING "Artifacts and the rebate"); market fees never go to the extra pot). Pure data: no React, no web3.
  */
-import { ARTIFACT_PRICE, FORGE_SPLIT_PCT, KEEPER_BOND_MIN, KEEPER_SETTLE_TIP, MARKET_MIN_PRICE, MIN_PRICE_BPS, XNT } from './constants';
+import { ARTIFACT_PRICE, FORGE_SPLIT_PCT, JACKPOT_MAX_POT, KEEPER_BOND_MIN, KEEPER_SETTLE_TIP, MARKET_MIN_PRICE, MIN_PRICE_BPS, XNT } from './constants';
 
 /** Filled at S7 with the git tag of the deployed source (the upgrade transaction is cited in UPGRADE-2026-11.md). */
 export const S7_PROGRAM_TAG: string | null = null;
@@ -31,23 +31,27 @@ export const artifactRulesS7 = {
     walletBurn: 'Burning an Artifact in a wallet app sends its floor to the reward pool: recycle it through Moon Forge instead.',
 } as const;
 
-/** F1-b (owner answers of 2026-10-25): why no keeper was armed at the upgrade, in the words of the staged texts (docs/WORDING.md). */
-const NO_KEEPER_WHY = 'no keeper was armed at the upgrade, because a keeper bond posted while no keeper runs could be drained at no cost';
+/**
+ * r9: house games and the Jackpot are offered only while the chain shows a live keeper (src/v3/keeper.ts keeperLiveness:
+ * seat armed, bond of at least 20 XNT, not idle for 28 days, its service levels kept on the bets now pending). No constant or
+ * later site release decides it: after the freeze nobody may change the site.
+ */
+const LIVE_GATE = `only while the chain shows a live keeper: armed, bonded with at least ${xnt(KEEPER_BOND_MIN)} XNT, not idle for 28 days and keeping its service levels on the bets pending now, with no bond withdrawal announced and no more than 32 draws waiting for a reveal (checked from X1 on every visit, never a setting)`;
 
 export const gamesS7 = {
-    intro: 'Every XNT game is an instruction of the Moon Forge program on X1. Since the final upgrade house bets and the Jackpot are drawn from the house keeper’s hash chain (values the keeper committed to before the bet) mixed with a later block hash. A house bet the keeper does not draw in time is paid to the player from the keeper’s bond (the stake back, or the payout if the keeper had anchored it); a Jackpot round it does not draw in time is refunded and the keeper’s bond can be penalized. Part of every stake feeds the burners’ reward pool. House games and the Jackpot stay hidden on this site until a keeper that runs continuously has met its published service levels for a week.',
-    house: `House games (Coin Flip, High-Low, Void Rush) are drawn on the house keeper’s hash chain since the final upgrade; a bet the keeper does not draw in time is paid for by the keeper’s bond: the player gets the payout from the bond if the bet was anchored and not revealed, or its whole stake back if it was never anchored, and the bond then loses the stake too. New house bets stay hidden on this site until a keeper that runs continuously has met its published service levels for a week: ${NO_KEEPER_WHY}, and without a keeper seat the program takes no house bet. Bets placed before the upgrade settle under their own rules.`,
-    jackpot: `The Jackpot is drawn on the house keeper’s hash chain, its pot is capped at 20 XNT, and a single-player round is refunded. This site offers it only after a keeper that runs continuously has met its published service levels for a week, and then only while its seat holds a bond of at least ${xnt(KEEPER_BOND_MIN)} XNT.`,
-    jackpotOff: `The Jackpot is hidden on this site until a keeper that runs continuously has met its published service levels for a week and its seat holds a bond of at least ${xnt(KEEPER_BOND_MIN)} XNT: ${NO_KEEPER_WHY}. Without a keeper seat, a Jackpot round that ends refunds every entry. Refunds and rounds already entered stay available below.`,
+    intro: `Every XNT game is an instruction of the Moon Forge program on X1. Since the final upgrade house bets and the Jackpot are drawn from the house keeper’s hash chain (values the keeper committed to before the bet) mixed with a later block hash; the Artifact Duel and Moon Wars are sealed player-versus-player games that need no keeper. A house bet the keeper does not draw in time is paid to the player from the keeper’s bond (the stake back, or the payout if the keeper had anchored it); a Jackpot round it does not draw in time is refunded and the keeper’s bond can be penalized. Part of every stake feeds the burners’ reward pool. This site offers house games and the Jackpot ${LIVE_GATE}.`,
+    house: `House games (Coin Flip, High-Low, Void Rush) are drawn on the house keeper’s hash chain since the final upgrade; a bet the keeper does not draw in time is paid for by the keeper’s bond: the player gets the payout from the bond if the bet was anchored and not revealed, or its whole stake back if it was never anchored, and the bond then loses the stake too. This site shows new house bets ${LIVE_GATE}; without a keeper seat the program takes no house bet. Bets placed before the upgrade settle under their own rules.`,
+    jackpot: `The Jackpot is drawn on the house keeper’s hash chain, its pot is capped at ${xnt(JACKPOT_MAX_POT)} XNT, and a single-player round is refunded. This site offers it ${LIVE_GATE}.`,
+    jackpotOff: 'The Jackpot is hidden on this site while the chain shows no live keeper (the reasons are listed above). Without a keeper seat, a Jackpot round that ends refunds every entry. Refunds and rounds already entered stay available below.',
     lottery: 'The Burn Lottery takes no new entries since the final upgrade. A round that was open at the upgrade still closes, draws and pays under its own rules: those steps stay here.',
-    duel: 'Artifact Duels use sealed joins since the final upgrade; this site does not offer new duels yet. Your own open duels (cancel, reveal, timeout) stay available below.',
-    wars: 'Real-XNT Moon Wars matches stay paused on this site until a keeper that runs continuously has met its published service levels for a week; the free practice is open.',
-    predictions: 'Predictions are in the program but not offered on this site or in the agent kit; only the exits (lock, settle, claim, refund) of rounds entered before remain.',
-    fees: `House edge 2% (1% reward pool, 0.5% architect, 0.5% bankroll). The registered house keeper receives a settle tip of at most ${xnt(KEEPER_SETTLE_TIP, 4)} XNT per settled bet, never more than half of that bet’s 1% pool share: a running cost of the pool, never paid on a refund. P2P rake 2% only when someone wins: 1.5% to the reward pool and 0.5% to the architect; nothing to the lottery.`,
+    duel: 'Artifact Duels use sealed choices since the final upgrade: both players lock a hidden element, the joiner opens it within 10 minutes and the creator reveals within about an hour. No Artifact and no keeper are needed.',
+    wars: 'Real-XNT Moon Wars matches start sealed since the final upgrade: each player locks half of the seed before seeing the other half, then both play under a chess clock. No Artifact and no keeper are needed; the free practice uses the same rules.',
+    predictions: 'Predictions are in the program but not offered on this site or in the agent kit; only the exits (lock, settle, claim, refund) of rounds entered before remain. The program still accepts entries sent to it directly and takes the same 2% rake when someone wins (1.5% reward pool, 0.5% architect).',
+    fees: `House edge 2% (1% reward pool, 0.5% architect, 0.5% bankroll; a little more at most Void Rush targets, whose win chance is rounded down to 0.01%). The registered house keeper receives a settle tip of at most ${xnt(KEEPER_SETTLE_TIP, 4)} XNT per settled bet, never more than half of that bet’s 1% pool share: a running cost of the pool, never paid on a refund. P2P rake 2% only when someone wins: 1.5% to the reward pool and 0.5% to the architect; nothing to the lottery.`,
     limits: 'A bet can win at most 0.25% of the free bankroll; all unsettled payouts stay under 5% of it; counting every unsettled bet as won, the bankroll may lose at most 3% per UTC day and 15% over 7 days.',
     houseWithdraw: 'Be the House withdrawals: request, wait 24 h, then withdraw within the next 24 h (an expired request is renewed).',
-    /** r7 audit F8: shown above Be the House while KEEPER_SLA_MET is false (src/v3/keeper.ts houseNoBetsNoticeShown). */
-    houseNoBets: 'No house bet is accepted until a house keeper is armed, and this site lists house games only after that keeper has met its published service levels for a week; that may not happen. A deposit made now sees no new house bets until then; you can withdraw it at any time (request, wait 24 h, withdraw within the next 24 h).',
+    /** Shown above Be the House whenever house games are not offered (src/v3/keeper.ts houseNoBetsNoticeShown). */
+    houseNoBets: `No house bet is accepted while no house keeper is armed, and this site lists house games ${LIVE_GATE}; that may not happen. A deposit made now may see no new house bets; you can withdraw it at any time (request, wait 24 h, withdraw within the next 24 h).`,
 } as const;
 
 export const noticesS7 = [

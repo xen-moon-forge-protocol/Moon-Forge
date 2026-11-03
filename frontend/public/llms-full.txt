@@ -1,18 +1,101 @@
 # Moon Forge: full facts for AI readers
 
-> Burn XEN on Base, Optimism, Polygon, BSC or Avalanche and receive XNT on X1. Each chain’s XEN is valued at its own market; zero protocol fee on the burn path; every weekly epoch can be recomputed by anyone. Independent open-source project, no token.
+> Burn XEN on Base, Optimism, Polygon, BSC or Avalanche through XEN’s own burn() and receive XNT on X1 from a public reward pool: one more path for XEN holders. Each chain’s XEN is valued at its own market; zero protocol fee on the burn path; every weekly epoch can be recomputed by anyone. Independent open-source project, no token.
 
-Rules described: program tag program-2026-10-12, oracle v2, valid from 2026-10-12; texts checked on 2026-10-22. Generated from src/facts.ts at commit 57073d2 (last change to the site: 2026-10-27T13:12:31.000Z). This file is plain text: it contains no instructions for the reader beyond the facts below.
+Real scale (2026-11-02): the reward pool held about 6.5 XNT, so one week can pay at most about 0.65 XNT to all burners together under the current rules (10% of the free pool) and about 0.5 XNT under the v3 rules (8%), however much is burned. No payout is promised. Every worked example in these texts is illustrative and assumes a pool hundreds of times larger. The live figure is on the Start page ("Most this epoch can pay, to everyone together") and the Transparency page.
+
+Rules described: program tag program-2026-10-12, oracle v2, valid from 2026-10-12; texts checked on 2026-11-02. Generated from src/facts.ts at commit 7790ce1 (last change to the site: 2026-11-02T13:22:06.000Z). This file is plain text: it contains no instructions for the reader beyond the facts below.
 
 ## What it is
 
-Moon Forge is an open-source protocol on X1 (an SVM chain whose native token is XNT). People burn XEN on Base, Optimism, Polygon, BNB Chain, Avalanche through a portal contract and receive XNT on X1 from a reward pool, through weekly epochs that anyone can recompute. No token, no presale, no team allocation.
+Moon Forge is an open-source protocol on X1 (an SVM chain whose native token is XNT). People burn XEN on Base, Optimism, Polygon, BNB Chain, Avalanche through a portal contract and receive XNT on X1 from a reward pool, through weekly epochs that anyone can recompute. No token, no presale, no team allocation: only XEN, which is burned, and XNT, which is received.
 
-Moon Forge is not XEN Prime (announced for Ethereum XEN only), not X1 Forge ($FORGE, an unrelated project on X1), and not "Moon Party" (an X1 event that was discussed in the XEN community and never took place).
+Everyone around XEN and X1 wants the same thing: a real use for XEN. Not everyone takes the same path. Moon Forge is one more way, alongside the others: it works with XEN on Base, Optimism, Polygon, BSC and Avalanche, burn by burn, under one public rule. Holders can use several ways with different parts of their XEN (each XEN can be burned only once).
+
+Moon Forge is independent and open source. It is separate from X1 Labs, the XEN team and every other XEN or X1 project; each project has its own rules, and none speaks for the others. Moon Forge is not the "Moon Party". Moon Forge and X1 Forge are separate projects with similar names.
 Moon Forge is not run by the XEN team, X1 Labs or the X1 team. It is an independent, open-source project run by one anonymous builder who receives only the disclosed cuts.
-Moon Forge has no token, no presale and no team allocation. Any "Moon Forge" token, presale, whitelist or airdrop claim page elsewhere is not ours.
+Moon Forge has no token, no token airdrop, no presale and no team allocation. The only airdrop is the Genesis airdrop: up to 120 Lunar Dust NFTs with no floor for the X1 validator withdraw authorities published on 2026-10-12, claimed only on this site’s /artifacts/ page. Any "Moon Forge" token, presale, whitelist or other airdrop claim page is not ours.
 
-Only burns made through the Moon Forge portals (from each chain’s start block) are paid. Past or legacy XEN burns made elsewhere, for example the burn records tracked by xen.pub or the 2024 plan to redeem Ethereum XEN burns, are not counted and cannot be claimed here. Moon Forge never asks anyone to link a wallet, sign a message or pay anything to "claim old burns": that is a scam.
+Fresh burns only: only burns made through the Moon Forge portals (from each chain’s start block) are paid, and each one is recorded in XEN’s own burn ledger (userBurns, on the burning address) on its chain. Burns made before the portals existed, or anywhere else, are not counted and cannot be claimed here. Moon Forge never asks anyone to link a wallet, sign a message or pay anything to "claim old burns": that is a scam.
+
+Plain guide (where the XNT comes from, how a burn is valued, Artifacts, games, the Legacy Pilot, chains, who controls what, how to check it, the risks): https://github.com/xen-moon-forge-protocol/Moon-Forge/blob/main/docs/HOW-IT-WORKS.md. Dated changelog of the final upgrade: https://github.com/xen-moon-forge-protocol/Moon-Forge/blob/main/docs/UPGRADE-2026-11.md.
+
+## Key questions (dated answers)
+
+Sentences that name the final upgrade (planned 2026-11-18) or the v3 rules (first epoch planned 2026-11-22) describe published plans; the rest is true today.
+
+Q: What is Moon Forge, in one sentence?
+A: You burn XEN on Base, Optimism, Polygon, BSC or Avalanche through XEN’s own burn() and receive XNT on X1 from a public reward pool, valued by one public market rule, with no new token. The pool is small: on 2026-11-02 it held about 6.5 XNT, so one week can pay at most about 0.5 to 0.65 XNT to all burners together. No payout is promised. It is one more way for XEN holders, alongside the others in the XEN and X1 ecosystem; holders can use several with different parts of their XEN.
+
+Q: Is there a Moon Forge token or airdrop? What do I need?
+A: No token, no token airdrop, no presale and no team allocation: only XEN, which you burn, and XNT, X1’s native coin, which you receive. The only airdrop is the Genesis airdrop: up to 120 Lunar Dust NFTs with no floor for the X1 validator withdraw authorities published on 2026-10-12 (claims through 2026-12-31 under the live program, through 2027-03-31 from the final upgrade planned 2026-11-18). To burn you need XEN in your own wallet on one of the five chains, a little gas on that chain, and an X1 address; you need no XNT to receive. Artifacts are optional NFTs bought with XNT.
+
+Q: Which XEN counts? Do old burns or Ethereum XEN count?
+A: Fresh burns only: the chain’s own XEN, held in your own wallet, burned through the Moon Forge portal 0x7b00f314aB48D223bee567181CA89c65126Bf6E9 on Base (8453), Optimism (10), Polygon (137), BNB Chain (56) or Avalanche (43114), each one recorded in XEN’s own burn ledger (userBurns) for your address. XEN on an exchange, in a stake or a XENFT, or wrapped or bridged does not count until it is liquid XEN in your wallet on one of those chains. Ethereum XEN: no. Moon Forge has no portal on Ethereum or PulseChain and none is planned by this project; Ethereum XEN already has its own path in the XEN ecosystem. Old burns: not paid here. The planned Legacy Pilot (FAQ) adds a one-time top-up only to a new burn made on one of the five chains from the same EVM address.
+
+Q: Where does the XNT come from?
+A: From one program account on X1, the reward pool, filled by Artifact forges (40% of the price today, 20% from the final upgrade planned 2026-11-18), house-game stakes (1%), player-versus-player and Predictions pots when someone wins (1% today, 1.5% from the final upgrade), Artifact market sales (2%, from the final upgrade), early-exit penalties, bonds and donations; the first funding came from the project’s own launch funding. On 2026-11-02 it held about 6.5 XNT; the Start and Transparency pages show the live figure. The program cannot create XNT, and no instruction lets anyone withdraw the pool; until the freeze, the upgrade key could still replace the program’s code. Moon Forge never buys XNT or XEN on the market.
+
+Q: How much XNT does a burn receive?
+A: No amount is promised, and a whole week is small: on 2026-11-02 the reward pool held about 6.5 XNT, so one week could pay at most about 0.65 XNT to all burners together under the current rules (10% of the free pool) and about 0.5 XNT under the v3 rules (8%). Today (rules 2) each burn receives a share of that weekly budget in proportion to its liquidity-adjusted value, at most 1.25× that value (Orbit 2× and Moon Landing 3× that), at one XNT price for the whole epoch; a tenth of each budget is drawn at random as Forge Drops. From the first epoch under the v3 rules (planned 2026-11-22) a burn is priced at its chain’s XEN price in its hour (the lowest of the 24-hour median, the last hourly close and 1.25× the chain’s reference), counted at about what selling it into that chain’s market would bring, and converted at that hour’s XNT price; Launchpad receives 1.25× that counted value in XNT at the claim, Orbit 2.5× released over 45 days, Moon Landing 3.75× released over 180 days, only while the week’s capacity lasts. Before you sign, the site shows the part that fits today’s capacity next to what selling would bring.
+
+Q: Is it fair to someone burning 20 billion XEN when others burn trillions?
+A: Every burn is valued by the same published rule, whatever the wallet or the chain, and splitting across wallets gains nothing. Under the v3 rules (planned from 2026-11-22) each chain’s liquidity curve counts a small burn at almost its full market value and a huge one at much less: on a market $2,000 deep, 20 billion XEN worth $50 counts $48.78, while 2 trillion XEN worth $5,000 counts $1,428.57 (100× the XEN, about 29× the counted value). These are illustrative numbers: on 2026-11-02 a whole week could pay all burners together only about 0.5 XNT. Capacity opens in daily slices, so a giant early burn takes only the slice open when it arrives. The limits: scripts can burn the moment a day’s slice opens, and if the day is full your burn waits for the week’s leftover, which may be nothing; burns on the same chain in the same hour share that hour’s value; a large burn lowers what later burns on the same chain count for, halving every 14 days; wallets the published rules list as the operator’s are paid after everyone else. Today (rules 2) every share is pro rata to value, and a large burn on your chain in the same week lowers the value of every burn on that chain.
+
+Q: What happens when many people burn?
+A: Under the v3 rules (planned from 2026-11-22) a week pays at most 8% of the free reward pool (about 0.5 XNT on 2026-11-02), never more than seven times 2% of the XDEX pool’s XNT reserve, opened in seven daily slices counted from the previous publication, first come, first served. What does not fit at arrival is paid only from the week’s leftover (the Launchpad part only), which is not promised; what is still unpaid is not carried to a later week. There is no deadline: capacity nobody uses stays in the pool for later weeks. The program never lets a week’s budget, with the oracle’s allowance, go above 10% of the free pool. Today (rules 2) every burner is cut pro rata when that 10% limit binds.
+
+Q: When am I paid?
+A: Weekly: each payout round (an epoch) comes at least 6 days after the previous one, scheduled for Sunday 00:00 UTC and often later. Today claims open as soon as an epoch is published. From the final upgrade (planned 2026-11-18) claims open 48 hours after publication, so that anyone can check the epoch and cancel (void) a wrong one by paying a bond, and they stay open 90 days; under the v3 rules the project’s keeper (a public bot that anyone can also run) usually claims every payout for its burner, even very small ones. Expect about 2 to 9 days from a burn to a Launchpad payout; Orbit and Moon Landing then release over 45 or 180 days from the claim.
+
+Q: Do I receive more or less with an Artifact?
+A: An Artifact is an optional purchase, not a source of income: half of its price is spent the day you forge it, and the other half stays in it as a floor you take back by recycling. Today (rules 2) a held Artifact raises its holder’s share of an epoch by 5% to 50% inside the same budget. From the first epoch under the v3 rules (planned 2026-11-22) an Artifact never changes what the reward pool pays for a burn: a holder and a non-holder are paid the same. A forged Artifact can add a weekly rebate from a separate extra pot, filled only by 25% of forge prices (it does not exist before the upgrade), and only for the holder’s own burns that the reward pool did not fully pay: at most 2% of the price paid per Artifact per week, for 52 weeks, while the pot lasts; a holder who does not burn receives nothing from it. As a group, forgers can get back at most 75% of what they pay (the 50% floors plus at most the 25% extra pot): 20% goes to all burners and 5% to the architect.
+
+Q: I only want to play. Can I try to win XNT with games?
+A: Only if you are 18 or older (or the legal age for games of chance where you live) and such games are legal where you are. You play with XNT only and can lose the whole stake. House games (Coin Flip, High-Low, Void Rush) have a built-in edge: on average 97 to 98 XNT come back per 100 staked, depending on the game and the target. Today the site offers house games, the Jackpot and the Burn Lottery (settle your own house bet within about 3 minutes); a Duel needs an Artifact and forging is paused on the site; real-XNT Moon Wars is paused (free practice open). From the final upgrade (planned 2026-11-18) the site offers sealed Duels and Moon Wars with no Artifact needed (2% of the pot only when someone wins; draws refunded), and shows house games and the Jackpot only while the chain shows a live house keeper; none is scheduled, so they may stay hidden. The Burn Lottery then takes no new entries.
+
+Q: Who controls Moon Forge?
+A: The burn portals have no owner and cannot be changed. The X1 program can still be upgraded by one key held by the anonymous builder, who leaves after the freeze; until then that key could replace the code, including code that moves the pools. The freeze (burning that key) is planned for 2026-12-02 at the earliest and 2026-12-31 at the latest. After it, no key can change a rule, fee or split, pause the program or withdraw the pools; XNT leaves them only by the program’s own rules. What remains, from the final upgrade (planned 2026-11-18): an oracle seat that publishes the weekly epochs within on-chain limits (at most 10% of the free pool, at least 6 days apart, cancellable by anyone with a bond during a 48-hour hold), a cold key that can replace a stolen hot key, a house keeper once someone arms one, and an architect payee that can only move or renounce its own address. The architect payee receives nothing from burns, claims or the pools; the pool pays small running costs (the oracle’s allowance and keeper tips) to the keys that run the oracle and the keeper.
+
+Q: How can the community take it over and run it?
+A: Today anyone can run the keeper (npm run keeper in the oracle folder, with a funded X1 key), recompute every epoch (npm run verify -- epoch-N.json --full), host the site (MIT license) and mirror the epoch files, which the agent kit checks against the data stored on X1; publishing an epoch still needs the oracle key. From the final upgrade (planned 2026-11-18) anyone can cancel (void) a wrong epoch during its 48-hour hold by paying a bond into the pool (10% of its budget, at least 0.05 XNT); if no epoch survives its hold for 28 days, the largest voider can take the oracle seat from day 28 and anyone from day 29, with a bond of 10% of the free pool (at least 1 XNT), and keep publishing on the same pools with the same code. From 2026-12-16 anyone can create a house-keeper seat that was never created, with a bond of at least 20 XNT (npm run keeper-arm), and anyone can take a keeper seat idle for 28 days, with nothing pending and the same bond (npm run keeper-take). Nobody can veto either.
+
+Q: Is it a scam? How can I check?
+A: Check it yourself: the source is public (MIT); the X1 explorer shows who can still upgrade the program (https://explorer.mainnet.x1.xyz/address/57UE1U1t23ztg2noLp8pcpGW1B1Xw25rLH6ra9Mchea9); the deployed bytes can be rebuilt and their hash compared; the portals are verified on Sourcify; every weekly epoch can be recomputed with npm run verify; counter.json lists the XEN removed from supply and the XNT set aside. There is no token, no presale and no fee on the burn path, and no instruction lets anyone withdraw the pools. What you still trust: no third-party audit (internal reviews only), a bounded oracle, the upgrade key until the freeze, and GitHub for the automation. Moon Forge never messages anyone first and never asks anyone to sign or pay to claim old burns or the Legacy Pilot.
+
+Q: What are the risks?
+A: A burn cannot be undone. The pool is small (about 6.5 XNT on 2026-11-02), so payouts are small; a payout can be less than selling, late, or nothing if no epoch is published; XNT is volatile and thin. Scripts can take a day’s capacity first. There is no third-party audit; bugs cannot be fixed after the freeze, and the builder leaves then. The oracle is bounded but trusted: a wrong epoch that nobody cancels within 48 hours is paid, and an honest epoch that someone cancels by paying a bond is not paid later. The reward rules are oracle policy: after the switch to the v3 rules (announced at least one full epoch ahead), any later change needs a new rule set announced at least two epochs ahead, never applied backwards. Artifact floors depend on Metaplex Core, and the whole program on X1’s runtime. Games can lose the whole stake. Taxes are your own responsibility. If the GitHub account falls, the site, the oracle, the keeper and the epoch files stop; payouts pause; the pools stay locked in the program.
+
+Q: Is Moon Forge part of another XEN or X1 project, or of X1 Forge?
+A: No. Moon Forge is independent and open source, run by one anonymous builder who receives the disclosed cuts. It is separate from X1 Labs, the XEN team and every other XEN or X1 project, and it is not an official XNT allocation; each project has its own rules, and none speaks for the others. Moon Forge and X1 Forge are separate projects with similar names.
+
+Q: Does burning raise the price of XEN or XNT?
+A: Each burn permanently removes that XEN from its chain’s supply, and XEN records it in its own burn ledger. Moon Forge makes no claim about the price of XEN or XNT: prices depend on demand, and new XEN can still be minted. Moon Forge does not buy XEN or XNT on the market.
+
+
+## Quote a burn from the hourly feed (v3 rules)
+
+No file quotes a burn today: under the current rules the estimator on The Forge shows an estimate only. On 2026-11-02 one week could pay at most about 0.65 XNT to all burners together (about 0.5 XNT under the v3 rules).
+
+Feed: https://xen-moon-forge-protocol.github.io/Moon-Forge/feed/week-so-far.json. From the first window under the v3 rules (after the final upgrade, planned 2026-11-18; first v3 epoch planned 2026-11-22) the oracle rewrites this file every hour; before that it does not exist (HTTP 404) and no quote exists. It must continue the newest epoch file (prevEpoch, prevDataHash); asOf is its time (X1 unix seconds).
+
+1. XEN price (USD per XEN) = min(readings.xen["<chainId>"][0] (24-hour median), readings.xen["<chainId>"][1] (last close), chains[<chain>].capE18) / 10^18; when readings.xen["<chainId>"] is null, chains[<chain>].spotE18 / 10^18.
+2. spot (USD) = XEN amount × XEN price.
+3. L = the chain’s liquidity for the week, fixed at the previous build (chains[].L.next of the previous epoch file); S = the chain’s curve memory: chains[<chain>].S + chains[<chain>].hourSpot, halved every 336 hours since chains[<chain>].hour (unix hours); in that same hour use S = chains[<chain>].S and add chains[<chain>].hourSpot to V. L, S and hourSpot are micro-USD (divide by 10^6).
+4. counted (USD) = spot × L² / ((L + S) × (L + S + V)), V = everything burned on that chain in that hour, the new burn included.
+5. XNT price (USD) = max(readings.xnt[0], readings.xnt[1], xnt.floorE18) / 10^18; when readings.xnt is null, xnt.buildE18 / 10^18.
+6. Launchpad XNT = 1.25 × counted / XNT price; Orbit 2× that (vesting 45 days), Moon Landing 3× that (vesting 180 days).
+7. Binding only for the part that fits today’s room: capacity.cash × (d + 1) / 7 − capacity.senior lamports (1 XNT = 10^9 lamports), d = whole days since window.startTs, at most capacity.cash; the rest is paid only from the week’s leftover, which is not promised.
+
+Example (illustrative numbers; it assumes a week whose capacity is hundreds of times today’s, while on 2026-11-02 a whole week could pay all burners together only about 0.5 XNT): 1,000,000,000,000 XEN on BNB Chain (56). readings.xen["56"] = ["102000000", "100000000"], capE18 "131250000" → price $1.00e-10, spot $100. L = 3600000000 micro-USD ($3,600), S = 0, no other burn that hour → counted = 3,600² × 100 / (3,600 × 3,700) = $97.30. readings.xnt = ["240000000000000000", "250000000000000000"], floorE18 "156000000000000000" → XNT $0.25. Launchpad = 1.25 × 97.30 / 0.25 = 486.49 XNT (Orbit 972.97, Moon Landing 1,459.46), binding if today’s room is at least that.
+
+The agent kit’s quoteBurn() computes the same number from the feed and the previous epoch file, and refuses a feed that is stale or does not continue the newest epoch file. Source: https://github.com/xen-moon-forge-protocol/Moon-Forge/blob/main/agents/kit/burn.mjs.
+
+## Legacy Pilot
+
+Legacy Pilot (planned, dated): a one-time recognition for EVM addresses that burned XEN before 2026-11-01 00:00 UTC on Ethereum, Base, Optimism, Polygon, BSC or Avalanche (recorded by XEN’s own contract as a transfer to the zero address). From the first epoch under the v3 rules (planned 2026-11-22), and only if the public list deployments/legacy-burners.json is built and its sha256 pinned in the oracle before that epoch is built (not yet done on 2026-11-02). (1) The first new burn of a listed address on one of the five chains, paid under the rule (burns paid under the current rules do not count), receives up to 50% more than the normal rules pay it, as Launchpad XNT, once per address; the top-ups come only from the week’s capacity left after every normal payout (together at most 25% of that leftover, none in a week the pool falls short), so nobody receives less in the week one is paid, and the pool then grows a little more slowly. (2) An X1 wallet named in a burn of a listed address: the first new Artifact (forged after the final upgrade, in the week of such a burn or later) that it holds at a weekly snapshot receives 20% of its forge price from the extra pot, only from what that pot’s weekly release leaves after the normal holder rebates, paid over later weeks when one week is not enough; once per wallet and once per address. Old burns themselves are still not paid, and nothing has to be claimed, signed or paid for it.
+
+Disclosure and how to check the list: https://github.com/xen-moon-forge-protocol/Moon-Forge/blob/main/docs/HOW-IT-WORKS.md (section 6).
 
 ## Verify you are on the real site
 
@@ -56,6 +139,8 @@ Only burns made through the Moon Forge portals (from each chain’s start block)
 
 ## Tiers and vesting
 
+Rules 2 (live): multipliers relative to Launchpad. From the first epoch under the v3 rules (planned 2026-11-22) Launchpad receives 1.25× the counted value, Orbit 2.5× and Moon Landing 3.75× (see the key questions).
+
 - Launchpad: 1×, paid at claim
 - Orbit: 2×, linear vesting over 45 days, 60% penalty on the unvested part if ejected early (to the pool)
 - Moon Landing: 3×, linear vesting over 180 days, 75% penalty on the unvested part if ejected early (to the pool)
@@ -73,6 +158,8 @@ Only burns made through the Moon Forge portals (from each chain’s start block)
 
 ## Artifacts (Metaplex Core NFTs)
 
+Rules of the live program and the current oracle (boost, chips, ticket, split); the planned rules from the final upgrade are in the key question on Artifacts above.
+
 - Lunar Dust (Lunar): max 600 alive, base price 10 XNT, burn boost +5%, 5 weekly chips
 - Cosmic Shard (Cosmic): max 300 alive, base price 25 XNT, burn boost +10%, 15 weekly chips
 - Solar Core (Solar): max 90 alive, base price 60 XNT, burn boost +20%, 40 weekly chips
@@ -82,19 +169,21 @@ Lunar Dust has a fixed price of 10 XNT. Cosmic Shard / Solar Core / Void Anomaly
 Floors by origin: forged = half of the price paid; Lunar Dust from a Forge Drop = the drop value (≥ 5 XNT); Genesis airdrop = none. Recycling gives the floor back and frees the supply slot.
 Only an Artifact held by the same owner at two consecutive epoch snapshots counts, and only the best one per wallet. A boost shifts shares between burners of the same epoch and never raises the total.
 Artifacts are standard Metaplex Core assets in the "Moon Forge Artifacts" collection and can be traded on any Core marketplace that supports X1. Moon Forge runs no marketplace and shows no listings. A 5% royalty to the architect is declared on the collection (paid only where the marketplace honors it).
-Genesis airdrop: up to 120 Lunar Dust with no floor for the 444 X1 validator withdraw authorities published on-chain on 2026-10-12 (one time, final). The claim is paused on this site until the final program upgrade. Claims close on 31 December 2026 (00:00 UTC on 1 January 2027) under the live program; the deadline may be extended by the final upgrade, and any new date is published with its changelog. The only Genesis claim is this site’s /artifacts/ page; any other "claim" link is not ours.
+Genesis airdrop: up to 120 Lunar Dust with no floor for the 444 X1 validator withdraw authorities published on-chain on 2026-10-12 (one time, final). The claim is paused on this site until the final program upgrade. Claims close on 31 December 2026 (00:00 UTC on 1 January 2027) under the live program; the published changelog of the final upgrade (planned 2026-11-18) extends it to 31 March 2027 (00:00 UTC on 1 April 2027). The only Genesis claim is this site’s /artifacts/ page; any other "claim" link is not ours.
 
 ## Games
 
-- Coin Flip (house): Pays 1.96×. Fixed 2% house edge: negative expected value. Status: live; keeper service level not yet promoted.
-- High-Low (house): 1–95% chance, pays 0.98 / chance. Fixed 2% house edge. Status: live; keeper service level not yet promoted.
-- Void Rush (house): 1.05×–100× targets, chance = 98% / target. Fixed 2% house edge. Status: live; keeper service level not yet promoted.
+18+: Games are for adults only: 18 or older (or the legal age for games of chance where you live), and only where such games are legal. You can lose the whole stake; house games have a fixed 2% edge, so players as a group lose. The site’s age and jurisdiction check is self-attested and stored only in the browser.
+
+- Coin Flip (house): Pays 1.96×. Fixed 2% house edge: negative expected value. Status: live on the current program (settle your own bet within about 3 minutes); from the final upgrade (planned 2026-11-18) shown on the site only while the chain shows a live house keeper.
+- High-Low (house): 1–95% chance, pays 0.98 / chance. Fixed 2% house edge. Status: live on the current program (settle your own bet within about 3 minutes); from the final upgrade (planned 2026-11-18) shown on the site only while the chain shows a live house keeper.
+- Void Rush (house): 1.05×–100× targets; the chance is 98% / target rounded down to 0.01%, so most targets pay back slightly under 98% (the worst 97.01%). A house edge of 2% or a little more. Status: live on the current program (settle your own bet within about 3 minutes); from the final upgrade (planned 2026-11-18) shown on the site only while the chain shows a live house keeper.
 - Jackpot (p2p): A round starts at the first entry and closes 10 minutes later; a single-player round is fully refunded; 2% rake only when someone wins. Status: live.
 - Artifact Duel (p2p): A live Artifact is the ticket; element hidden by commit-reveal; same or opposite element = draw with a full refund; the creator must reveal within 1 h. Status: live.
 - Moon Wars (p2p): Player-vs-player card matches, perfect information, every move checked by the program, 2 minutes per turn, 2% rake. Status: free practice only; real-XNT matches are paused on the site.
 - Burn Lottery (lottery): A round lasts 7 days from its first entry; weight = chips + 1-XNT tickets; the winner gets 50% of the vault; an unsettled round pays its prize to the burners’ pool. Status: live.
 - Be the House (house-backing): Deposit XNT into the game bankroll and share its result; 0.5% of every house stake stays in it and it pays the winners. 24 h withdrawal cooldown. You can lose. Status: live.
-- Predictions (p2p): XNT up/down rounds settled by an on-chain TWAP. Status: in the program, not offered by this site or the agent kit (read-only claim/refund view only); the round can be blocked or steered cheaply (known issue GAM-3).
+- Predictions (p2p): XNT up/down rounds settled by an on-chain TWAP. Status: in the program, not offered by this site or the agent kit (read-only claim/refund view only); the program still accepts entries sent to it directly, with the same 2% rake; a round can be blocked or steered cheaply (known issue GAM-3).
 
 House-game outcomes come from the hash of the slot after the bet: keccak("MOONFORGE_RNG" ‖ slotHash ‖ bet ‖ seed) mod 10000. The result is not known to the player or the protocol when the stake is locked; it is verifiable by anyone, and the producer of the drawing slot can influence the roll (until the program upgrade).
 A house bet not settled within ~3 minutes counts as lost even if its roll was a win (the site settles immediately; the keeper is a safety net).
@@ -104,6 +193,8 @@ Session keys (bots) play house games only and can never withdraw; Jackpot, Burn 
 ## Verification
 
 Each epoch file (burns, prices, liquidity, every leaf) is public at https://xen-moon-forge-protocol.github.io/Moon-Forge/epochs/index.json and hash-committed on-chain. Anyone can run `cd oracle && npm run verify -- epoch-N.json --full` from https://github.com/xen-moon-forge-protocol/Moon-Forge and get the same result.
+
+Public counter: https://xen-moon-forge-protocol.github.io/Moon-Forge/counter.json gives the XEN removed from supply through Moon Forge per chain and the XNT the published epochs set aside for burners, computed only from the epoch files and rebuilt at every site build.
 
 ## Trust assumptions
 
@@ -117,6 +208,7 @@ Each epoch file (burns, prices, liquidity, every leaf) is public at https://xen-
 ## Risks
 
 - Burned XEN is gone forever. There is no undo.
+- The pool is small: on 2026-11-02 it held about 6.5 XNT, so one week can pay at most about 0.65 XNT to all burners together.
 - You are paid in XNT, and its price moves.
 - What a week pays depends on the pool and on how much others burn; nobody can promise an amount.
 - Smart contracts can have bugs; there is no third-party audit (internal reviews are public). The program is upgradeable during the test period.
@@ -139,23 +231,17 @@ X https://x.com/MoonXenForge: No posts are planned: announcements are on this si
 
 ## FAQ
 
-Q: Is this XEN Prime? Is it run by the X1 team?
-A: No to both. Moon Forge is an independent, open-source project run by one anonymous builder who receives only the disclosed cuts. XEN Prime is announced for Ethereum XEN only; Moon Forge works with XEN on Base, Optimism, Polygon, BNB Chain, Avalanche. You can use both with different XEN.
+Q: Can I use Moon Forge alongside other XEN programs?
+A: Yes. Moon Forge is one option among several in the XEN and X1 ecosystem and replaces none of them. Each XEN can be burned only once, so holders who use several paths use a different part of their XEN for each. A burn here is paid only under Moon Forge’s rules; Moon Forge does not promise that it counts in any other program, so check each program’s own rules.
 
-Q: Is this X1 Forge, or the "Moon Party"?
-A: No. X1 Forge ($FORGE) is a separate, unrelated project on X1. "Moon Party" was an X1 event discussed in the XEN community that never took place; Moon Forge is not it and is not run by X1 Labs. Moon Forge has no token at all: if you see a "Moon Forge" token, presale or airdrop claim anywhere, it is not us. Official places: this site, the GitHub repository and the project’s X account.
-
-Q: Do my old XEN burns count?
-A: No. Only burns made through the Moon Forge portal on a supported chain are paid. Burns you made before, or anywhere else (for example the records tracked by xen.pub, or the 2024 plan to redeem Ethereum XEN burns), are not counted and cannot be claimed here. Moon Forge never asks you to link a wallet, sign a message or pay a fee to "claim old burns": anyone who does is running a scam.
+Q: I burned XEN before Moon Forge. Is there anything for me?
+A: Old burns are not paid here. A separate, one-time Legacy Pilot is planned for addresses that burned XEN before 2026-11-01 00:00 UTC: up to 50% more on their first new burn through a Moon Forge portal (from the same EVM address, on one of the five chains), paid only from capacity the normal payouts leave unused, and 20% of the price of a first new Artifact held by a wallet such a burn names, paid only from what the extra pot’s weekly release leaves; from the first epoch under the v3 rules (planned 2026-11-22) and only once its public address list is built and pinned. Nothing has to be claimed, signed or paid for it; anyone asking you to is running a scam.
 
 Q: My X1 wallet is brand new. Where does a tiny payout go?
 A: To your wallet, as long as it ends with at least about 0.00089 XNT (the chain’s minimum for an account). A smaller payment to an empty wallet is credited to your game balance instead; move it with Withdraw in the Games page (that needs your signature and a little XNT for the fee).
 
 Q: Can I calculate what I will get?
 A: Yes, after the fact, exactly: the epoch file lists every burn, its price and your share, and the program checks the totals. Before the epoch you can only estimate, because your share depends on what others burn that week. The estimator on The Forge shows the upper bound, and the Transparency page shows, chain by chain, what the same burn is worth right now and why.
-
-Q: What do I get burning a little when others burn trillions?
-A: Exactly your share of the value: 1% of the week’s value gets 1% of the budget, whatever the size. Under rules 2, small burners also enter the Forge Drops draw with a chance equal to their expected drop value ÷ 5 XNT.
 
 Q: Is there a minimum?
 A: Any amount above zero can be burned. A burn worth less than a millionth of a dollar after the liquidity discount scores zero. A payout under 0.02 XNT carries no keeper tip. Today the project’s oracle and keeper submit every unclaimed payout, tipped or not, when they run; if yours is still unclaimed, claiming it yourself costs a network fee and a small rent deposit (the receipt’s rent can be recovered after the epoch closes). All your burns to one X1 address in one tier and epoch are paid as one payout.
@@ -173,10 +259,10 @@ Q: When and how am I paid?
 A: After the weekly epoch is published. The public keeper may submit the claim for you (its runs are irregular); otherwise claim on Missions within 90 days, or the amount goes back to the pool for everyone.
 
 Q: Is the Genesis airdrop real? Where do I claim it?
-A: Yes, for the 444 X1 validator withdraw authorities published on-chain on 2026-10-12: up to 120 Lunar Dust. The claim is paused on this site until the final program upgrade (the claim button on /artifacts/ is disabled). Claims close on 31 December 2026 (00:00 UTC on 1 January 2027) under the live program; the deadline may be extended by the final upgrade, and any new date is published with its changelog. The only Genesis claim is this site’s /artifacts/ page. Any other "claim" link, message or form is not ours.
+A: Yes, for the 444 X1 validator withdraw authorities published on-chain on 2026-10-12: up to 120 Lunar Dust. The claim is paused on this site until the final program upgrade (the claim button on /artifacts/ is disabled). Claims close on 31 December 2026 (00:00 UTC on 1 January 2027) under the live program; the published changelog of the final upgrade (planned 2026-11-18) extends it to 31 March 2027 (00:00 UTC on 1 April 2027). The only Genesis claim is this site’s /artifacts/ page. Any other "claim" link, message or form is not ours.
 
 Q: Can AI agents play?
-A: Yes, with their own keypair, like anyone: the games are on-chain instructions. In Moon Wars every move is checked by the program; the creator currently has an edge (known issue GAM-4), and real-XNT matches are paused on the site at the moment (the program still accepts them). The agent kit on GitHub has a skill file, a JavaScript client and examples. Part of every pot goes to the burners’ pool.
+A: Yes, with their own keypair, like anyone, and only for an operator who is 18 or older (or the legal age for games of chance) where such games are legal; the stake can be lost. The games are on-chain instructions. In Moon Wars every move is checked by the program; the creator currently has an edge (known issue GAM-4), and real-XNT matches are paused on the site at the moment (the program still accepts them). The agent kit on GitHub has a skill file, a JavaScript client and examples. Part of every pot goes to the burners’ pool.
 
 Q: Where do I ask for help?
 A: X @MoonXenForge or an issue on GitHub. Nobody from Moon Forge will contact you first, and no chat group is official.
@@ -192,24 +278,25 @@ A: X @MoonXenForge or an issue on GitHub. Nobody from Moon Forge will contact yo
 
 ## Dated notices
 
-- 2026-10-22 (rules-v2): The live program and oracle are still version 2 (rules 2). A redesign of the weekly rewards is being prepared; this file will describe new rules only after they are live on X1 and the first epoch under them is published.
-- 2026-10-22 (forge-drops): Forge Drops (Lunar Dust drawn from 10% of each epoch budget, ≥ 5 XNT each) are part of rules 2 and are still sealed and paid by the v2 oracle; weekly lottery chips are a rule of the live program. Forge Drops and the Artifact boost are rules of the current oracle and apply to every epoch it builds. They are scheduled to be replaced at the oracle rules change (planned for November 2026 and announced on this page and on the project’s X account at least one full epoch ahead, with the date and the last publish transaction under the current rules); what replaces them is published with that announcement, not before. Chips, the weekly Artifact chips and the arena ticket are rules of the live program and keep working as described until the final upgrade (not before mid-November 2026; its source and full changelog are published at least 7 days before it, and its binary hash at least 48 hours before; earlier versions of this notice said 7 days for the hash too); what changes is published with the upgrade changelog, not before.
+- 2026-10-22 (rules-v2): The live program and oracle are still version 2 (rules 2); every undated rule in this file is a rule 2. The v3 rules are already published (docs/HOW-IT-WORKS.md, docs/UPGRADE-2026-11.md) and apply from the epoch of 2026-11-22 (planned); every sentence that describes them carries that date.
+- 2026-11-02 (final-upgrade): The final program upgrade is planned for Wednesday 2026-11-18, 16:00–20:00 UTC (moved from 2026-11-11; the same hours a week later if a gate is not green), and the first weekly epoch under the v3 reward rules for Sunday 2026-11-22. Burns made after the last epoch under the current rules is published (planned Sunday 2026-11-15) are paid under the v3 rules. The upgrade key is then burned (the freeze): earliest 2026-12-02, no later than 2026-12-31. Every planned rule is published in docs/UPGRADE-2026-11.md and explained in docs/HOW-IT-WORKS.md; the key questions give the dated answers.
+- 2026-10-22 (forge-drops): Forge Drops (Lunar Dust drawn at random from 10% of each epoch budget, ≥ 5 XNT each; a random draw: 18+ and only where such draws are legal) are part of rules 2 and are still sealed and paid by the v2 oracle; weekly lottery chips are a rule of the live program. Forge Drops and the Artifact boost are rules of the current oracle and apply to every epoch it builds. They are scheduled to be replaced at the oracle rules change (planned with the first epoch under the v3 rules (Sunday 2026-11-22) and announced on this site and in the GitHub repository at least one full epoch ahead, with the date and the last publish transaction under the current rules); the rules that replace them are already published (docs/HOW-IT-WORKS.md, docs/UPGRADE-2026-11.md). Chips, the weekly Artifact chips and the arena ticket are rules of the live program and keep working as described until the final upgrade (planned for 2026-11-18, 16:00–20:00 UTC (moved from 2026-11-11 on 2026-11-02; the same hours a week later if a gate is not green); its source and full changelog are published at least 7 days before it, and its binary hash at least 48 hours before; earlier versions of this notice said 7 days for the hash too); what changes is already published in the upgrade changelog (docs/UPGRADE-2026-11.md).
 - 2026-10-22 (moon-wars-paused): Real-XNT Moon Wars matches are paused on the site; free practice stays available.
-- 2026-10-22 (house-keeper): House games are available but not promoted until a public keeper meets its service level for a week; see the known-issues notice on the Games page.
-- 2026-10-22 (predictions-off): Predictions are in the program but not offered on the site (a round can be blocked or steered cheaply, known issue GAM-3); only a read-only claim/refund view of past rounds remains.
-- 2026-10-22 (forge-paused): Forging Artifacts and the Genesis claim are paused on this site until the final program upgrade (not before mid-November 2026; its source and full changelog are published at least 7 days before it, and its binary hash at least 48 hours before; earlier versions of this notice said 7 days for the hash too); the forge and claim buttons on /artifacts/ are disabled, while recycling an Artifact and the weekly chips claim stay open. The program itself still accepts forges from other clients.
-- 2026-10-22 (genesis): Genesis Lunar Dust: the claim is paused on this site until the final program upgrade. Claims close on 31 December 2026 (00:00 UTC on 1 January 2027) under the live program; the deadline may be extended by the final upgrade, and any new date is published with its changelog. After the upgrade a Genesis Lunar Dust is a collectible with a cosmetic badge: no floor, no rebate, no burn boost, no chips, no ticket, and it is not needed to play any game; recycling it gives back only the record’s rent. Moon Forge never messages anyone about Genesis.
+- 2026-11-02 (house-keeper): House games and the Jackpot are open under the live program (18+ and only where legal; settle your own house bet: one not settled within about 3 minutes counts as lost). From the final upgrade (planned 2026-11-18) the site reads the house keeper seat from X1 on every visit and shows them only while it is live: armed, bonded with at least 20 XNT, active within 28 days, no bond withdrawal announced, at most 32 draws waiting, and its service levels kept on the bets pending now. No keeper is armed at the upgrade.
+- 2026-10-22 (predictions-off): Predictions are in the program but not offered on the site or in the agent kit (a round can be blocked or steered cheaply, known issue GAM-3); only a read-only claim/refund view of past rounds remains. The program still accepts entries sent to it directly and takes the same 2% rake when someone wins (18+, where legal).
+- 2026-10-22 (forge-paused): Forging Artifacts and the Genesis claim are paused on this site until the final program upgrade (planned for 2026-11-18, 16:00–20:00 UTC (moved from 2026-11-11 on 2026-11-02; the same hours a week later if a gate is not green); its source and full changelog are published at least 7 days before it, and its binary hash at least 48 hours before; earlier versions of this notice said 7 days for the hash too); the forge and claim buttons on /artifacts/ are disabled, while recycling an Artifact and the weekly chips claim stay open. The program itself still accepts forges from other clients.
+- 2026-10-22 (genesis): Genesis Lunar Dust: the claim is paused on this site until the final program upgrade. Claims close on 31 December 2026 (00:00 UTC on 1 January 2027) under the live program; the published changelog of the final upgrade (planned 2026-11-18) extends it to 31 March 2027 (00:00 UTC on 1 April 2027). After the upgrade a Genesis Lunar Dust is a collectible with a cosmetic badge: no floor, no rebate, no burn boost, no chips, no ticket, and it is not needed to play any game; recycling it gives back only the record’s rent. Moon Forge never messages anyone about Genesis.
 - 2026-10-22 (upgrade-pending): The program can still be upgraded by the architect wallet during the public test period. The upgrade key is to be burned after the final upgrade, on the published freeze conditions (no later than 2026-12-31); the Start page reads the live value from X1.
 
 ## Pages
 
-- https://xen-moon-forge-protocol.github.io/Moon-Forge/: Burn XEN on Base, Optimism, Polygon, BSC or Avalanche and receive XNT on X1. Each chain’s XEN is valued at its own market; zero protocol fee on the burn path; every weekly epoch can be recomputed by anyone. Independent open-source project, no token.
+- https://xen-moon-forge-protocol.github.io/Moon-Forge/: Burn XEN on Base, Optimism, Polygon, BSC or Avalanche through XEN’s own burn() and receive XNT on X1 from a public reward pool: one more path for XEN holders. Each chain’s XEN is valued at its own market; zero protocol fee on the burn path; every weekly epoch can be recomputed by anyone. Independent open-source project, no token.
 - https://xen-moon-forge-protocol.github.io/Moon-Forge/start/: What Moon Forge can really pay this week, how to burn XEN for XNT step by step, how to verify it yourself, the risks, and the questions people ask.
-- https://xen-moon-forge-protocol.github.io/Moon-Forge/faq/: Questions people ask about Moon Forge: XEN Prime, X1 Forge, old burns, minimums, payouts, the Genesis airdrop and AI agents.
+- https://xen-moon-forge-protocol.github.io/Moon-Forge/faq/: Questions people ask about Moon Forge: where the XNT comes from, which XEN counts, old burns, fairness, games, who controls it, how to check it, minimums, payouts, the Genesis airdrop and AI agents.
 - https://xen-moon-forge-protocol.github.io/Moon-Forge/forge/: Burn XEN on Base, Optimism, Polygon, BNB Chain, Avalanche through the Moon Forge portal and receive XNT on X1. Zero protocol fee on the burn path.
 - https://xen-moon-forge-protocol.github.io/Moon-Forge/missions/: Claim your weekly XNT, follow vesting and withdraw vested XNT.
 - https://xen-moon-forge-protocol.github.io/Moon-Forge/artifacts/: Metaplex Core NFTs minted by the Moon Forge program: floor you can take back, burn boost, weekly chips and arena ticket.
-- https://xen-moon-forge-protocol.github.io/Moon-Forge/games/: On-chain XNT games of the Moon Forge program: house games with a fixed 2% edge, Jackpot, Artifact Duel, Moon Wars, Burn Lottery and Be the House.
-- https://xen-moon-forge-protocol.github.io/Moon-Forge/donate/: A donation to the reward pool goes 100% to XEN burners through the weekly budget.
+- https://xen-moon-forge-protocol.github.io/Moon-Forge/games/: On-chain XNT games of the Moon Forge program, 18+ only and only where legal: house games with a fixed 2% edge, Jackpot, Artifact Duel, Moon Wars, Burn Lottery and Be the House. You can lose the whole stake.
+- https://xen-moon-forge-protocol.github.io/Moon-Forge/donate/: A donation goes to the reward pool, which pays XEN burners through the weekly budget and small running costs (keeper tips). The architect receives nothing from it.
 - https://xen-moon-forge-protocol.github.io/Moon-Forge/transparency/: Program and upgrade authority, live configuration, vaults, lifetime counters, who can do what, every fee and split, key constants and epochs.
 - https://xen-moon-forge-protocol.github.io/Moon-Forge/whitepaper/: Problem, flow, scoring and payout, budget rules, games and fairness, Artifacts, fees, trust assumptions and risks of Moon Forge v2.
