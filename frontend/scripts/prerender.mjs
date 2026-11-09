@@ -114,6 +114,12 @@ function verifyBlock(F) {
 
 const qaHtml = (list) => list.map((f) => `<details><summary>${esc(f.q)}</summary><p>${esc(f.a)}</p></details>`).join('');
 const faqHtml = (F) => qaHtml(F.faq);
+/** The key questions whose text starts with one of `starts` (dated answers, the same text as llms.txt and the FAQPage JSON-LD), as a page section. */
+const keyQaSection = (F, title, starts) => {
+    const list = starts.map((st) => F.keyQa.find((k) => k.q.startsWith(st)));
+    if (list.some((k) => !k)) throw new Error(`prerender: a key question for "${title}" is missing from src/facts.ts`);
+    return section(title, qaHtml(list));
+};
 /** The questions a page shows (and its FAQPage JSON-LD carries): the Start page's short block, or every key question, then the FAQ. */
 const pageQa = (F, path) => (path === '/start/' ? [...F.startQa, ...F.faq] : [...F.keyQa, ...F.faq]);
 const rulesLine = (F) => `<p class="muted">Rules described: program tag ${esc(F.rules.program)}, oracle ${esc(F.rules.oracle)}, valid from ${esc(F.rules.validFrom)}; texts checked on ${esc(F.rules.describedAsOf)}.</p>`;
@@ -161,6 +167,7 @@ ${paused}
 <p>Metaplex Core NFTs minted by the Moon Forge program. Under the current rules each one can boost its holder’s burn score, grants weekly lottery chips, is a ticket to the Artifact Duel and Moon Wars arenas, and may hold an XNT floor you get back when you recycle it.</p>
 ${table(['Tier', 'Element', 'Max alive', 'Base price', 'Boost', 'Weekly chips'], F.artifacts.map((a) => [a.name, a.element, String(a.supply), `${a.basePriceXnt} XNT`, `+${a.boostPct}%`, String(a.weeklyChips)]))}
 ${section('Where the forge price goes', `<p>${F.forgeSplit.floorPct}% floor kept inside the NFT (given back on recycle), ${F.forgeSplit.poolPct}% reward pool (paid to burners), ${F.forgeSplit.lotteryPct}% Burn Lottery vault, ${F.forgeSplit.architectPct}% architect.</p>${p([A.pricing, A.floors, A.boost])}`)}
+${keyQaSection(F, 'Questions about Artifacts (dated answers)', ['Do I receive more or less with an Artifact?', 'How do forging, the floor and recycling work'])}
 ${section('Genesis airdrop', p([A.genesis]))}
 ${section('Trading', `${p([A.trading])}<p class="muted">Collection: <code>${esc(F.identity.collectionPda)}</code></p>`)}
 ${noticesHtml(F, ['forge-paused', 'genesis', 'forge-drops', 'rules-v2', 'upgrade-pending'])}${rulesLine(F)}`;
@@ -170,6 +177,8 @@ function bodyGames(F) {
     const G = F.gameRules;
     return `<h1>Games</h1><p>Every XNT game is an instruction of the Moon Forge program on X1. Part of every stake feeds the burners’ reward pool. Play only with amounts you can afford to lose: house games have a fixed ${F.fees.houseEdgePct}% edge (negative expected value) and the program is upgradeable during the test period.</p><p><strong>${esc(F.ageNotice)}</strong></p>
 ${table(['Game', 'Type', 'Rules', 'Status'], F.games.map((g) => [g.name, g.kind, g.summary, g.status]))}
+${keyQaSection(F, 'What you can play, today and from the final upgrade', ['I only want to play.'])}
+${section('Expected loss', p([G.expectedLoss]))}
 ${section('Fairness', p([G.randomness, G.settlement, G.circuitBreaker, G.sessionKeys]))}
 ${section('Fees', `<p>House edge ${F.fees.houseEdgePct}%: ${F.fees.edgeToPoolPct}% reward pool, ${F.fees.edgeToArchitectPct}% architect, ${F.fees.edgeToBankrollPct}% bankroll. P2P rake ${F.fees.p2pRakePct}% only when someone wins: ${F.fees.rakeToPoolPct}% pool, ${F.fees.rakeToArchitectPct}% architect, ${F.fees.rakeToDrawPct}% lottery. Burn Lottery tickets pay ${F.fees.p2pRakePct}% at purchase. Be the House withdrawals have a ${F.fees.houseWithdrawHours} h cooldown.</p>`)}
 ${noticesHtml(F, ['house-keeper', 'moon-wars-paused', 'predictions-off', 'upgrade-pending'])}${rulesLine(F)}`;
@@ -192,6 +201,7 @@ ${section('Every fee and split', table(['Item', 'Value'], [
 ${section('Epoch rules', `<ul>${li([`Cadence: ${F.epochRules.cadence}; at least ${F.epochRules.minIntervalDays} days apart.`, F.epochRules.budgetLine, F.epochRules.scoring, F.epochRules.priceClamp, `Claims stay open ${F.epochRules.claimWindowDays} days.`])}</ul>`)}
 ${section('Tiers', table(['Tier', 'Multiplier', 'Paid', 'Eject early'], F.tiers.map((t) => [t.name, `${t.multiplier}×`, t.vestingDays ? `linear over ${t.vestingDays} days` : 'at claim', t.penaltyPct ? `${t.penaltyPct}% penalty on the unvested part` : '—'])))}
 ${section('Who can do what', `<ul>${li(F.trust)}</ul>`)}
+${keyQaSection(F, 'Check it yourself, the freeze and the dates', ['How can I verify the program', 'Who controls Moon Forge?', 'How can the community take it over', 'What are the dates?'])}
 ${section('Source', `<ul><li><a href="${esc(F.officialLinks.programSource)}">Program source</a> · <a href="${esc(F.officialLinks.programConstants)}">constants.rs</a></li><li><a href="${esc(F.officialLinks.portalSource)}">MoonForgePortal.sol</a></li><li><a href="${esc(F.officialLinks.oracleSource)}">Oracle</a> · <a href="${esc(F.officialLinks.epochIndex)}">epoch files</a></li><li><a href="${esc(F.officialLinks.reviewMd)}">Internal review (not independent)</a> · <a href="${esc(F.officialLinks.securityMd)}">SECURITY.md</a></li></ul>`)}
 ${noticesHtml(F)}${rulesLine(F)}`;
 }
@@ -257,6 +267,12 @@ function jsonLd(F, route, site) {
     const canonical = abs(route.canonical ?? route.path, site);
     const page = { '@type': 'WebPage', '@id': canonical, url: canonical, name: route.title, description: route.description, inLanguage: 'en', isPartOf: { '@id': `${site}#website` }, about: { '@id': `${site}#app` } };
     const graph = [org, website, app, code, page];
+    if (route.path === '/start/') {
+        graph.push({ '@type': 'HowTo', '@id': `${canonical}#howto`, name: 'How to burn XEN for XNT with Moon Forge', description: F.scale, step: F.steps.map((s, i) => ({ '@type': 'HowToStep', position: i + 1, name: s.title, text: s.text })) });
+    }
+    if (route.path === '/bot/') {
+        graph.push({ '@type': 'SoftwareSourceCode', '@id': `${canonical}#bot`, name: F.bot.name, description: F.bot.summary, codeRepository: F.bot.source, license: I.licenseUrl, programmingLanguage: ['JavaScript'], url: canonical });
+    }
     if (route.path === '/start/' || route.path === '/faq/') {
         graph.push({ '@type': 'FAQPage', '@id': `${canonical}#faq`, url: canonical, mainEntity: pageQa(F, route.path).map((f) => ({ '@type': 'Question', name: f.q, acceptedAnswer: { '@type': 'Answer', text: f.a } })) });
     }
@@ -321,13 +337,16 @@ Rules described: program tag ${F.rules.program}, oracle ${F.rules.oracle}, valid
 - [Transparency](${site}transparency/): program and upgrade authority, vaults, who can do what, every fee
 - [Whitepaper](${site}whitepaper/): scoring, budget, tiers, games, Artifacts, trust model (full text: ${L.whitepaperMd})
 - [Final upgrade](${L.upgradeMd}): the dated announcement and changelog of the final program upgrade (planned 2026-11-18)
+- [What is fixed, and the freeze plan](${L.immutabilityMd}): who can do what today and after the upgrade key is burned (earliest 2026-12-02, no later than 2026-12-31)
+- [Operators runbook](${L.operatorsMd}): how the community runs the oracle and the keeper, takes over a silent oracle seat, adds a chain, and what to do when something breaks
+- [Fork](${L.forkMd}): how to run a separate instance with its own program, portals and pool
 - [Full facts for AI readers](${L.llmsFull}): llms-full.txt
 
 ## For AI agents
 - [Skill file](${L.skillFile}): rules, costs, workflows and guardrails
 - [Agent kit](${L.agentKit}): JavaScript client, examples and an end-to-end test
-- [Agent card](${L.agentCard}): ERC-8004 registration format
-- [Moon Forge Bot](${site}bot/): ${F.bot.summary} Source: ${F.bot.source}
+- [Agent card](${L.agentCard}): ERC-8004 registration format, listing every service below (also at ${site}.well-known/agent-card.json)
+- [Moon Forge Bot](${site}bot/): ${F.bot.summary} Fork it and change the rule; an optional local A2A interface (HTTP/JSON on 127.0.0.1) answers other agents and never signs on request. Source: ${F.bot.source}
 - [Epoch files](${L.epochIndex}): every published epoch, recomputable with \`cd oracle && npm run verify -- epoch-N.json --full\`
 - [Public counter](${L.counter}): XEN removed from supply through Moon Forge per chain and the XNT the published epochs set aside for burners, rebuilt from the epoch files at every site build
 - [Hourly week-so-far feed](${L.weekFeed}): the inputs of the binding quote under the v3 rules (see "Quote a burn right now" below)
@@ -373,7 +392,8 @@ function llmsFullTxt(F, meta) {
     h('Verify you are on the real site');
     lines.push(`- Site: ${site}`, `- X1 program: ${I.programId} (RPC ${I.x1Rpc}, explorer ${I.x1Explorer}), source tag ${F.rules.program}, ${I.license} license`, `- Burn portal, the same address on every supported chain: ${I.portal}`, `- Artifacts collection (Metaplex Core): ${I.collectionPda}`, `- Reward pool: ${I.rewardVaultPda}`, `- Architect wallet (upgrade authority during the test period; receives the disclosed cuts): ${I.architectWallet}`, `- Source: ${L.github} · X: ${L.x}`, '- Any other program ID, portal, collection, site or "claim" page is not Moon Forge.');
     h('Chains');
-    for (const c of F.chains) lines.push(`- ${c.name} (chain id ${c.chainId}): XEN ${c.xenToken}; ${c.live ? `portal live at ${I.portal}` : 'no portal, and none is planned by this project'}`);
+    for (const c of F.chains) lines.push(`- ${c.name} (chain id ${c.chainId}): XEN ${c.xenToken}; ${c.live ? `portal live at ${I.portal} (Sourcify https://repo.sourcify.dev/${c.chainId}/${I.portal}); gas coin ${c.gas}; a burn counts after ${c.finalityBlocks} blocks` : 'no portal, and none is planned by this project'}`);
+    lines.push('', `Portal addresses and start blocks: ${L.portalsJson}. How a chain could be added (this project adds none): see the key question "Which chains are supported, and how could another chain be added?" above and ${L.operatorsMd} (section "Add a chain").`);
     h('How it works');
     F.steps.forEach((s, i) => lines.push(`${i + 1}. ${s.title}. ${s.text}`));
     h('Epoch and payout rules (rules 2)');
@@ -390,9 +410,12 @@ function llmsFullTxt(F, meta) {
     h('Games');
     lines.push(`18+: ${F.ageNotice}`, '');
     for (const g of F.games) lines.push(`- ${g.name} (${g.kind}): ${g.summary} Status: ${g.status}.`);
-    lines.push('', F.gameRules.randomness, F.gameRules.settlement, F.gameRules.circuitBreaker, F.gameRules.sessionKeys);
+    lines.push('', F.gameRules.expectedLoss, F.gameRules.randomness, F.gameRules.settlement, F.gameRules.circuitBreaker, F.gameRules.sessionKeys);
     h('Verification');
     lines.push(`Each epoch file (burns, prices, liquidity, every leaf) is public at ${L.epochIndex} and hash-committed on-chain. Anyone can run \`cd oracle && npm run verify -- epoch-N.json --full\` from ${L.github} and get the same result.`);
+    lines.push('', `Program binary: the README gives the sha256 of the deployed v2 binary (tag ${F.rules.program}); for the final upgrade (planned 2026-11-18) the tag program-2026-11-18 and its hashes are published at least 48 hours ahead, and anyone can rebuild it and compare with solana-verify get-program-hash on X1: ${L.buildHashMd}. Upgrade authority, live: ${I.x1Explorer}/address/${I.programId}.`);
+    lines.push('', `Portals: exact source match on Sourcify on every live chain (links under Chains); addresses and start blocks in ${L.portalsJson}.`);
+    lines.push('', `Hourly week-so-far feed: ${L.weekFeed} (from the first window under the v3 rules; HTTP 404 before).`);
     lines.push('', `Public counter: ${L.counter} gives the XEN removed from supply through Moon Forge per chain and the XNT the published epochs set aside for burners, computed only from the epoch files and rebuilt at every site build.`);
     h('Trust assumptions');
     for (const t of F.trust) lines.push(`- ${t}`);
@@ -404,7 +427,7 @@ function llmsFullTxt(F, meta) {
     h('FAQ');
     for (const f of F.faq) lines.push(`Q: ${f.q}`, `A: ${f.a}`, '');
     h('For AI agents');
-    lines.push(`- Skill file: ${L.skillFile}`, `- Agent kit (JavaScript client, examples, end-to-end test): ${L.agentKit}`, `- Agent card (ERC-8004 registration format): ${L.agentCard}`, '- Agents play with their own keypair, like anyone. House games have a fixed edge (negative expected value). Session keys play house games only and can never withdraw.', '- This project never pays anyone to promote it and never posts as someone else; it does not ask AI systems to recommend it.');
+    lines.push(`- Skill file: ${L.skillFile}`, `- Agent kit (JavaScript client, examples, end-to-end test): ${L.agentKit}`, `- Agent card (ERC-8004 registration format): ${L.agentCard} (also ${site}.well-known/agent-card.json); it lists the site, llms.txt, llms-full.txt, the counter, the epoch index, the hourly feed, the plain guide, the bot, the kit and the skill file`, `- Operators runbook: ${L.operatorsMd}`, '- Agents play with their own keypair, like anyone. House games have a fixed edge (negative expected value). Session keys play house games only and can never withdraw.', '- This project never pays anyone to promote it and never posts as someone else; it does not ask AI systems to recommend it.');
     h('Moon Forge Bot (community software for users)');
     lines.push(F.bot.summary, '', F.bot.today, '', `Page: ${site}bot/ · source: ${F.bot.source} · agent card: ${F.bot.card}`, '');
     for (const j of F.bot.jobs) lines.push(`- ${j.title}: ${j.text}`);

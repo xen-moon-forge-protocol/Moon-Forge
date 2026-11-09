@@ -97,6 +97,18 @@ export const officialLinks = {
     kitBurn: `${GITHUB_URL}/blob/main/agents/kit/burn.mjs`,
     /** Moon Forge Bot: forkable community software for users (bots/moon-forge-bot) */
     botSource: `${GITHUB_URL}/tree/main/bots/moon-forge-bot`,
+    /** the /bot/ page of the site */
+    botPage: `${SITE_URL}bot/`,
+    /** runbooks: oracle, keeper, community takeover, "Add a chain", what to do when something breaks */
+    operatorsMd: `${GITHUB_URL}/blob/main/OPERATORS.md`,
+    /** a separate instance (own program, portals and pool) */
+    forkMd: `${GITHUB_URL}/blob/main/FORK.md`,
+    /** what is fixed, what is not, and the freeze plan */
+    immutabilityMd: `${GITHUB_URL}/blob/main/IMMUTABILITY.md`,
+    /** portal addresses and start blocks per chain (read by the verifier, the oracle and the kit) */
+    portalsJson: `${GITHUB_URL}/blob/main/deployments/portals.json`,
+    /** how to rebuild the final binary and compare its hash (UPGRADE-2026-11.md §2) */
+    buildHashMd: `${GITHUB_URL}/blob/main/docs/UPGRADE-2026-11.md#2-source-binary-and-how-to-check-the-hash`,
 } as const;
 
 export interface ChainFact {
@@ -107,15 +119,19 @@ export interface ChainFact {
     /** false = no portal, and none is planned by this project. */
     live: boolean;
     explorer: string;
+    /** gas coin of the chain (live chains only) */
+    gas?: string;
+    /** blocks the oracle waits before a burn counts (oracle/src/config.ts confirmations; live chains only) */
+    finalityBlocks?: number;
 }
 
 /** Five live chains (owner decision 2026-10-20). Ethereum and PulseChain: no portal; left to the community. */
 export const chains: readonly ChainFact[] = [
-    { key: 'base', name: 'Base', chainId: 8453, xenToken: '0xffcbF84650cE02DaFE96926B37a0ac5E34932fa5', live: true, explorer: 'https://basescan.org' },
-    { key: 'optimism', name: 'Optimism', chainId: 10, xenToken: '0xeB585163DEbB1E637c6D617de3bEF99347cd75c8', live: true, explorer: 'https://optimistic.etherscan.io' },
-    { key: 'polygon', name: 'Polygon', chainId: 137, xenToken: '0x2AB0e9e4eE70FFf1fB9D67031E44F6410170d00e', live: true, explorer: 'https://polygonscan.com' },
-    { key: 'bsc', name: 'BNB Chain', chainId: 56, xenToken: '0x2AB0e9e4eE70FFf1fB9D67031E44F6410170d00e', live: true, explorer: 'https://bscscan.com' },
-    { key: 'avalanche', name: 'Avalanche', chainId: 43114, xenToken: '0xC0C5AA69Dbe4d6DDdfBc89c0957686ec60F24389', live: true, explorer: 'https://snowtrace.io' },
+    { key: 'base', name: 'Base', chainId: 8453, xenToken: '0xffcbF84650cE02DaFE96926B37a0ac5E34932fa5', live: true, explorer: 'https://basescan.org', gas: 'ETH', finalityBlocks: 120 },
+    { key: 'optimism', name: 'Optimism', chainId: 10, xenToken: '0xeB585163DEbB1E637c6D617de3bEF99347cd75c8', live: true, explorer: 'https://optimistic.etherscan.io', gas: 'ETH', finalityBlocks: 120 },
+    { key: 'polygon', name: 'Polygon', chainId: 137, xenToken: '0x2AB0e9e4eE70FFf1fB9D67031E44F6410170d00e', live: true, explorer: 'https://polygonscan.com', gas: 'POL', finalityBlocks: 256 },
+    { key: 'bsc', name: 'BNB Chain', chainId: 56, xenToken: '0x2AB0e9e4eE70FFf1fB9D67031E44F6410170d00e', live: true, explorer: 'https://bscscan.com', gas: 'BNB', finalityBlocks: 30 },
+    { key: 'avalanche', name: 'Avalanche', chainId: 43114, xenToken: '0xC0C5AA69Dbe4d6DDdfBc89c0957686ec60F24389', live: true, explorer: 'https://snowtrace.io', gas: 'AVAX', finalityBlocks: 30 },
     { key: 'ethereum', name: 'Ethereum', chainId: 1, xenToken: '0x06450dEe7FD2Fb8E39061434BAbCFC05599a6Fb8', live: false, explorer: 'https://etherscan.io' },
     { key: 'pulsechain', name: 'PulseChain', chainId: 369, xenToken: '0x8a7FDcA264e87b6da72D000f22186B4403081A2a', live: false, explorer: 'https://scan.pulsechain.com' },
 ];
@@ -208,6 +224,7 @@ export const gameRules = {
     settlement: 'A house bet not settled within ~3 minutes counts as lost even if its roll was a win (the site settles immediately; the keeper is a safety net).',
     circuitBreaker: 'If the bankroll has lost 10% since the start of the UTC day, new house bets are refused until the next day. A bet can win at most 0.25% of the free bankroll.',
     sessionKeys: 'Session keys (bots) play house games only and can never withdraw; Jackpot, Burn Lottery, Duels and Moon Wars are entered by the wallet owner only.',
+    expectedLoss: 'Expected loss (18+, where legal): house games lose on average 2 to 3 XNT per 100 XNT staked, depending on the game and the target (Coin Flip and High-Low give back 98 per 100 on average, most Void Rush targets a little less, the worst 97.01). Short-run luck is real: after 100 one-XNT coin flips the expected result is −2 XNT with a typical swing of about ±9.8 XNT. Duel with random choices: about −1% of the stake on average (half are draws, refunded). Jackpot: −2% of what you entered. Moon Wars is a game of skill between two players, minus 2% of decided pots and move fees. Network fees matter on small stakes. No strategy, setting or bot changes the house edge.',
 } as const;
 
 /** Dated notices: facts that are true today but expected to change; they are removed only after the change is live. */
@@ -449,6 +466,12 @@ export const faq: readonly FaqFact[] = [
     { q: 'Where do I ask for help?', a: 'X @MoonXenForge or an issue on GitHub. Nobody from Moon Forge will contact you first, and no chat group is official.' },
 ];
 
+/** Per-chain burn facts used by the key questions (gas coin, finality depth, Sourcify page of the portal). */
+const chainGasList = liveChains.map((c) => `${c.name} ${c.gas}`).join(', ');
+const chainFinalityList = liveChains.map((c) => `${c.name} ${c.finalityBlocks} blocks`).join(', ');
+const chainXenList = liveChains.map((c) => `${c.name} (chain id ${c.chainId}) ${c.xenToken}`).join('; ');
+const sourcifyList = liveChains.map((c) => `https://repo.sourcify.dev/${c.chainId}/${identity.portal}`).join(', ');
+
 export interface KeyQaFact extends FaqFact { /** shown in the Start page's short block (6–8 entries) */ start?: boolean }
 
 /**
@@ -468,6 +491,14 @@ export const keyQa: readonly KeyQaFact[] = [
     {
         start: true, q: 'Which XEN counts? Do old burns or Ethereum XEN count?',
         a: `Fresh burns only: the chain’s own XEN, held in your own wallet, burned through the Moon Forge portal ${identity.portal} on Base (8453), Optimism (10), Polygon (137), BNB Chain (56) or Avalanche (43114), each one recorded in XEN’s own burn ledger (userBurns) for your address. XEN on an exchange, in a stake or a XENFT, or wrapped or bridged does not count until it is liquid XEN in your wallet on one of those chains. Ethereum XEN: no. Moon Forge has no portal on Ethereum or PulseChain and none is planned by this project; Ethereum XEN already has its own path in the XEN ecosystem. Old burns: not paid here. The planned Legacy Pilot (FAQ) adds a one-time top-up only to a new burn made on one of the five chains from the same EVM address.`,
+    },
+    {
+        q: 'How do I burn, step by step, on each chain?',
+        a: `The same steps on ${liveChainNames.join(', ')}; only the network, its gas coin and its XEN contract differ. (1) Get an X1 address whose key you hold: X1 Wallet, or Backpack with the custom RPC ${identity.x1Rpc} (MetaMask does not support X1). You need no XNT to receive. (2) Hold liquid XEN in an EVM wallet you control (MetaMask, Rabby, Trust…) on that chain, plus a little of its gas coin: ${chainGasList}. XEN on an exchange, in a stake or a XENFT, or bridged, must first become liquid XEN in your wallet. (3) Open The Forge (${SITE_URL}forge/), connect the EVM wallet, select the chain and paste your X1 address. (4) Choose the amount and the tier: Launchpad (paid at the claim), Orbit (released over 45 days) or Moon Landing (released over 180 days); leaving a vesting tier early costs 60% or 75% of the part not yet released. (5) Sign two transactions: an approval for exactly that amount to the portal ${identity.portal} (never unlimited, never to any other address), then the burn; the portal calls XEN’s own burn(), so the XEN leaves that chain’s supply and is recorded in XEN’s userBurns for your address. Your only cost is gas; Moon Forge takes no fee on this path; the burn links your EVM address to your X1 address publicly. Try a small burn first: a burn cannot be undone. (6) The burn counts once it is final on its chain (${chainFinalityList}) and is valued in the next weekly epoch. (7) Claim on Missions within 90 days, or let the public keeper claim for you; from the final upgrade (planned 2026-11-18) claims open 48 hours after an epoch is published. XEN contracts: ${chainXenList}.`,
+    },
+    {
+        q: 'Which chains are supported, and how could another chain be added?',
+        a: `Five: ${liveChainNames.join(', ')}, through the same portal address ${identity.portal} (deployed 2026-10-07; no owner, admin, fee, pause or upgrade). Never send or approve XEN to that address on any other chain. Ethereum XEN (ETH-XEN) and PulseChain XEN: no Moon Forge portal, and none is planned by this project; Ethereum XEN already has its own path in the XEN ecosystem. This project adds no chain. The X1 program has no list of chains: the list is the open-source oracle configuration, so whoever holds the oracle seat could add a chain to this instance, announced publicly at least two epochs before the first epoch that reads it; the steps (a liquid XEN market first, a portal deployed and verified on Sourcify, the oracle entry, the price rules, the site and the kit) are in OPERATORS.md, section "Add a chain" (${officialLinks.operatorsMd}). Every epoch file names the chains it read, and under the v3 rules the published verifier flags a chain it does not know. Anyone can also run a separate instance with its own portals, program and pool (${officialLinks.forkMd}).`,
     },
     {
         start: true, q: 'Where does the XNT come from?',
@@ -494,6 +525,10 @@ export const keyQa: readonly KeyQaFact[] = [
         a: 'An Artifact is an optional purchase, not a source of income: half of its price is spent the day you forge it, and the other half stays in it as a floor you take back by recycling. Today (rules 2) a held Artifact raises its holder’s share of an epoch by 5% to 50% inside the same budget. From the first epoch under the v3 rules (planned 2026-11-22) an Artifact never changes what the reward pool pays for a burn: a holder and a non-holder are paid the same. A forged Artifact can add a weekly rebate from a separate extra pot, filled only by 25% of forge prices (it does not exist before the upgrade), and only for the holder’s own burns that the reward pool did not fully pay: at most 2% of the price paid per Artifact per week, for 52 weeks, while the pot lasts; a holder who does not burn receives nothing from it. As a group, forgers can get back at most 75% of what they pay (the 50% floors plus at most the 25% extra pot): 20% goes to all burners and 5% to the architect.',
     },
     {
+        q: 'How do forging, the floor and recycling work, and what if Metaplex Core breaks?',
+        a: 'Forge: you buy an Artifact (a Metaplex Core NFT) from the program with XNT; forging is paused on the site until the final upgrade (planned 2026-11-18), and the program still accepts forges from other clients. Floor: half of the price you paid stays inside the Artifact. Recycle: at any time, with no fee and no waiting, recycling destroys the NFT, gives you back its floor (plus the record’s rent) and frees the slot, so anyone can forge into it again at the current price, which sends a new share to the pools. Burning an Artifact in a wallet app instead sends its floor to the reward pool. Rebate: from the first epoch under the v3 rules (planned 2026-11-22) a forged Artifact can add a capped weekly rebate from the extra pot (see the question on Artifacts above); Genesis Lunar Dust has no floor and no rebate. Core hatch: recycling burns the Artifact through Metaplex Core, an upgradeable program that Moon Forge does not control. From the final upgrade, if Core is closed while still owned by the upgradeable loader, recycling still pays the floor without Core (the agent kit adds the needed account by itself); if Core is instead changed so that its burn breaks while it still runs, floors wait until Core works again, and after the freeze nothing in Moon Forge can change that (known issue OPS-6).',
+    },
+    {
         start: true, q: 'I only want to play. Can I try to win XNT with games?',
         a: 'Only if you are 18 or older (or the legal age for games of chance where you live) and such games are legal where you are. You play with XNT only and can lose the whole stake. House games (Coin Flip, High-Low, Void Rush) have a built-in edge: on average 97 to 98 XNT come back per 100 staked, depending on the game and the target. Today the site offers house games, the Jackpot and the Burn Lottery (settle your own house bet within about 3 minutes); a Duel needs an Artifact and forging is paused on the site; real-XNT Moon Wars is paused (free practice open). From the final upgrade (planned 2026-11-18) the site offers sealed Duels and Moon Wars with no Artifact needed (2% of the pot only when someone wins; draws refunded), and shows house games and the Jackpot only while the chain shows a live house keeper; none is scheduled, so they may stay hidden. The Burn Lottery then takes no new entries.',
     },
@@ -502,20 +537,32 @@ export const keyQa: readonly KeyQaFact[] = [
         a: 'The burn portals have no owner and cannot be changed. The X1 program can still be upgraded by one key held by the anonymous builder, who leaves after the freeze; until then that key could replace the code, including code that moves the pools. The freeze (burning that key) is planned for 2026-12-02 at the earliest and 2026-12-31 at the latest. After it, no key can change a rule, fee or split, pause the program or withdraw the pools; XNT leaves them only by the program’s own rules. What remains, from the final upgrade (planned 2026-11-18): an oracle seat that publishes the weekly epochs within on-chain limits (at most 10% of the free pool, at least 6 days apart, cancellable by anyone with a bond during a 48-hour hold), a cold key that can replace a stolen hot key, a house keeper once someone arms one, and an architect payee that can only move or renounce its own address. The architect payee receives nothing from burns, claims or the pools; the pool pays small running costs (the oracle’s allowance and keeper tips) to the keys that run the oracle and the keeper.',
     },
     {
+        q: 'What are the dates?',
+        a: `Dated plan, written 2026-11-02; each date stays a plan until its transaction exists. Today the v2 program and the v2 oracle rules are live. Sunday 2026-11-15: last epoch planned under the current rules. Wednesday 2026-11-18, 16:00–20:00 UTC: the final program upgrade (the same hours a week later if a gate is not green); its source tag and binary hash are published at least 48 hours ahead. Sunday 2026-11-22: first epoch planned under the v3 rules (and the Legacy Pilot, only if its list is pinned before that epoch is built). 2026-11-25 00:00 UTC: a never-forged Artifact tier starts at its base price. 2026-12-02 at the earliest, 2026-12-31 at the latest: the freeze (the upgrade key is burned), after the mainnet proof plan and 14 stable daily health runs; the builder leaves after it. 2026-12-16 00:00 UTC: anyone may create a never-created house-keeper seat with a bond. Genesis claims close 2026-12-31 under the live program, 2027-03-31 from the final upgrade. Changelog: ${officialLinks.upgradeMd}; freeze conditions: ${officialLinks.immutabilityMd}.`,
+    },
+    {
         q: 'How can the community take it over and run it?',
-        a: 'Today anyone can run the keeper (npm run keeper in the oracle folder, with a funded X1 key), recompute every epoch (npm run verify -- epoch-N.json --full), host the site (MIT license) and mirror the epoch files, which the agent kit checks against the data stored on X1; publishing an epoch still needs the oracle key. From the final upgrade (planned 2026-11-18) anyone can cancel (void) a wrong epoch during its 48-hour hold by paying a bond into the pool (10% of its budget, at least 0.05 XNT); if no epoch survives its hold for 28 days, the largest voider can take the oracle seat from day 28 and anyone from day 29, with a bond of 10% of the free pool (at least 1 XNT), and keep publishing on the same pools with the same code. From 2026-12-16 anyone can create a house-keeper seat that was never created, with a bond of at least 20 XNT (npm run keeper-arm), and anyone can take a keeper seat idle for 28 days, with nothing pending and the same bond (npm run keeper-take). Nobody can veto either.',
+        a: `Today anyone can run the keeper (npm run keeper in the oracle folder, with a funded X1 key), recompute every epoch (npm run verify -- epoch-N.json --full), host the site (MIT license) and mirror the epoch files, which the agent kit checks against the data stored on X1; publishing an epoch still needs the oracle key. From the final upgrade (planned 2026-11-18) anyone can cancel (void) a wrong epoch during its 48-hour hold by paying a bond into the pool (10% of its budget, at least 0.05 XNT); if no epoch survives its hold for 28 days, the largest voider can take the oracle seat from day 28 and anyone from day 29, with a bond of 10% of the free pool (at least 1 XNT), and keep publishing on the same pools with the same code. From 2026-12-16 anyone can create a house-keeper seat that was never created, with a bond of at least 20 XNT (npm run keeper-arm), and anyone can take a keeper seat idle for 28 days, with nothing pending and the same bond (npm run keeper-take). Nobody can veto either. Runbooks (setup, commands, the takeover, what to do when something breaks): ${officialLinks.operatorsMd}.`,
+    },
+    {
+        q: 'What is the Moon Forge Bot, and how do AI agents use Moon Forge?',
+        a: `The Moon Forge Bot (${officialLinks.botPage}; source ${officialLinks.botSource}, MIT) is community software you run on your own computer with your own keys: it burns XEN only when your rule is met (XNT per XEN above your threshold, at least what selling would fetch, today’s capacity still open, your daily and gas caps), claims your XNT, and only if you switch them on plays 18+ games within a loss budget and watches your Artifacts. It starts in dry run and signs nothing until you go live; fork it and change the rule in one small file. An optional A2A interface (local HTTP/JSON on 127.0.0.1, with its own agent card) lets another agent ask it for a quote or a plan; it never signs on request. Before the v3 rules no binding quote exists, so the bot waits and does not burn. AI agents use the same program with their own keypair through the agent kit (${officialLinks.agentKit}) and the skill file (${officialLinks.skillFile}); the site’s agent card (${officialLinks.agentCard}, also at /.well-known/agent-card.json) lists every service. No payout is promised.`,
     },
     {
         start: true, q: 'Is it a scam? How can I check?',
-        a: `Check it yourself: the source is public (MIT); the X1 explorer shows who can still upgrade the program (${identity.x1Explorer}/address/${identity.programId}); the deployed bytes can be rebuilt and their hash compared; the portals are verified on Sourcify; every weekly epoch can be recomputed with npm run verify; counter.json lists the XEN removed from supply and the XNT set aside. There is no token, no presale and no fee on the burn path, and no instruction lets anyone withdraw the pools. What you still trust: no third-party audit (internal reviews only), a bounded oracle, the upgrade key until the freeze, and GitHub for the automation. Moon Forge never messages anyone first and never asks anyone to sign or pay to claim old burns or the Legacy Pilot.`,
+        a: `Check it yourself: the source is public (MIT); the X1 explorer shows who can still upgrade the program (${identity.x1Explorer}/address/${identity.programId}); the deployed bytes can be rebuilt and their hash compared; the portals are verified on Sourcify; every weekly epoch can be recomputed with npm run verify; counter.json lists the XEN removed from supply and the XNT set aside (step by step: the next question). There is no token, no presale and no fee on the burn path, and no instruction lets anyone withdraw the pools. What you still trust: no third-party audit (internal reviews only), a bounded oracle, the upgrade key until the freeze, and GitHub for the automation. Moon Forge never messages anyone first and never asks anyone to sign or pay to claim old burns or the Legacy Pilot.`,
+    },
+    {
+        q: 'How can I verify the program, the portals and the payouts myself?',
+        a: `(1) Who can upgrade: ${identity.x1Explorer}/address/${identity.programId}, or solana program show ${identity.programId} -u ${identity.x1Rpc}; today it shows an upgrade authority, after the freeze none. (2) The deployed bytes are the published source: the README gives the sha256 of the deployed v2 binary, built from tag ${rules.program}; for the final upgrade the tag program-2026-11-18 and its hashes are published at least 48 hours ahead, and anyone can rebuild it with SOURCE_DATE_EPOCH=0 cargo build-sbf and compare solana-verify get-executable-hash with solana-verify get-program-hash on X1 (${officialLinks.buildHashMd}). (3) The portals: exact source match on Sourcify (${sourcifyList}); addresses and start blocks in deployments/portals.json. (4) Every epoch: cd oracle && npm install && npm run verify -- ../frontend/public/epochs/epoch-N.json --full recomputes every payout from the burns on the five chains and compares the fingerprint with X1. (5) The public counter ${officialLinks.counter}: XEN removed from supply per chain and XNT set aside, rebuilt from the epoch files at every site build. (6) From the first window under the v3 rules, the hourly feed ${officialLinks.weekFeed} (HTTP 404 before), which the agent kit refuses unless it continues the newest epoch file. (7) The burns themselves: each portal’s getStats() and XEN’s userBurns(address). Known issues: ${officialLinks.knownIssuesMd}.`,
     },
     {
         q: 'What are the risks?',
         a: 'A burn cannot be undone. The pool is small (about 6.5 XNT on 2026-11-02), so payouts are small; a payout can be less than selling, late, or nothing if no epoch is published; XNT is volatile and thin. Scripts can take a day’s capacity first. There is no third-party audit; bugs cannot be fixed after the freeze, and the builder leaves then. The oracle is bounded but trusted: a wrong epoch that nobody cancels within 48 hours is paid, and an honest epoch that someone cancels by paying a bond is not paid later. The reward rules are oracle policy: after the switch to the v3 rules (announced at least one full epoch ahead), any later change needs a new rule set announced at least two epochs ahead, never applied backwards. Artifact floors depend on Metaplex Core, and the whole program on X1’s runtime. Games can lose the whole stake. Taxes are your own responsibility. If the GitHub account falls, the site, the oracle, the keeper and the epoch files stop; payouts pause; the pools stay locked in the program.',
     },
     {
-        q: 'Is Moon Forge part of another XEN or X1 project, or of X1 Forge?',
-        a: 'No. Moon Forge is independent and open source, run by one anonymous builder who receives the disclosed cuts. It is separate from X1 Labs, the XEN team and every other XEN or X1 project, and it is not an official XNT allocation; each project has its own rules, and none speaks for the others. Moon Forge and X1 Forge are separate projects with similar names.',
+        q: 'Is Moon Forge part of another XEN or X1 project, of X1 Forge or of the Moon Party?',
+        a: 'No. Moon Forge is independent and open source, run by one anonymous builder who receives the disclosed cuts. It is separate from X1 Labs, the XEN team and every other XEN or X1 project, and it is not an official XNT allocation; each project has its own rules, and none speaks for the others. Moon Forge and X1 Forge are separate projects with similar names. Moon Forge is not the "Moon Party".',
     },
     {
         q: 'Does burning raise the price of XEN or XNT?',
