@@ -57,8 +57,10 @@ jobs:
     # limit (a step timeout is a plain failure, after which the rescue steps still run).
     # A week without a valued burn publishes nothing on the v2 program, so the next read spans several weeks: on
     # 2026-11-01 BSC alone (2.7 million blocks, two weeks) took 38 minutes and a second run hit the old 60-minute
-    # step limit. The step now has 150 minutes and the job 240 (90 minutes left for the rescue steps).
-    timeout-minutes: 240
+    # step limit. On 2026-11-08 BSC took 98 minutes for four weeks of blocks, and the read grows until the first v3 epoch
+    # publishes (weekly from then on), so the step has 320 minutes and the job 355 (GitHub's limit is 360), leaving
+    # 35 minutes for the rescue steps (artifact upload and commit take a few).
+    timeout-minutes: 355
     permissions:
       contents: write # commit the epoch files
       actions: write # start the site deploy
@@ -82,7 +84,7 @@ jobs:
       - name: Build / publish epoch
         id: epoch
         working-directory: oracle
-        timeout-minutes: 150
+        timeout-minutes: 320
         env:
           ORACLE_PRIVATE_KEY: ${{ secrets.ORACLE_PRIVATE_KEY }}
           EPOCHS_DIR: ../frontend/public/epochs

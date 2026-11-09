@@ -3,10 +3,13 @@ name: Legacy Pilot snapshot
 # Builds deployments/legacy-burners.json for the Legacy Pilot rule (oracle/src/legacy.ts): every EVM address that burned
 # XEN before 2026-11-01T00:00:00Z, read from XEN's own contracts (Transfer to 0x0) on Ethereum and the five Moon Forge
 # chains, through public RPCs. It runs on GitHub, never on a personal machine. Manual only, no secret, a read-only token.
-# One job per chain (each well inside the 6-hour job limit; a failed chain is re-run alone with "Re-run failed jobs"),
-# then a merge job that checks the file with the script and with the oracle's own validator and uploads it as an
-# artifact. The same reads give the same bytes. Pin its sha256 (printed in the run summary) in oracle/src/legacy.ts
-# LEGACY_SNAPSHOT_SHA256, in one reviewed commit with the file, before the first v3 epoch is built.
+# A plan job cuts each chain's block range into parts (scripts/legacy/build-snapshot.mjs SOURCES `parts`, or the `parts`
+# input); one scan job per part, at most 20 at a time, each reading its range from every keyless RPC that serves it, in
+# parallel. A part stops by itself at 320 minutes (inside the 350-minute job limit), saves a checkpoint artifact and
+# fails: "Re-run failed jobs" resumes it from there (and re-runs the merge). Then a merge job checks that the parts tile
+# each chain exactly, checks the file with the script and with the oracle's own validator and uploads it as an
+# artifact. The same reads give the same bytes, whatever the parts. Pin its sha256 (printed in the run summary) in
+# oracle/src/legacy.ts LEGACY_SNAPSHOT_SHA256, in one reviewed commit with the file, before the first v3 epoch is built.
 # Actions pinned to commit SHAs (version in the comment), runner image pinned, Node 22, like ci.yml.
 
 on:
@@ -21,7 +24,7 @@ on:
         required: false
         default: ''
       bsc_rpc:
-        description: 'BSC RPC list; empty = the script default'
+        description: 'BSC RPC list (archive nodes: the scan reads logs from 2022); empty = the script default'
         required: false
         default: ''
       polygon_rpc:
@@ -40,6 +43,10 @@ on:
         description: 'optional scan starts as chainId=block pairs, comma-separated (each a block at or before XEN''s deployment there); empty = the time bound 2022-10-01'
         required: false
         default: ''
+      parts:
+        description: 'optional parallel parts per chain as chainId=n pairs (n 1..64), e.g. 43114=48,56=24; empty = the script default (1, 10, 137: 1; 8453: 4; 56: 16; 43114: 32)'
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -49,26 +56,12 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  scan:
-    name: Scan chain ${{ matrix.chain }}
+  plan:
+    name: Plan the scan jobs
     runs-on: ubuntu-24.04
-    timeout-minutes: 350
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - chain: 1
-            rpc: ${{ inputs.eth_rpc }}
-          - chain: 10
-            rpc: ${{ inputs.op_rpc }}
-          - chain: 56
-            rpc: ${{ inputs.bsc_rpc }}
-          - chain: 137
-            rpc: ${{ inputs.polygon_rpc }}
-          - chain: 8453
-            rpc: ${{ inputs.base_rpc }}
-          - chain: 43114
-            rpc: ${{ inputs.avax_rpc }}
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.m.outputs.matrix }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -76,23 +69,78 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '22'
+      - id: m
+        env:
+          PARTS: ${{ inputs.parts }}
+        run: |
+          set -euo pipefail
+          M="$(node scripts/legacy/build-snapshot.mjs matrix --parts "$PARTS")"
+          echo "$M"
+          echo "matrix=$M" >> "$GITHUB_OUTPUT"
+
+  scan:
+    name: Scan chain ${{ matrix.label }}
+    needs: plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      max-parallel: 20
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+      - name: Restore the checkpoint of an earlier attempt (none on the first attempt)
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        continue-on-error: true
+        with:
+          name: legacy-ckpt-${{ matrix.chain }}-${{ matrix.part }}-of-${{ matrix.parts }}
+          path: ckpt
       - name: Scan XEN burns before the cutoff
         env:
           CHAIN: ${{ matrix.chain }}
-          RPC: ${{ matrix.rpc }}
+          PART: ${{ matrix.part }}
+          PARTS: ${{ matrix.parts }}
+          ETH_RPC: ${{ inputs.eth_rpc }}
+          OP_RPC: ${{ inputs.op_rpc }}
+          BSC_RPC: ${{ inputs.bsc_rpc }}
+          POLYGON_RPC: ${{ inputs.polygon_rpc }}
+          BASE_RPC: ${{ inputs.base_rpc }}
+          AVAX_RPC: ${{ inputs.avax_rpc }}
           FROM_BLOCKS: ${{ inputs.from_blocks }}
         run: |
           set -euo pipefail
+          case "$CHAIN" in
+            1) RPC="$ETH_RPC" ;; 10) RPC="$OP_RPC" ;; 56) RPC="$BSC_RPC" ;;
+            137) RPC="$POLYGON_RPC" ;; 8453) RPC="$BASE_RPC" ;; 43114) RPC="$AVAX_RPC" ;;
+            *) echo "unknown chain $CHAIN"; exit 1 ;;
+          esac
           FROM="$(printf '%s' "$FROM_BLOCKS" | tr ',' '\n' | sed -n "s/^ *${CHAIN}=\([0-9][0-9]*\) *$/\1/p" | head -n 1)"
-          set -- scan --chain "$CHAIN" --out "parts/part-$CHAIN.json"
+          set -- scan --chain "$CHAIN" --part "$PART" --parts "$PARTS" --out "parts/part-$CHAIN-$PART.json" \
+            --checkpoint "ckpt/ckpt-$CHAIN-$PART.json" --deadline-min 320
           if [ -n "$RPC" ]; then set -- "$@" --rpc "$RPC"; fi
           if [ -n "$FROM" ]; then set -- "$@" --from "$FROM"; fi
           node scripts/legacy/build-snapshot.mjs "$@"
+      - name: Save the checkpoint ("Re-run failed jobs" resumes from it)
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: legacy-ckpt-${{ matrix.chain }}-${{ matrix.part }}-of-${{ matrix.parts }}
+          path: ckpt/ckpt-${{ matrix.chain }}-${{ matrix.part }}.json
+          if-no-files-found: ignore
+          overwrite: true
+          retention-days: 7
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: legacy-part-${{ matrix.chain }}
-          path: parts/part-${{ matrix.chain }}.json
+          name: legacy-part-${{ matrix.chain }}-${{ matrix.part }}-of-${{ matrix.parts }}
+          path: parts/part-${{ matrix.chain }}-${{ matrix.part }}.json
           if-no-files-found: error
+          overwrite: true
           retention-days: 30
 
   merge:
@@ -114,7 +162,7 @@ jobs:
           pattern: legacy-part-*
           path: parts
           merge-multiple: true
-      - name: Merge the six chains
+      - name: Merge the parts of the six chains (every part exactly once, tiling each chain's range)
         run: node scripts/legacy/build-snapshot.mjs merge --out deployments/legacy-burners.json parts/part-*.json
       - name: Check with the script
         run: node scripts/legacy/build-snapshot.mjs check deployments/legacy-burners.json

@@ -562,9 +562,13 @@ function mockServer(chains: MockChain[], o: { maxRange: number; flaky: number })
     let body = "";
     req.on("data", (d) => (body += d));
     req.on("end", () => {
-      const m = chains.find((c) => req.url === `/${c.chainId}` || req.url === `/${c.chainId}/b` || req.url === `/${c.chainId}/lag`);
+      const m = chains.find((c) => ["", "/b", "/lag", "/empty", "/pruned"].some((s) => req.url === `/${c.chainId}${s}`));
       // `/lag`: a node behind the head and without old history (null block headers, a refused getLogs)
       const lag = req.url!.endsWith("/lag");
+      // `/empty`: a node that answers [] for every getLogs (history it does not hold, silently); `/pruned`: headers
+      // served, every getLogs refused with "header not found" (the BSC failure of run 41608437087)
+      const empty = req.url!.endsWith("/empty");
+      const pruned = req.url!.endsWith("/pruned");
       const q = JSON.parse(body);
       const reply = (result: unknown) => res.end(JSON.stringify({ jsonrpc: "2.0", id: q.id, result }));
       const error = (code: number, message: string) => res.end(JSON.stringify({ jsonrpc: "2.0", id: q.id, error: { code, message } }));
@@ -583,6 +587,8 @@ function mockServer(chains: MockChain[], o: { maxRange: number; flaky: number })
           return reply(Number(BigInt(p[1])) >= m.deploy ? "0x6080" : "0x");
         case "eth_getLogs": {
           if (lag) return error(-32000, "history has been pruned for this block");
+          if (pruned) return error(-32000, "header not found");
+          if (empty) return reply([]);
           calls++;
           if (o.flaky && calls % o.flaky === 0 && !req.url!.endsWith("/b")) {
             res.statusCode = 429;
@@ -676,6 +682,105 @@ testAsync("the snapshot script: every source chain scanned from the time bound t
     const late = await run(["scan", "--chain", "10", "--out", path.join(dir, "z.json"), "--rpc", `${srv.url}/10`, "--from", String(chains[1].deploy + 5), "--backoff-ms", "1"]);
     assert.notStrictEqual(late.code, 0);
     assert.match(late.err, /already has code/);
+  } finally {
+    await srv.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+testAsync("the snapshot script, parts: each chain cut into parallel parts gives the same bytes as one job; resumable from a checkpoint; a pruned node is left out, a node answering [] is caught by the cross-check; merge refuses a missing, doubled or shifted part; the job matrix", async () => {
+  const chains = LEGACY_SOURCES.map((s, i) => mockChain(s.chainId, s.xen, i + 1));
+  const srv = await mockServer(chains, { maxRange: 300, flaky: 7 });
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "legacy-parts-"));
+  const rpcOf = (id: number, ...s: string[]) => s.map((x) => `${srv.url}/${id}${x}`).join(",");
+  const scan = (id: number, out: string, extra: string[] = [], rpc = rpcOf(id, "", "/b")) => run(["scan", "--chain", String(id), "--out", path.join(dir, out), "--rpc", rpc, "--backoff-ms", "1", ...extra]);
+  const readJson = (f: string) => JSON.parse(fs.readFileSync(path.join(dir, f), "utf8"));
+  try {
+    // one job per chain, three parts per chain, and a mix (Ethereum whole, the others in two to four parts)
+    const files: Record<string, string[]> = { whole: [], three: [], mixed: [] };
+    for (const c of chains) {
+      const w = await scan(c.chainId, `w-${c.chainId}.json`, ["--chunk", "1000"]);
+      assert.strictEqual(w.code, 0, w.err);
+      files.whole.push(path.join(dir, `w-${c.chainId}.json`));
+      for (let k = 0; k < 3; k++) {
+        const r = await scan(c.chainId, `t-${c.chainId}-${k}.json`, ["--part", String(k), "--parts", "3", "--chunk", "64"]);
+        assert.strictEqual(r.code, 0, r.err);
+        files.three.push(path.join(dir, `t-${c.chainId}-${k}.json`));
+      }
+      const n = c.chainId === 1 ? 1 : 2 + (c.chainId % 3);
+      for (let k = 0; k < n; k++) {
+        const r = await scan(c.chainId, `m-${c.chainId}-${k}.json`, ["--part", String(k), "--parts", String(n)]);
+        assert.strictEqual(r.code, 0, r.err);
+        files.mixed.push(path.join(dir, `m-${c.chainId}-${k}.json`));
+      }
+    }
+    const t0 = readJson("t-10-0.json");
+    const t2 = readJson("t-10-2.json");
+    assert.deepStrictEqual([t0.rangeFrom, t2.rangeTo], [t0.fromBlock, t0.toBlock], "the parts start at the chain's first block and end at its cutoff block");
+    assert.strictEqual(readJson("t-10-1.json").rangeFrom, t0.rangeTo + 1, "the parts are contiguous");
+    const bytes: string[] = [];
+    for (const k of ["whole", "three", "mixed"]) {
+      const m = await run(["merge", "--out", path.join(dir, `${k}.json`), ...files[k]]);
+      assert.strictEqual(m.code, 0, `${k}: ${m.err}`);
+      bytes.push(fs.readFileSync(path.join(dir, `${k}.json`), "utf8"));
+    }
+    assert.strictEqual(bytes[1], bytes[0], "three parts per chain: the same bytes as one job per chain");
+    assert.strictEqual(bytes[2], bytes[0], "a mix of splits: the same bytes");
+    const doc = JSON.parse(bytes[0]) as LegacySnapshotDoc;
+    assert.strictEqual(legacySnapshotError(doc), null, "the oracle's validator accepts it");
+    assert.deepStrictEqual(doc.chains.map((c) => c.events), chains.map((c) => expectedOf(c).events));
+
+    // resumable: a part stopped at its budget (exit 3) keeps a checkpoint; the next run continues it to the same part
+    const ck = path.join(dir, "ck", "ck-10-1.json");
+    const stop = await scan(10, "r-10-1.json", ["--part", "1", "--parts", "3", "--chunk", "64", "--max-chunks", "2", "--checkpoint", ck]);
+    assert.strictEqual(stop.code, 3, stop.err);
+    assert.match(stop.err, /stopped at the time budget with \d+ blocks left/);
+    assert(fs.existsSync(ck) && !fs.existsSync(path.join(dir, "r-10-1.json")), "a checkpoint, no part file");
+    const saved = JSON.parse(fs.readFileSync(ck, "utf8"));
+    assert(saved.done.length >= 1 && saved.done.every((iv: number[]) => iv[0] >= t0.rangeTo + 1));
+    const other = await scan(10, "x.json", ["--part", "2", "--parts", "3", "--checkpoint", ck]);
+    assert.notStrictEqual(other.code, 0);
+    assert.match(other.err, /is for another range \(part 1, not 2\)/);
+    const resume = await scan(10, "r-10-1.json", ["--part", "1", "--parts", "3", "--chunk", "64", "--checkpoint", ck]);
+    assert.strictEqual(resume.code, 0, resume.err);
+    assert.match(resume.err, /resumed from the checkpoint, \d+ of \d+ blocks already read/);
+    assert.deepStrictEqual(readJson("r-10-1.json"), readJson("t-10-1.json"), "a resumed part is the same part");
+
+    // a pruned node ("header not found" on its logs, BSC) is left out at the start, with the reason; alone, the part fails
+    const pr = await scan(10, "p-10.json", ["--chunk", "1000"], rpcOf(10, "/pruned", "/b"));
+    assert.strictEqual(pr.code, 0, pr.err);
+    assert.match(pr.err, /left out for blocks \d+\.\.\d+ \(.*header not found/);
+    assert.deepStrictEqual(readJson("p-10.json"), readJson("w-10.json"));
+    const pr1 = await scan(10, "p1.json", [], rpcOf(10, "/pruned"));
+    assert.notStrictEqual(pr1.code, 0);
+    assert.match(pr1.err, /no RPC serves the logs of blocks \d+\.\.\d+ \(.*header not found/);
+    // a node that answers [] for history it does not hold is caught when its ranges are read again from another RPC
+    const liar = await scan(10, "l-10.json", ["--chunk", "1000", "--verify", "1000"], rpcOf(10, "/empty", "/b"));
+    assert.notStrictEqual(liar.code, 0, "a silently empty node must fail the part, never shrink the list");
+    assert.match(liar.err, /the RPCs disagree on blocks \d+\.\.\d+: .* answered \d+ burns, .* answered \d+/);
+    assert(!fs.existsSync(path.join(dir, "l-10.json")));
+    // an honest pair: the cross-check passes
+    assert.match((await scan(10, "h-10.json", ["--verify", "4"])).err, /ranges read again from another RPC: the same burns/);
+
+    // merge: every part exactly once, each exactly its range
+    const three = files.three;
+    const mergeErr = async (list: string[]) => (await run(["merge", "--out", path.join(dir, "bad.json"), ...list])).err;
+    assert.match(await mergeErr(three.filter((f) => !f.endsWith("t-10-1.json"))), /chain 10 part 2\/3 is missing/);
+    assert.match(await mergeErr([...three, path.join(dir, "t-10-1.json")]), /chain 10 part 2\/3 twice/);
+    assert.match(await mergeErr([...three.filter((f) => !/t-10-/.test(f)), path.join(dir, "t-10-0.json"), path.join(dir, "t-10-1.json"), path.join(dir, "w-10.json")]), /parts of different splits/);
+    const shifted = readJson("t-10-1.json");
+    shifted.rangeFrom += 1;
+    fs.writeFileSync(path.join(dir, "s.json"), JSON.stringify(shifted));
+    assert.match(await mergeErr([...three.filter((f) => !f.endsWith("t-10-1.json")), path.join(dir, "s.json")]), /chain 10 part 2\/3: blocks \d+\.\.\d+, not \d+\.\.\d+/);
+
+    // the job matrix: one job per part, the chains interleaved; the override is checked
+    const mx = JSON.parse((await run(["matrix", "--parts", "43114=3,56=2"])).out) as { chain: number; part: number; parts: number }[];
+    assert.deepStrictEqual(mx.map((j) => `${j.chain}:${j.part}/${j.parts}`), ["1:0/1", "10:0/1", "56:0/2", "137:0/1", "8453:0/4", "43114:0/3", "56:1/2", "8453:1/4", "43114:1/3", "8453:2/4", "43114:2/3", "8453:3/4"]);
+    const dflt = JSON.parse((await run(["matrix"])).out) as { chain: number }[];
+    assert(dflt.length <= 64 && LEGACY_SOURCES.every((s) => dflt.some((j) => j.chain === s.chainId)), "every chain, a matrix GitHub accepts");
+    const badMx = await run(["matrix", "--parts", "999=2"]);
+    assert.notStrictEqual(badMx.code, 0);
+    assert.match(badMx.err, /is not chainId=n/);
   } finally {
     await srv.close();
     fs.rmSync(dir, { recursive: true, force: true });

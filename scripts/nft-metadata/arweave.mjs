@@ -51,37 +51,151 @@ export async function turboStatus(id, opts) {
 }
 
 const b64 = (s) => Buffer.from(s, 'base64url');
+const H = (...bufs) => crypto.createHash('sha256').update(Buffer.concat(bufs)).digest();
+const noteInt = (b) => BigInt('0x' + (b.toString('hex') || '0'));
 
-// Rebuilds the payload of a bundled data item from L1 chunks. Returns { ok, buf, bundleId, height, confirmations,
-// reason }. A bundle whose header is mined but whose data was never seeded fails here (the 2026-10-14 upload did:
-// Turbo said FINALIZED, GraphQL showed a block height, and no node served a single chunk of it).
-export async function l1Payload(id, { node = L1_NODE, opts } = {}) {
+// Arweave's Merkle proof (data_path) of the byte at `dest` (relative to the transaction) against the transaction's
+// data_root: branch = left id | right id | 32-byte boundary note, leaf = sha256(chunk) | 32-byte chunk-end note, and a
+// node id is sha256 of the sha256 of each part. Returns { left, right, dataHash } of the proven leaf, or null.
+export function validateDataPath(dataRoot, dest, txSize, dataPath) {
+  let id = dataRoot;
+  let left = 0n;
+  let right = txSize;
+  let rest = dataPath;
+  if (!(dest >= 0n && dest < txSize)) return null;
+  while (rest.length > 64) {
+    if (rest.length < 96) return null;
+    const [l, r, n] = [rest.subarray(0, 32), rest.subarray(32, 64), rest.subarray(64, 96)];
+    if (!H(H(l), H(r), H(n)).equals(id)) return null;
+    const off = noteInt(n);
+    if (dest < off) {
+      id = l;
+      right = right < off ? right : off;
+    } else {
+      id = r;
+      left = left > off ? left : off;
+    }
+    rest = rest.subarray(96);
+  }
+  if (rest.length !== 64) return null;
+  const [dataHash, n] = [rest.subarray(0, 32), rest.subarray(32, 64)];
+  if (!H(H(dataHash), H(n)).equals(id)) return null;
+  const end = noteInt(n);
+  if (!(left <= dest && dest < end && end <= right)) return null;
+  return { left, right: end, dataHash };
+}
+
+// A chunk answer is accepted only when its data_path proves it against the mined transaction's data_root AND its
+// bytes hash to the proven leaf. That makes the answer independent of who served it.
+export function verifyChunk(json, { dataRoot, txSize, rel }) {
+  if (typeof json?.chunk !== 'string' || typeof json?.data_path !== 'string') return { ok: false, why: 'not a chunk answer' };
+  const chunk = b64(json.chunk);
+  const leaf = validateDataPath(dataRoot, rel, txSize, b64(json.data_path));
+  if (!leaf) return { ok: false, why: 'data_path does not prove the offset against data_root' };
+  if (!H(chunk).equals(leaf.dataHash) || BigInt(chunk.length) !== leaf.right - leaf.left) return { ok: false, why: 'chunk bytes do not match the proven leaf' };
+  return { ok: true, chunk, left: leaf.left, right: leaf.right };
+}
+
+// Arweave L1 node list: the seed itself, then the Arweave nodes it peers with (GET /peers, "ip:port"). Only Arweave
+// nodes are asked for chunks, never an ar.io gateway (a gateway can serve the copy it was handed at upload time from
+// its own cache, which is what the 2026-10-14 trap looked like). Since 2026-11-07 arweave.net answers 404 (HTML) to
+// every GET /chunk/<offset>, even for old data, while its /tx/* answers still work; miners store only some
+// partitions, so only a few peers hold a given offset, and any one of them is enough once the proof checks out.
+export async function l1Nodes(seed = L1_NODE, opts) {
+  const nodes = [seed];
+  const p = await fetchJson(`${seed}/peers`, { ...opts, attempts: 1 });
+  if (p.ok && Array.isArray(p.json)) {
+    for (const x of p.json) if (typeof x === 'string' && /^[0-9a-zA-Z.\-]+:\d{1,5}$/.test(x)) nodes.push(`http://${x}`);
+  }
+  return [...new Set(nodes)];
+}
+
+// A transaction header field from the first of a few L1 nodes that answers it (the seed with the usual retries).
+async function firstOk(nodes, pathname, opts, { json = true } = {}) {
+  let last = { ok: false, error: 'no node' };
+  for (const n of nodes.slice(0, 8)) {
+    const o = n === nodes[0] ? opts : { ...opts, attempts: 1, timeoutMs: 15_000 };
+    if (json) last = await fetchJson(`${n}${pathname}`, o);
+    else {
+      const r = await fetchBytes(`${n}${pathname}`, o);
+      last = r.status === 200 ? { ok: true, text: r.buf.toString('utf8').trim() } : { ok: false, error: r.error ?? `HTTP ${r.status}` };
+    }
+    if (last.ok) return last;
+  }
+  return last;
+}
+
+// One chunk from any L1 node, valid proof required. The node that served the previous chunk is asked first (the
+// chunks of one bundle sit in the same partition); otherwise nodes are probed `batch` at a time with one attempt and a
+// short timeout. Rounds (opts.attempts, opts.backoffMs) cover a node that is briefly down.
+async function l1Chunk(abs, check, ctx, opts) {
+  const { attempts = 3, backoffMs = [0, 20_000, 60_000] } = opts ?? {};
+  const probe = { attempts: 1, timeoutMs: ctx.probeTimeoutMs ?? 15_000 };
+  const tally = {};
+  for (let round = 0; round < attempts; round++) {
+    if (round && backoffMs[round]) await sleep(backoffMs[round]);
+    const order = [...new Set([ctx.preferred, ...ctx.nodes].filter(Boolean))].slice(0, ctx.maxNodes ?? 250);
+    // the preferred node (or the seed) alone first, then the rest `batch` at a time
+    for (let i = 0; i < order.length; i = i ? i + (ctx.batch ?? 12) : 1) {
+      const batch = order.slice(i, i ? i + (ctx.batch ?? 12) : 1);
+      const answers = await Promise.all(batch.map(async (n) => {
+        const c = await fetchJson(`${n}/chunk/${abs}`, probe);
+        if (!c.ok) return { n, why: c.status ? `HTTP ${c.status}` : 'unreachable' };
+        const v = verifyChunk(c.json, check);
+        return v.ok ? { n, v } : { n, why: v.why };
+      }));
+      const hit = answers.find((a) => a.v);
+      if (hit) {
+        ctx.preferred = hit.n;
+        return { ok: true, ...hit.v, node: hit.n };
+      }
+      for (const a of answers) tally[a.why] = (tally[a.why] ?? 0) + 1;
+    }
+  }
+  const tried = Object.entries(tally).map(([k, v]) => `${k} x${v}`).join(', ');
+  return { ok: false, error: `no Arweave L1 node served a proven chunk (${tried || 'no node to ask'})` };
+}
+
+// Shared state for one check run: the L1 node list (discovered once) and the node that answered last.
+export const l1Context = (extra = {}) => ({ nodes: null, preferred: null, batch: 24, ...extra });
+
+// Rebuilds the payload of a bundled data item from L1 chunks, each proven against the bundle's mined data_root.
+// Returns { ok, buf, bundleId, height, confirmations, nodes, reason }. A bundle whose header is mined but whose data
+// was never seeded fails here (the 2026-10-14 upload did: Turbo said FINALIZED, GraphQL showed a block height, and no
+// node served a single chunk of it).
+export async function l1Payload(id, { node = L1_NODE, opts, ctx = l1Context() } = {}) {
   const st = await turboStatus(id, opts);
   if (!st.ok) return { ok: false, reason: `turbo status: ${st.error}` };
   const s = st.json;
   if (s.status !== 'FINALIZED') return { ok: false, reason: `turbo status ${s.status}`, bundleId: s.bundleId ?? null };
   const bundleId = s.bundleId;
-  const [off, txs] = await Promise.all([fetchJson(`${node}/tx/${bundleId}/offset`, opts), fetchJson(`${node}/tx/${bundleId}/status`, opts)]);
+  ctx.discovery ??= ctx.nodes ? Promise.resolve(ctx.nodes) : (ctx.discover ?? l1Nodes)(node, opts); // once per run
+  ctx.nodes = await ctx.discovery;
+  const [off, txs, root] = await Promise.all([
+    firstOk(ctx.nodes, `/tx/${bundleId}/offset`, opts),
+    firstOk(ctx.nodes, `/tx/${bundleId}/status`, opts),
+    firstOk(ctx.nodes, `/tx/${bundleId}/data_root`, opts, { json: false }), // plain base64url text, not JSON
+  ]);
   if (!off.ok) return { ok: false, bundleId, reason: `bundle offset: ${off.error}` };
   const height = txs.ok ? txs.json.block_height : null;
   const confirmations = txs.ok ? txs.json.number_of_confirmations : null;
-  const txStart = BigInt(off.json.offset) - BigInt(off.json.size) + 1n;
+  const dataRoot = root.ok ? b64(root.text) : Buffer.alloc(0);
+  if (dataRoot.length !== 32) return { ok: false, bundleId, height, confirmations, reason: `bundle data_root: ${root.ok ? 'not 32 bytes' : root.error}` };
+  const txSize = BigInt(off.json.size);
+  const txStart = BigInt(off.json.offset) - txSize + 1n;
   const rStart = BigInt(s.startOffsetInRootBundle) + BigInt(s.payloadDataStart);
   const rEnd = rStart + BigInt(s.payloadContentLength);
   const parts = [];
+  const served = new Set();
   for (let r = rStart; r < rEnd; ) {
-    const c = await fetchJson(`${node}/chunk/${txStart + r}`, opts);
+    const c = await l1Chunk(txStart + r, { dataRoot, txSize, rel: r }, ctx, opts);
     if (!c.ok) return { ok: false, bundleId, height, confirmations, reason: `chunk at +${r}: ${c.error}` };
-    const chunk = b64(c.json.chunk);
-    const dataPath = b64(c.json.data_path);
-    const right = BigInt('0x' + dataPath.subarray(dataPath.length - 32).toString('hex')); // leaf note = chunk end
-    const left = right - BigInt(chunk.length);
-    if (!(left <= r && r < right)) return { ok: false, bundleId, height, confirmations, reason: `chunk range [${left},${right}) does not hold +${r}` };
-    const to = right < rEnd ? right : rEnd;
-    parts.push(chunk.subarray(Number(r - left), Number(to - left)));
+    served.add(c.node);
+    const to = c.right < rEnd ? c.right : rEnd;
+    parts.push(c.chunk.subarray(Number(r - c.left), Number(to - c.left)));
     r = to;
   }
-  return { ok: true, buf: Buffer.concat(parts), bundleId, height, confirmations };
+  return { ok: true, buf: Buffer.concat(parts), bundleId, height, confirmations, nodes: [...served] };
 }
 
 // Runs fn over items with at most n in flight.

@@ -2,6 +2,7 @@
 // (no network: the L1 reader is exercised against a stubbed fetch).
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -9,7 +10,7 @@ import { TIERS, JSON_PATHS, IMAGE_PATHS, COLLECTION, PROGRAM_ID, COLLECTION_NAME
 import { buildV2 } from '../texts-v2.mjs';
 import { buildFinal, serialize, SPLIT, EXTERNAL_URL } from '../texts-final.mjs';
 import { lintFiles, lintIdl, lintText, IDL_DESCRIPTION } from '../lint-permanent.mjs';
-import { l1Payload, scanWebp, sha256 } from '../arweave.mjs';
+import { l1Payload, scanWebp, sha256, validateDataPath, verifyChunk } from '../arweave.mjs';
 import { normalizeRecord, expectedBytes, runCheck, verdict } from '../check-gateways.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
@@ -142,41 +143,112 @@ test('the WebP scan passes the 12 images and refuses metadata chunks', () => {
   assert.ok(issues.some((i) => i.includes('EXIF')) && issues.some((i) => i.includes('SynthID')));
 });
 
-test('L1 reader rebuilds a payload that spans two chunks, and fails when a chunk is missing', async () => {
+// A real Arweave Merkle tree over `data` in CH-byte chunks: data_root and the data_path of every chunk.
+function merkle(data, CH) {
+  const HH = (...b) => crypto.createHash('sha256').update(Buffer.concat(b)).digest();
+  const note = (n) => { const b = Buffer.alloc(32); b.writeBigUInt64BE(BigInt(n), 24); return b; };
+  let level = [];
+  for (let s = 0; s < data.length; s += CH) {
+    const c = data.subarray(s, s + CH);
+    const dh = HH(c);
+    const end = s + c.length;
+    level.push({ id: HH(HH(dh), HH(note(end))), max: end, paths: [[s / CH, Buffer.concat([dh, note(end)])]] });
+  }
+  while (level.length > 1) {
+    const next = [];
+    for (let i = 0; i < level.length; i += 2) {
+      const [l, r] = [level[i], level[i + 1]];
+      if (!r) { next.push(l); continue; }
+      const head = Buffer.concat([l.id, r.id, note(l.max)]);
+      next.push({ id: HH(HH(l.id), HH(r.id), HH(note(l.max))), max: r.max, paths: [...l.paths, ...r.paths].map(([k, p]) => [k, Buffer.concat([head, p])]) });
+    }
+    level = next;
+  }
+  return { root: level[0].id, path: Object.fromEntries(level[0].paths) };
+}
+
+// An L1 world as it looked on 2026-11-07/08: the seed answers /tx/* but 404s every /chunk; its peers hold some
+// partitions only. `peers` maps "ip:port" -> 'serve' | '404' | 'down' | 'tamper' (valid proof, altered bytes).
+function stubL1({ peers, drop = -1, seedServesChunks = false }) {
   const CH = 16;
   const bundle = Buffer.from(Array.from({ length: 64 }, (_, i) => i));
-  const txEnd = 1000n; // absolute offset of the bundle's last byte
+  const txEnd = 1000n;
   const txStart = txEnd - BigInt(bundle.length) + 1n;
+  const { root, path: dp } = merkle(bundle, CH);
   const status = { status: 'FINALIZED', bundleId: 'B'.repeat(43), startOffsetInRootBundle: 10, payloadDataStart: 4, payloadContentLength: 20 };
-  const want = bundle.subarray(14, 34);
-  const note = (end) => { const b = Buffer.alloc(32); b.writeBigUInt64BE(BigInt(end), 24); return b; };
-  const real = globalThis.fetch;
-  let drop = false;
-  globalThis.fetch = async (url) => {
+  const calls = [];
+  const fetch = async (url) => {
     const u = String(url);
+    calls.push(u);
     const json = (o, s = 200) => new Response(JSON.stringify(o), { status: s, headers: { 'content-type': 'application/json' } });
-    if (u.endsWith('/status') && u.includes('upload.ardrive.io')) return json(status);
+    if (u.includes('upload.ardrive.io')) return json(status);
+    const host = new URL(u).host;
+    const kind = host === 'arweave.net' ? (seedServesChunks ? 'serve' : 'seed') : peers[host] ?? '404';
+    if (kind === 'down') throw new TypeError('fetch failed');
+    if (u.endsWith('/peers')) return json(Object.keys(peers));
     if (u.endsWith('/offset')) return json({ size: String(bundle.length), offset: String(txEnd) });
+    if (u.endsWith('/data_root')) return new Response(root.toString('base64url'), { status: 200, headers: { 'content-type': 'text/plain' } });
     if (u.endsWith('/status')) return json({ block_height: 7, number_of_confirmations: 9 });
     const m = u.match(/\/chunk\/(\d+)$/);
     if (m) {
-      const rel = Number(BigInt(m[1]) - txStart);
-      const k = Math.floor(rel / CH);
-      if (drop && k === 2) return json({}, 404);
-      const c = bundle.subarray(k * CH, (k + 1) * CH);
-      return json({ chunk: c.toString('base64url'), data_path: Buffer.concat([Buffer.alloc(32), note((k + 1) * CH)]).toString('base64url') });
+      if (kind === 'seed') return new Response('<html>404</html>', { status: 404, headers: { 'content-type': 'text/html' } });
+      if (kind === '404') return json({}, 404);
+      const k = Math.floor(Number(BigInt(m[1]) - txStart) / CH);
+      if (k === drop) return json({}, 404);
+      const c = Buffer.from(bundle.subarray(k * CH, (k + 1) * CH));
+      if (kind === 'tamper') c[0] ^= 1;
+      return json({ chunk: c.toString('base64url'), data_path: dp[k].toString('base64url') });
     }
     return json({}, 404);
   };
+  return { fetch, calls, want: bundle.subarray(14, 34), root, dp, size: BigInt(bundle.length) };
+}
+
+test('L1 proof: data_path is checked against data_root, offset and chunk bytes', () => {
+  const w = stubL1({ peers: {} });
+  assert.ok(validateDataPath(w.root, 20n, w.size, w.dp[1]));
+  assert.equal(validateDataPath(w.root, 40n, w.size, w.dp[1]), null); // a proof of chunk 1 does not hold offset 40
+  assert.equal(validateDataPath(Buffer.alloc(32), 20n, w.size, w.dp[1]), null); // another root
+  const ok = { chunk: Buffer.from(Array.from({ length: 16 }, (_, i) => 16 + i)).toString('base64url'), data_path: w.dp[1].toString('base64url') };
+  assert.ok(verifyChunk(ok, { dataRoot: w.root, txSize: w.size, rel: 20n }).ok);
+  const bad = { ...ok, chunk: Buffer.alloc(16).toString('base64url') };
+  assert.match(verifyChunk(bad, { dataRoot: w.root, txSize: w.size, rel: 20n }).why, /do not match/);
+});
+
+test('L1 reader: rebuilds a two-chunk payload from any peer when the seed 404s every chunk (2026-11-07)', async () => {
+  const real = globalThis.fetch;
   try {
+    let w = stubL1({ peers: { '10.0.0.1:1984': '404', '10.0.0.2:1984': 'down', '10.0.0.3:1984': 'serve' } });
+    globalThis.fetch = w.fetch;
     const r = await l1Payload('X'.repeat(43), { opts: { attempts: 1 } });
     assert.ok(r.ok, r.reason);
-    assert.equal(sha256(r.buf), sha256(want));
+    assert.equal(sha256(r.buf), sha256(w.want));
     assert.equal(r.height, 7);
-    drop = true;
-    const r2 = await l1Payload('X'.repeat(43), { opts: { attempts: 1 } });
-    assert.equal(r2.ok, false);
-    assert.match(r2.reason, /chunk at/);
+    assert.deepEqual(r.nodes, ['http://10.0.0.3:1984']);
+    // the seed alone (the pre-fix reader) fails on the same world
+    w = stubL1({ peers: {} });
+    globalThis.fetch = w.fetch;
+    const seedOnly = await l1Payload('X'.repeat(43), { opts: { attempts: 1 } });
+    assert.equal(seedOnly.ok, false);
+    assert.match(seedOnly.reason, /chunk at \+14: no Arweave L1 node served a proven chunk \(HTTP 404 x1\)/);
+    // still strict: a missing chunk everywhere fails, and so does a peer whose bytes do not match the proof
+    w = stubL1({ peers: { '10.0.0.3:1984': 'serve' }, drop: 1 });
+    globalThis.fetch = w.fetch;
+    const missing = await l1Payload('X'.repeat(43), { opts: { attempts: 1 } });
+    assert.equal(missing.ok, false);
+    assert.match(missing.reason, /chunk at \+16/);
+    w = stubL1({ peers: { '10.0.0.4:1984': 'tamper' } });
+    globalThis.fetch = w.fetch;
+    const tampered = await l1Payload('X'.repeat(43), { opts: { attempts: 1 } });
+    assert.equal(tampered.ok, false);
+    assert.match(tampered.reason, /do not match the proven leaf/);
+    // a serving seed is still used first and no peer is asked for a chunk
+    w = stubL1({ peers: { '10.0.0.3:1984': 'serve' }, seedServesChunks: true });
+    globalThis.fetch = w.fetch;
+    const seed = await l1Payload('X'.repeat(43), { opts: { attempts: 1 } });
+    assert.ok(seed.ok, seed.reason);
+    assert.deepEqual(seed.nodes, ['https://arweave.net']);
+    assert.ok(!w.calls.some((u) => u.includes('10.0.0.3') && u.includes('/chunk/')));
   } finally {
     globalThis.fetch = real;
   }

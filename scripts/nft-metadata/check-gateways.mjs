@@ -23,7 +23,7 @@ import { fileURLToPath } from 'url';
 import { IMAGE_PATHS, JSON_PATHS } from './tiers.mjs';
 import { buildFinal, serialize } from './texts-final.mjs';
 import { buildV2 } from './texts-v2.mjs';
-import { DEFAULT_GATEWAYS, ID_RE, fetchBytes, l1Payload, pool, rawManifest, sha256 } from './arweave.mjs';
+import { DEFAULT_GATEWAYS, ID_RE, fetchBytes, l1Context, l1Payload, pool, rawManifest, sha256 } from './arweave.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '../..');
@@ -103,7 +103,7 @@ export async function checkSetOnGateway(rec, set, exp, gw, { imagesOnly = false,
 }
 
 // The same items rebuilt from L1 chunks (no gateway involved).
-export async function checkSetOnL1(rec, set, exp, { imagesOnly = false, opts } = {}) {
+export async function checkSetOnL1(rec, set, exp, { imagesOnly = false, opts, ctx = l1Context() } = {}) {
   const failures = [];
   const bundles = {};
   const items = [];
@@ -116,8 +116,13 @@ export async function checkSetOnL1(rec, set, exp, { imagesOnly = false, opts } =
   progress(`Arweave L1: ${items.length} items`);
   const results = await pool(items, 4, async (it) => {
     if (!ID_RE.test(it.id ?? '')) return fail(failures, it.item, 'no id in the record');
-    const r = await l1Payload(it.id, { opts });
-    if (r.bundleId) bundles[r.bundleId] = { height: r.height ?? null, confirmations: r.confirmations ?? null };
+    const r = await l1Payload(it.id, { opts, ctx });
+    if (r.bundleId) {
+      const b = (bundles[r.bundleId] ??= { height: null, confirmations: null, nodes: [] });
+      b.height = r.height ?? b.height;
+      b.confirmations = r.confirmations ?? b.confirmations;
+      for (const n of r.nodes ?? []) if (!b.nodes.includes(n)) b.nodes.push(n);
+    }
     if (!r.ok) return fail(failures, it.item, r.reason);
     if (it.want && sha256(r.buf) !== sha256(it.want)) return fail(failures, it.item, 'L1 bytes differ from the repository');
     if (it.paths) {
@@ -136,7 +141,7 @@ export async function checkSetOnL1(rec, set, exp, { imagesOnly = false, opts } =
   return { ok: results.reduce((a, b) => a + b, 0), total: items.length, failures, bundles };
 }
 
-export async function runCheck(rec, { gateways = DEFAULT_GATEWAYS, only, l1 = true, imagesOnly = false, opts } = {}) {
+export async function runCheck(rec, { gateways = DEFAULT_GATEWAYS, only, l1 = true, imagesOnly = false, opts, ctx = l1Context() } = {}) {
   const now = new Date().toISOString();
   const report = { checkedAt: now, day: now.slice(0, 10), legacy: !!rec.legacy, sandbox: !!rec.sandbox, uploadedAt: rec.uploadedAt ?? null, gateways, l1, imagesOnly, sets: {} };
   const sets = rec.sets.filter((s) => !only || s.gateway === only);
@@ -154,7 +159,7 @@ export async function runCheck(rec, { gateways = DEFAULT_GATEWAYS, only, l1 = tr
     if (!imagesOnly && set.metadataBaseUri !== wantMetadata) drift.push(`metadataBaseUri ${set.metadataBaseUri} is not the checked base ${wantMetadata}`);
     const out = { metadataBaseUri: set.metadataBaseUri, imageBaseUri: set.imageBaseUri, drift, gateways: {} };
     for (const gw of gateways) out.gateways[gw] = await checkSetOnGateway(rec, set, exp, gw, { imagesOnly, opts });
-    if (l1) out.l1 = await checkSetOnL1(rec, set, exp, { imagesOnly, opts });
+    if (l1) out.l1 = await checkSetOnL1(rec, set, exp, { imagesOnly, opts, ctx });
     out.pass = !drift.length && Object.values(out.gateways).every((g) => g.ok === g.total) && (!l1 || out.l1.ok === out.l1.total);
     report.sets[set.gateway] = out;
   }
@@ -172,7 +177,7 @@ export function printReport(report) {
       for (const f of g.failures.slice(0, 6)) console.log(`      ${f.item}: ${f.why}`);
       if (g.failures.length > 6) console.log(`      ... ${g.failures.length - 6} more`);
     }
-    if (s.l1) for (const [b, v] of Object.entries(s.l1.bundles)) console.log(`  bundle ${b}: height ${v.height ?? '?'}, confirmations ${v.confirmations ?? '?'}`);
+    if (s.l1) for (const [b, v] of Object.entries(s.l1.bundles)) console.log(`  bundle ${b}: height ${v.height ?? '?'}, confirmations ${v.confirmations ?? '?'}, chunks proven from ${v.nodes?.length ? v.nodes.join(' ') : '-'}`);
     console.log(`  => ${s.pass ? 'PASS' : 'FAIL'}`);
   }
 }
