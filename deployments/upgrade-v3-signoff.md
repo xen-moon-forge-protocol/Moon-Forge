@@ -9,7 +9,8 @@ first v3 epoch is the first Sunday after a green S6; `docs/UPGRADE-2026-11.md` p
 the binary hash at least 48 hours before it; house games and the Jackpot stay hidden on the site from S7 until a
 continuous keeper has met the published service levels for a week, D-39).
 Revised 2026-10-31 (round 7): the S0 decisions are recorded on the public decision sheet (no signature), and no token
-is revoked at S9. Nothing on this sheet is signed yet. Every `____` is filled in at the stage named beside it.
+is revoked at S9. S0 filled in on 2026-11-09: the public keys of section 1, the funding of section 3 and the S0 rows of
+sections 4 and 7 (`docs/decisions/2026-11-OD-SHEET.md`). Nothing on this sheet is signed yet. Every `____` is filled in at the stage named beside it.
 The binding text is `SPEC-UPGRADE-v2` revision v2.2 (sections 6.3, 8.5-8.7, 9 and 10). This sheet is the operator's checklist
 for S6: what is deployed, what it costs, the exact commands, the checks before each step, when to abort, and what is
 signed. It holds no secret: keypair files are named by path, and only public keys are written here.
@@ -24,11 +25,11 @@ signed. It holds no secret: keypair files are named by path, and only public key
 | Live executable hash (zero padding stripped) | `7a990932739954802d4df9bc9b284a71e6ab430b123b94d4135f542c71f86a1d` (equal to a fresh build of tag program-2026-10-12 / be03ad8) | measured 2026-10-23 |
 | Upgrade authority and IDL authority before S6 | `7PuG8ELKXzvZqVLawFnmjDJqq4KEyRhssKQEq7aQM6Qd` (the deploy wallet, also today's architect payee) | S5 |
 | On-chain IDL account | `CCt3yKzEbfZ1tV9cBVqsryGGSXGojMCtJZhYKHRfxszP`, 16,258 B (16,214 B usable) | measured 2026-10-23 |
-| OD-32 DEPLOY_KEY (new upgrade + IDL authority from S6 to S9), public key | ____ | S0 |
-| OD-25 INITIAL_KEEPER, public key (K-4 default of 2026-10-25: today's keeper key, the one in the `KEEPER_PRIVATE_KEY` repository secret; never the oracle, deploy, cold or payee key; a new key only if the S0 decision sheet records one). It is compiled into the S2 binary and is the only key that can create the keeper seat until 2026-12-16 00:00 UTC (from then anyone with a bond of at least 20 XNT may create a never-armed seat), so it is named at S0 even though it is **not armed at S7** (F1-b, owner answer of 2026-10-25): no keeper bond is posted, because while no keeper runs anyone could place house bets that nobody anchors, have each refunded in full and make the bond pay the edge and forfeit the stake, so a posted bond could be drained at no cost. The seat is armed later, by `s7.mjs --arm-keeper` (section 5, "Later"), only once a keeper has run continuously with this key for at least 24 hours, as an always-on loop outside GitHub Actions (SPEC 9.5); house games and the Jackpot stay hidden on the site until that keeper has met the published service levels for a week (D-39). keeper.yml keeps running with this key without a seat (role "no-seat"), so the R-1 hand-over risk of a seat held by keeper.yml does not arise | ____ | S0 |
-| OD-16 SEAT_COLD_INITIAL (cold key, kept offline), public key | ____ | S0 |
-| OD-20 SEAT_REFUND_INITIAL, public key | ____ | S0 |
-| OD-22 architect payee (kept offline), public key | ____ | S0 |
+| OD-32 DEPLOY_KEY (new upgrade + IDL authority from S6 to S9; kept offline, never in GitHub), public key | `DGeGqSjsdWK385DmFYmy2ZKpoebEur3ZQrSiVPn6Ah7X` | S0, 2026-11-08 |
+| OD-25 INITIAL_KEEPER, public key (K-4 default of 2026-10-25: today's keeper key, the one in the `KEEPER_PRIVATE_KEY` repository secret; never the oracle, deploy, cold or payee key; a new key only if the S0 decision sheet records one). It is compiled into the S2 binary and is the only key that can create the keeper seat until 2026-12-16 00:00 UTC (from then anyone with a bond of at least 20 XNT may create a never-armed seat), so it is named at S0 even though it is **not armed at S7** (F1-b, owner answer of 2026-10-25): no keeper bond is posted, because while no keeper runs anyone could place house bets that nobody anchors, have each refunded in full and make the bond pay the edge and forfeit the stake, so a posted bond could be drained at no cost. The seat is armed later, by `s7.mjs --arm-keeper` (section 5, "Later"), only once a keeper has run continuously with this key for at least 24 hours, as an always-on loop outside GitHub Actions (SPEC 9.5); house games and the Jackpot stay hidden on the site until that keeper has met the published service levels for a week (D-39). keeper.yml keeps running with this key without a seat (role "no-seat"), so the R-1 hand-over risk of a seat held by keeper.yml does not arise | `XjMMmtbDN1zFiVoihyRjwdFXiyxXX5wegNWeeSQ2YFN` (today's keeper key, K-4 default) | S0, 2026-11-08 |
+| OD-16 SEAT_COLD_INITIAL (cold key, kept offline, never in GitHub), public key | `2jYC9zxXL8zPXi5J3Yfu3irVEHK3PpBwJGc8FtfCDXq1` | S0, 2026-11-08 |
+| OD-20 SEAT_REFUND_INITIAL, public key | `2jYC9zxXL8zPXi5J3Yfu3irVEHK3PpBwJGc8FtfCDXq1` (the cold key, OD-20 default) | S0, 2026-11-08 |
+| OD-22 architect payee (kept offline, never in GitHub), public key | `HLuvdSgg4Y5xb3GdG2MpK973kE8q7viM1PuXDnNFqwxc` | S0, 2026-11-08 |
 
 ## 2. The binary and the IDL
 
@@ -90,6 +91,10 @@ The EVM gas for the proof-plan burns is separate and not in this total. The oper
 before, with the balances of that day and the S2 size. The earlier totals (≈ 55-60 XNT, ≈ 52 and
 ≈ 90 XNT in earlier plans) included the 20.1 XNT keeper line (52 − 20.1 ≈ 32) and no longer apply.
 
+| Funding received (S0) | Value |
+|---|---|
+| The single funding transfer | arrived on 2026-11-08; the deploy wallet `7PuG8ELKXzvZqVLawFnmjDJqq4KEyRhssKQEq7aQM6Qd` then held about 34.21 XNT (finalized). The other lines of the table above are paid from it, role to role, in public. No outside money goes into the project after it (D-04) |
+
 | Balance check at S5 | Value |
 |---|---|
 | Deploy wallet `7PuG8…` balance | ____ XNT (≥ 15) |
@@ -100,7 +105,7 @@ before, with the balances of that day and the S2 size. The earlier totals (≈ 5
 
 | Gate | Evidence | Yes / no |
 |---|---|---|
-| Section 10 decisions recorded (S0) | the public decision sheet | ____ |
+| Section 10 decisions recorded (S0) | the public decision sheet, `docs/decisions/2026-11-OD-SHEET.md` (published 2026-11-09) | yes |
 | `cargo test -p moon-forge --lib` green, incl. the frozen errors 6000-6100 (8.7 item 1) | log ____ | ____ |
 | Integration B-1 … B-14 green twice in a row (8.7 item 2) | logs ____ | ____ |
 | Stress green for 3 seeds (8.7 item 3) | logs ____ | ____ |
@@ -125,8 +130,8 @@ WALLET=~/.config/solana/deploy-wallet.json   # 7PuG8…, the current upgrade + I
 SO=target/deploy/moon_forge.so               # the S2 binary, built from the S2 tag
 S2_SHA=____                                  # section 2
 NEW=$(stat -c %s "$SO")                      # must equal section 2
-DEPLOY_KEY=____                              # OD-32 public key (section 1)
-DEPLOY_KEY_FILE=____                         # a copy of the deploy key file in RAM only (/dev/shm in WSL), made from its offline copy for steps 9-10; never on a disk
+DEPLOY_KEY=DGeGqSjsdWK385DmFYmy2ZKpoebEur3ZQrSiVPn6Ah7X  # OD-32 public key (section 1)
+DEPLOY_KEY_FILE=____                         # a copy of the deploy key file in RAM only (/dev/shm), made from its offline copy for steps 9-10; never on a disk
 ```
 
 | # | Command | Check before the step | Check after the step |
@@ -164,7 +169,7 @@ it: `scripts/upgrade/census.mjs` (the S5, S6, S7 and S9 censuses; at S7 and S9 i
 transaction that erases the IDL authority and removes the upgrade authority, so both go together or neither does).
 Each is a dry run by default, sends only with `--send` (and `--mainnet` on X1 mainnet), refuses any key file whose
 public key differs from section 1, and skips a step already done, so a re-run resumes. All of them were rehearsed on
-localnet with the upgrade-day key layout (the DEPLOY_KEY and the payee fresh keys in a separate key folder, the payee at
+localnet with the upgrade-day key layout (the DEPLOY_KEY and the payee as fresh keys apart from the deploy wallet, the payee at
 0 XNT): `tests/run-upgrade-tooling.sh`, 64 checks green twice on 2026-10-25 with the arm at S7, and again in round 6
 (2026-10-26) with the F1-b steps and the later arm after the freeze (section 8). The command of each stage is in
 `scripts/upgrade/README.md`. S7 command: `node scripts/upgrade/s7.mjs --payee <OD-22> --keeper <OD-25> --seat-cold
@@ -192,7 +197,7 @@ Actions (SPEC 9.5; the S4 gate of a new keeper), and only then:
    the service-level week; at S7 it is hidden anyway, because no seat exists);
 1. fund the INITIAL_KEEPER wallet with the bond (at least 20 XNT) + 0.1 XNT for the seat rent and fees, from project
    wallets only (the architect payee's income or the deploy wallet's O-10 reserve, moved from role to role in public):
-   no owner money goes into the project after the single funding before S6, and none is planned for this; if project
+   no outside money goes into the project after the single funding transfer before S6, and none is planned for this; if project
    wallets do not hold it, the keeper is not armed and house games and the Jackpot stay hidden on the site (BOND-GRIEF,
    disclosed);
 2. `node scripts/upgrade/s7.mjs --arm-keeper --payee <OD-22> --keeper <OD-25> --continuous-keeper-since <its start, ISO UTC> --keeper-key <file>`
@@ -256,7 +261,7 @@ Each item is recorded with its date and UTC time:
 
 | Signature | Text signed | Signature / commit | Date (UTC) |
 |---|---|---|---|
-| S0 decisions (public decision sheet) | section 10 table + sections 1 and 3 | ____ | ____ |
+| S0 decisions (public decision sheet) | section 10 table + sections 1 and 3 | recorded, not signed: the commit that adds `docs/decisions/2026-11-OD-SHEET.md` | 2026-11-09 |
 | S6 hashes (DEPLOY_KEY off-chain message) | the line of item 2 | ____ | ____ |
 | S6 completed | "deployed `<S2_SHA>`, last-deploy slot ____, authorities = DEPLOY_KEY" | ____ | ____ |
 

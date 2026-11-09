@@ -27,6 +27,7 @@ const PROSE_SCOPE = [
   { dir: "frontend/public", ext: [".txt", ".json", ".xml", ".html", ".svg", ".md", ".webmanifest"],
     skip: ["frontend/public/epochs", "frontend/public/airdrop"] },
   { dir: "agents", ext: [".md", ".mjs", ".js", ".json", ".txt"], skip: ["package-lock.json"] },
+  { dir: "bots", ext: [".md", ".mjs", ".js", ".json", ".txt"], skip: ["package-lock.json"] },
   { dir: "scripts/nft-metadata", ext: [".mjs", ".js", ".json"] },
   { dir: "nft-arweave", ext: [".json", ".md"] },
   { file: "oracle/src/announce.ts" },
