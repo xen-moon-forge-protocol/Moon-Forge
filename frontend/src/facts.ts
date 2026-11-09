@@ -95,6 +95,8 @@ export const officialLinks = {
     weekFeed: `${SITE_URL}feed/week-so-far.json`,
     /** the agent kit's quote (quoteBurn) and the feed contract */
     kitBurn: `${GITHUB_URL}/blob/main/agents/kit/burn.mjs`,
+    /** Moon Forge Bot: forkable community software for users (bots/moon-forge-bot) */
+    botSource: `${GITHUB_URL}/tree/main/bots/moon-forge-bot`,
 } as const;
 
 export interface ChainFact {
@@ -327,6 +329,57 @@ export const quoteFeed = {
     kit: 'The agent kit’s quoteBurn() computes the same number from the feed and the previous epoch file, and refuses a feed that is stale or does not continue the newest epoch file.',
 } as const;
 
+/**
+ * Moon Forge Bot (bots/moon-forge-bot): forkable community software a user runs on their own machine, built on the agent
+ * kit. Facts for the /bot/ page, its static copy, llms.txt / llms-full.txt and the agent card. Dated 2026-11-08.
+ */
+export const bot = {
+    name: 'Moon Forge Bot',
+    source: `${GITHUB_URL}/tree/main/bots/moon-forge-bot`,
+    readme: `${GITHUB_URL}/blob/main/bots/moon-forge-bot/README.md`,
+    card: `${GITHUB_URL}/blob/main/bots/moon-forge-bot/agent-card.json`,
+    summary: 'Moon Forge Bot is a small open-source program you run on your own computer, with your own keys, that does the routine Moon Forge chores under rules you write: it burns XEN at the moments your rule allows, claims your XNT when it can be claimed, and (only if you switch them on) plays games within a loss budget and watches your Artifacts. Nothing is signed until you ask for it: it starts in dry run.',
+    forWhom: [
+        'People who burn XEN regularly and do not want to watch the hourly feed and the daily capacity slice by hand.',
+        'People who want their XNT claimed as soon as the 48-hour hold ends, without opening the site every week.',
+        'Builders and AI agents that want a worked, tested example on top of the agent kit, with a local interface another agent can query.',
+        'Not for anyone who expects a bot to make a payout larger: it only acts on your rule, faster than you would by hand.',
+    ],
+    jobs: [
+        { title: 'Burn strategist', text: 'Every few minutes it reads the hourly week-so-far feed, asks the kit for a quote on every chain in deployments/portals.json, and burns through the Moon Forge portal only when your rule is met: XNT per XEN above your threshold, at least what selling the XEN would fetch, today’s slice still open, your daily XEN cap and your gas cap. One decision line per chain per tick says what it did and why.' },
+        { title: 'Claimer', text: 'It finds your leaves in the published epoch files, checks each one against the root stored on X1 and claims it once its 48-hour hold is over and while its 90-day window is open; after the final upgrade it also claims the extra-pot rebates of your Artifacts. A claim always pays the wallet in the leaf.' },
+        { title: 'Games (optional, off by default)', text: 'Sealed Artifact Duel and sealed Moon Wars within a stake cap, a number of games per day and a total loss budget; house games only while the house keeper seat is live on X1. 18+ only and only where legal; you can lose the whole stake.' },
+        { title: 'Artifact alerts (optional)', text: 'It warns when an Artifact you hold is near the end of its 52 weeks, or is held by a wallet that is not the destination of your burns; it recycles or lists only the Artifacts you name, a few per day at most.' },
+        { title: 'A2A interface (optional, off by default)', text: 'A local HTTP/JSON interface on 127.0.0.1 and an agent card, so another agent can ask the bot for a quote or a plan. It never signs on request; a tick runs only if you allow it, inside every limit you set.' },
+    ],
+    steps: [
+        'Get the code: clone the Moon Forge repository (or fork it on GitHub) and open bots/moon-forge-bot.',
+        'Install from the committed lockfiles: npm ci --ignore-scripts in agents/kit, then in bots/moon-forge-bot (one dependency, ethers, to sign EVM transactions).',
+        'Copy config.example.json to config.json and write your rule and your limits: the X1 address that receives the XNT (and its last 6 characters, typed again), XEN per burn and per day, gas caps per chain, which jobs run.',
+        'Run node bin/moon-forge-bot.mjs check: it validates the config, prints the risk notice and lists every chain with its state.',
+        'Run it in dry run for a few days (once, then run): read the decision lines and change the rule until they match what you want.',
+        'Only then go live with small caps: accept the risk notice in the config, put your keys in local files or environment variables, and start it with --live. Stop it any time with Ctrl+C or the kill-switch file.',
+    ],
+    adapt: 'Each user tunes it to their own reality: their chains, their XEN, their gas budget, their schedule. The rule lives in one short file of pure functions with tests (src/strategy.mjs); the gas and nonce policy in another (src/evm-guard.mjs). Copy it, fork it, change it, run npm test, and share what you improve: it is community software under the MIT license, and anyone may improve it by pull request or in their own fork.',
+    safety: [
+        'Keys stay on your machine: read from a local file or an environment variable, never from the config file, and never written to a log (every log line is scrubbed of anything that looks like a key or a seed phrase).',
+        'Limits you set: XEN per burn and per day, burns per day, max fee per gas and max gas cost per transaction per chain, a coin reserve left in the wallet, a stake cap and a total loss budget for games.',
+        'Exact approvals only (never unlimited), a simulation before every transaction, at most one unfinished transaction per chain, and a journal written before each broadcast so a crash never leads to a blind resend.',
+        'A kill switch: create the STOP file (or set MFBOT_STOP=1) and the bot sends nothing and leaves its loop.',
+        'The kit’s quote is the floor of every decision: the bot never burns what the kit refuses, and a chain whose portal address differs between the published list and the kit is refused.',
+    ],
+    risks: [
+        'A burn cannot be undone; the payout is XNT on X1 under the rules of the epoch the burn falls in, and no payout is promised.',
+        'The quote is “at most” until the epoch is built; the part beyond today’s capacity is paid only from the week’s leftover, which is not promised. XNT is volatile and thin.',
+        'Other bots are fast: scripts can take a day’s slice the moment it opens, so your rule may never be met.',
+        'Software fails: the bot, the kit, an RPC or your computer can stop at the wrong moment; check the explorer when in doubt.',
+        'If the GitHub account falls, the site, the oracle, the keeper and the epoch files stop; payouts pause; the reward pool stays locked in the program.',
+        'Games: 18+ only and only where legal; you can lose the whole stake; house games carry a fixed 2% edge; your opponent may be another automated agent.',
+    ],
+    today: 'Today (2026-11-08): no binding quote exists before the v3 switch epoch (planned for November 2026, announced at least one full epoch ahead), so the week-so-far feed is not published yet and the bot logs “WAIT” and does not burn. Claims of published epochs work today. Sealed games, the extra-pot rebates and Artifact listings wait for the final upgrade (planned, earliest 2026-11-18), which the bot reads from X1.',
+    community: 'Community software: written on top of the public agent kit, MIT license, no warranty. You run it and hold its keys, so you are responsible for what it does. Moon Forge never asks for your keys and never runs the bot for you.',
+} as const;
+
 /** "What Moon Forge will never do" (T9-30 / T15-18): verbatim from public/links.json, the same list every surface renders. */
 export const never: readonly string[] = linksJson.never;
 /** "Nothing else is official" sentence, from public/links.json. */
@@ -538,6 +591,7 @@ export const routes: readonly RouteFact[] = [
     { path: '/games/', title: 'Games | Moon Forge', description: 'On-chain XNT games of the Moon Forge program, 18+ only and only where legal: house games with a fixed 2% edge, Jackpot, Artifact Duel, Moon Wars, Burn Lottery and Be the House. You can lose the whole stake.', index: true },
     { path: '/donate/', title: 'Donate | Moon Forge', description: 'A donation goes to the reward pool, which pays XEN burners through the weekly budget and small running costs (keeper tips). The architect receives nothing from it.', index: true, app: true },
     { path: '/transparency/', title: 'Transparency | Moon Forge', description: 'Program and upgrade authority, live configuration, vaults, lifetime counters, who can do what, every fee and split, key constants and epochs.', index: true },
+    { path: '/bot/', title: 'Moon Forge Bot | Moon Forge', description: 'A forkable, open-source bot you run on your own computer: burns XEN only when your rule is met, claims your XNT after the 48-hour hold, optional 18+ games and Artifact alerts, a local A2A interface. Dry run first; your keys stay with you; no payout is promised.', index: true },
     { path: '/whitepaper/', title: 'Whitepaper v2 | Moon Forge', description: 'Problem, flow, scoring and payout, budget rules, games and fairness, Artifacts, fees, trust assumptions and risks of Moon Forge v2.', index: true },
 ];
 
@@ -547,7 +601,7 @@ export const sitemapFiles: readonly string[] = ['llms.txt', 'llms-full.txt', 'ag
 export const facts = {
     INTERIM, rules, identity, officialLinks, chains, liveChains, epochRules, tiers, fees, artifacts, forgeSplit, artifactRules,
     games, gameRules, notices, disambiguation, position, scale, SCALE_DATE, oldBurns, ageNotice, legacyPilot, quoteFeed, never, notOfficial, xNote, verify, risks, trust, verifyChecklist, steps,
-    faq, keyQa, startQa, whitepaper, routes, sitemapFiles,
+    faq, keyQa, startQa, whitepaper, routes, sitemapFiles, bot,
 } as const;
 
 // ── Drift guard: the identity facts above must equal public/links.json (one source for every surface, T9-30 / X-064) ──

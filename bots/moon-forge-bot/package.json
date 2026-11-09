@@ -1,0 +1,23 @@
+{
+  "name": "moon-forge-bot",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Forkable automation for Moon Forge users: rule-based XEN burns through the portals, automatic XNT claims, optional 18+ games, Artifact alerts and a local A2A interface. Dry run by default.",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "moon-forge-bot": "bin/moon-forge-bot.mjs"
+  },
+  "scripts": {
+    "check": "node bin/moon-forge-bot.mjs check",
+    "once": "node bin/moon-forge-bot.mjs once",
+    "run": "node bin/moon-forge-bot.mjs run",
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "ethers": "6.13.4"
+  }
+}

@@ -202,6 +202,19 @@ ${F.whitepaper.map((s, i) => section(`${i + 1}. ${s.title}`, p(s.paragraphs))).j
 ${noticesHtml(F, ['rules-v2', 'forge-drops'])}${rulesLine(F)}`;
 }
 
+function bodyBot(F) {
+    const B = F.bot;
+    return `<h1>${esc(B.name)}</h1><p>${esc(B.summary)}</p><p><a href="${esc(B.source)}">Get it: bots/moon-forge-bot on GitHub</a></p>
+<p><strong>${esc(F.scale)}</strong></p><p>${esc(B.today)}</p>
+${section('What it does', `<ul>${B.jobs.map((j) => `<li><strong>${esc(j.title)}.</strong> ${esc(j.text)}</li>`).join('')}</ul><p class="muted">${esc(F.ageNotice)}</p>`)}
+${section('Who it is for', `<ul>${li(B.forWhom)}</ul>`)}
+${section('How to get it and run it, step by step', `<ol>${li(B.steps)}</ol><p>Full guide and every setting: <a href="${esc(B.readme)}">README</a> · agent card: <a href="${esc(B.card)}">agent-card.json</a>.</p>`)}
+${section('Copy it, fork it, adapt it', p([B.adapt]))}
+${section('Safety', `<ul>${li(B.safety)}</ul>`)}
+${section('Risks, plainly', `<ul>${li(B.risks)}</ul><p class="muted">${esc(B.community)}</p>`)}
+${rulesLine(F)}`;
+}
+
 function bodyApp(F, route) {
     const extra = route.path === '/forge/'
         ? `<p>${esc(F.oldBurns)}</p><p>Before signing: the burn is irreversible, your only cost is gas on that chain, Moon Forge takes no fee on this path, and the burn transaction links your EVM address to your X1 address publicly and forever.</p>`
@@ -220,6 +233,7 @@ function bodyFor(F, route) {
         case '/games/': return bodyGames(F);
         case '/transparency/': return bodyTransparency(F);
         case '/whitepaper/': return bodyWhitepaper(F);
+        case '/bot/': return bodyBot(F);
         default: return bodyApp(F, route);
     }
 }
@@ -313,6 +327,7 @@ Rules described: program tag ${F.rules.program}, oracle ${F.rules.oracle}, valid
 - [Skill file](${L.skillFile}): rules, costs, workflows and guardrails
 - [Agent kit](${L.agentKit}): JavaScript client, examples and an end-to-end test
 - [Agent card](${L.agentCard}): ERC-8004 registration format
+- [Moon Forge Bot](${site}bot/): ${F.bot.summary} Source: ${F.bot.source}
 - [Epoch files](${L.epochIndex}): every published epoch, recomputable with \`cd oracle && npm run verify -- epoch-N.json --full\`
 - [Public counter](${L.counter}): XEN removed from supply through Moon Forge per chain and the XNT the published epochs set aside for burners, rebuilt from the epoch files at every site build
 - [Hourly week-so-far feed](${L.weekFeed}): the inputs of the binding quote under the v3 rules (see "Quote a burn right now" below)
@@ -390,6 +405,10 @@ function llmsFullTxt(F, meta) {
     for (const f of F.faq) lines.push(`Q: ${f.q}`, `A: ${f.a}`, '');
     h('For AI agents');
     lines.push(`- Skill file: ${L.skillFile}`, `- Agent kit (JavaScript client, examples, end-to-end test): ${L.agentKit}`, `- Agent card (ERC-8004 registration format): ${L.agentCard}`, '- Agents play with their own keypair, like anyone. House games have a fixed edge (negative expected value). Session keys play house games only and can never withdraw.', '- This project never pays anyone to promote it and never posts as someone else; it does not ask AI systems to recommend it.');
+    h('Moon Forge Bot (community software for users)');
+    lines.push(F.bot.summary, '', F.bot.today, '', `Page: ${site}bot/ · source: ${F.bot.source} · agent card: ${F.bot.card}`, '');
+    for (const j of F.bot.jobs) lines.push(`- ${j.title}: ${j.text}`);
+    lines.push('', 'Who it is for:', ...F.bot.forWhom.map((w) => `- ${w}`), '', 'Step by step:', ...F.bot.steps.map((s, i) => `${i + 1}. ${s}`), '', F.bot.adapt, '', 'Safety:', ...F.bot.safety.map((s) => `- ${s}`), '', 'Risks:', ...F.bot.risks.map((r) => `- ${r}`), '', F.bot.community);
     h('Dated notices');
     for (const n of F.notices) lines.push(`- ${n.date} (${n.id}): ${n.text}`);
     h('Pages');

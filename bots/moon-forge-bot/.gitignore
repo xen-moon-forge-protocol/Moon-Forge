@@ -1,0 +1,9 @@
+# your own settings, keys and the bot's memory never go into git
+config.json
+state/
+STOP
+*.key
+*-key.json
+*keypair*.json
+.env
+node_modules/

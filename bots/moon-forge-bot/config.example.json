@@ -1,0 +1,65 @@
+{
+  "acceptRiskNotice": false,
+  "x1Destination": "<your X1 wallet address: the XNT of every burn is paid here>",
+  "x1DestinationConfirm": "<the last 6 characters of that address, typed by you>",
+  "evmAddress": "",
+  "keys": {
+    "evm": { "file": "", "env": "MFBOT_EVM_KEY" },
+    "x1": { "file": "", "env": "MFBOT_X1_KEY" }
+  },
+  "x1Rpcs": ["https://rpc.mainnet.x1.xyz"],
+  "tickSeconds": 300,
+  "stateFile": "./state/journal.json",
+  "logFile": "./state/bot.log",
+  "killSwitchFile": "./STOP",
+  "burn": {
+    "enabled": true,
+    "tier": 0,
+    "rule": {
+      "minXntPerBillionXen": 0,
+      "minQuoteOverMarketBps": 10000,
+      "minRemainingTodayXnt": 0.001,
+      "maxShareOfRemainingBps": 2500,
+      "minXenPerBurn": "1000000"
+    },
+    "limits": {
+      "maxXenPerBurn": "50000000",
+      "maxXenPerDay": "100000000",
+      "maxBurnsPerDay": 4,
+      "maxBurnsPerTick": 1
+    },
+    "gas": {
+      "maxFeePerGasGwei": 5,
+      "maxGasCostNative": "0.002",
+      "keepNativeReserve": "0.0005",
+      "extraFeeNative": "0",
+      "gasLimitHeadroomBps": 12500,
+      "confirmations": 2,
+      "txTimeoutSeconds": 600
+    },
+    "chains": {
+      "8453": { "rpcs": ["https://mainnet.base.org"], "gas": { "maxFeePerGasGwei": 0.5, "extraFeeNative": "0.00002" } },
+      "10": { "rpcs": ["https://mainnet.optimism.io"], "gas": { "maxFeePerGasGwei": 0.5, "extraFeeNative": "0.00002" } },
+      "137": { "rpcs": ["https://polygon-bor-rpc.publicnode.com"], "gas": { "maxFeePerGasGwei": 800, "maxGasCostNative": "0.15" } },
+      "56": { "rpcs": ["https://bsc-dataseed.bnbchain.org"], "gas": { "maxFeePerGasGwei": 3, "maxGasCostNative": "0.0005" } },
+      "43114": { "rpcs": ["https://api.avax.network/ext/bc/C/rpc"], "gas": { "maxFeePerGasGwei": 50, "maxGasCostNative": "0.01" } }
+    }
+  },
+  "claims": { "enabled": true, "base": true, "extra": true, "withdrawVested": false, "lastEpochs": 20, "minClaimXnt": 0 },
+  "games": {
+    "enabled": false,
+    "ageConfirmed18Plus": false,
+    "lossBudgetXnt": 0,
+    "maxStakeXnt": 0.1,
+    "maxGamesPerDay": 3,
+    "duel": { "enabled": false, "createWhenNone": false },
+    "wars": { "enabled": false, "createWhenNone": false },
+    "house": { "enabled": false, "game": 0, "param": 0, "choice": 0 }
+  },
+  "artifacts": {
+    "alerts": true,
+    "recycle": { "enabled": false, "assets": [], "maxPerDay": 1 },
+    "listing": { "enabled": false, "items": [], "maxPerDay": 2 }
+  },
+  "a2a": { "enabled": false, "host": "127.0.0.1", "port": 8787, "tokenEnv": "MFBOT_A2A_TOKEN", "allowActions": false }
+}

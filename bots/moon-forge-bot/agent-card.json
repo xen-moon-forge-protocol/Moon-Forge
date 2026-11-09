@@ -1,0 +1,23 @@
+{
+  "type": "https://eips.ethereum.org/EIPS/eip-8004#registration-v1",
+  "name": "Moon Forge Bot",
+  "description": "Forkable, open-source automation that a Moon Forge user runs on their own machine with their own keys (MIT license, community software, no warranty). Skills: (1) burn strategist: reads the hourly week-so-far feed and the day's capacity slice, and burns XEN through the Moon Forge portals (Base 8453, Optimism 10, Polygon 137, BSC 56, Avalanche 43114, and any chain later added to deployments/portals.json and to the kit) only when the owner's rule is met: XNT per XEN above a threshold, at least what selling the XEN would bring, a slice still open, daily XEN and gas caps; exact approvals only, a simulation before every transaction, at most one unfinished transaction per chain, a journal written before each broadcast; (2) claimer: claims the owner's XNT leaves and, after the final upgrade, the extra-pot rebates, after the 48-hour hold and inside the 90-day window; (3) games, off by default, 18+ only and only where legal: sealed Duel and Moon Wars within a stake cap and a total loss budget, house games only while the keeper seat is live on X1; (4) Artifact alerts, with recycling or listing only for assets the owner names. Dry run by default: nothing is signed without --live, the risk notice accepted in the config, and a key the owner placed in a local file or environment variable; a kill switch stops it. The local A2A interface is off by default, binds to 127.0.0.1, answers quotes and plans read-only, and runs a tick only if the owner allows it. No payout is promised: on 2026-11-02 the reward pool held about 6.5 XNT, so one week can pay at most about 0.65 XNT to all burners together (about 0.5 XNT under the v3 rules). Before the v3 switch epoch (planned for November 2026) no binding quote exists and the bot does not burn. If the GitHub account falls, the site, the oracle, the keeper and the epoch files stop; payouts pause; the reward pool stays locked in the program. Games: you can lose the whole stake; house games carry a fixed 2% edge.",
+  "image": "https://xen-moon-forge-protocol.github.io/Moon-Forge/moon-icon.svg",
+  "services": [
+    { "name": "source", "endpoint": "https://github.com/xen-moon-forge-protocol/Moon-Forge/tree/main/bots/moon-forge-bot" },
+    { "name": "agent-kit", "endpoint": "https://github.com/xen-moon-forge-protocol/Moon-Forge/tree/main/agents/kit" },
+    { "name": "a2a-local", "endpoint": "http://127.0.0.1:8787", "version": "0.1.0" },
+    { "name": "how-it-works", "endpoint": "https://github.com/xen-moon-forge-protocol/Moon-Forge/blob/main/docs/HOW-IT-WORKS.md" },
+    { "name": "x1-program", "endpoint": "x1:mainnet:57UE1U1t23ztg2noLp8pcpGW1B1Xw25rLH6ra9Mchea9" }
+  ],
+  "skills": [
+    { "id": "quote", "name": "Burn quote", "description": "POST /quote { chainId, amountXen }: the kit's quote for a burn now, with every refusal and the owner's rule verdict. Read-only." },
+    { "id": "plan", "name": "Burn plan", "description": "POST /plan: what the strategist would do this tick on every chain, one decision line per chain. Read-only dry run." },
+    { "id": "status", "name": "Status", "description": "GET /status: mode, kill switch, chains and the last tick's decisions. Read-only." },
+    { "id": "tick", "name": "Run one tick", "description": "POST /tick: one normal tick within every limit of the owner's config. Refused (403) unless the owner set a2a.allowActions; sends only if the bot was started with --live." }
+  ],
+  "x402Support": false,
+  "active": true,
+  "registrations": [],
+  "supportedTrust": []
+}

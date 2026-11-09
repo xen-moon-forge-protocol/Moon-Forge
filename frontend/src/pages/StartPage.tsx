@@ -373,7 +373,8 @@ export default function StartPage() {
                     <Link className="text-forge-orange hover:underline" to="/missions">Missions</Link> (claims) ·{' '}
                     <Link className="text-forge-orange hover:underline" to="/artifacts">Artifacts</Link> (Genesis) ·{' '}
                     <Link className="text-forge-orange hover:underline" to="/transparency">Transparency</Link> (chain weights) ·{' '}
-                    <a className="text-forge-orange hover:underline" href={`${PROJECT_LINKS.github}/tree/main/agents`} target="_blank" rel="noopener noreferrer">agent kit</a>.
+                    <a className="text-forge-orange hover:underline" href={`${PROJECT_LINKS.github}/tree/main/agents`} target="_blank" rel="noopener noreferrer">agent kit</a> ·{' '}
+                    <Link className="text-forge-orange hover:underline" to="/bot">Moon Forge Bot</Link> (burn on your own rule and claim automatically, from your own computer; dry run first).
                     Official places only: <Places />.
                 </p>
             </section>

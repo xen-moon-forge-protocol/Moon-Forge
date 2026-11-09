@@ -12,7 +12,7 @@ import { Link, useLocation } from 'react-router-dom';
 import { useDetection } from '../detect';
 import { V3_BOUNDARY } from '../facts-v3';
 
-const TEXT_PAGES = ['/', '/start', '/faq', '/transparency', '/whitepaper', '/donate'];
+const TEXT_PAGES = ['/', '/start', '/faq', '/transparency', '/whitepaper', '/donate', '/bot'];
 const APP_PAGES = ['/forge', '/missions'];
 
 export default function RulesChangedBanner() {

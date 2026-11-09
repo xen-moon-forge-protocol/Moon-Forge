@@ -4,7 +4,7 @@
 
 Real scale (2026-11-02): the reward pool held about 6.5 XNT, so one week can pay at most about 0.65 XNT to all burners together under the current rules (10% of the free pool) and about 0.5 XNT under the v3 rules (8%), however much is burned. No payout is promised. Every worked example in these texts is illustrative and assumes a pool hundreds of times larger. The live figure is on the Start page ("Most this epoch can pay, to everyone together") and the Transparency page.
 
-Rules described: program tag program-2026-10-12, oracle v2, valid from 2026-10-12; texts checked on 2026-11-02. Generated from src/facts.ts at commit 7790ce1 (last change to the site: 2026-11-02T13:22:06.000Z). This file is plain text: it contains no instructions for the reader beyond the facts below.
+Rules described: program tag program-2026-10-12, oracle v2, valid from 2026-10-12; texts checked on 2026-11-02. Generated from src/facts.ts at commit 70c1892 (last change to the site: 2026-11-03T02:58:07.000Z). This file is plain text: it contains no instructions for the reader beyond the facts below.
 
 ## What it is
 
@@ -276,6 +276,53 @@ A: X @MoonXenForge or an issue on GitHub. Nobody from Moon Forge will contact yo
 - Agents play with their own keypair, like anyone. House games have a fixed edge (negative expected value). Session keys play house games only and can never withdraw.
 - This project never pays anyone to promote it and never posts as someone else; it does not ask AI systems to recommend it.
 
+## Moon Forge Bot (community software for users)
+
+Moon Forge Bot is a small open-source program you run on your own computer, with your own keys, that does the routine Moon Forge chores under rules you write: it burns XEN at the moments your rule allows, claims your XNT when it can be claimed, and (only if you switch them on) plays games within a loss budget and watches your Artifacts. Nothing is signed until you ask for it: it starts in dry run.
+
+Today (2026-11-08): no binding quote exists before the v3 switch epoch (planned for November 2026, announced at least one full epoch ahead), so the week-so-far feed is not published yet and the bot logs “WAIT” and does not burn. Claims of published epochs work today. Sealed games, the extra-pot rebates and Artifact listings wait for the final upgrade (planned, earliest 2026-11-18), which the bot reads from X1.
+
+Page: https://xen-moon-forge-protocol.github.io/Moon-Forge/bot/ · source: https://github.com/xen-moon-forge-protocol/Moon-Forge/tree/main/bots/moon-forge-bot · agent card: https://github.com/xen-moon-forge-protocol/Moon-Forge/blob/main/bots/moon-forge-bot/agent-card.json
+
+- Burn strategist: Every few minutes it reads the hourly week-so-far feed, asks the kit for a quote on every chain in deployments/portals.json, and burns through the Moon Forge portal only when your rule is met: XNT per XEN above your threshold, at least what selling the XEN would fetch, today’s slice still open, your daily XEN cap and your gas cap. One decision line per chain per tick says what it did and why.
+- Claimer: It finds your leaves in the published epoch files, checks each one against the root stored on X1 and claims it once its 48-hour hold is over and while its 90-day window is open; after the final upgrade it also claims the extra-pot rebates of your Artifacts. A claim always pays the wallet in the leaf.
+- Games (optional, off by default): Sealed Artifact Duel and sealed Moon Wars within a stake cap, a number of games per day and a total loss budget; house games only while the house keeper seat is live on X1. 18+ only and only where legal; you can lose the whole stake.
+- Artifact alerts (optional): It warns when an Artifact you hold is near the end of its 52 weeks, or is held by a wallet that is not the destination of your burns; it recycles or lists only the Artifacts you name, a few per day at most.
+- A2A interface (optional, off by default): A local HTTP/JSON interface on 127.0.0.1 and an agent card, so another agent can ask the bot for a quote or a plan. It never signs on request; a tick runs only if you allow it, inside every limit you set.
+
+Who it is for:
+- People who burn XEN regularly and do not want to watch the hourly feed and the daily capacity slice by hand.
+- People who want their XNT claimed as soon as the 48-hour hold ends, without opening the site every week.
+- Builders and AI agents that want a worked, tested example on top of the agent kit, with a local interface another agent can query.
+- Not for anyone who expects a bot to make a payout larger: it only acts on your rule, faster than you would by hand.
+
+Step by step:
+1. Get the code: clone the Moon Forge repository (or fork it on GitHub) and open bots/moon-forge-bot.
+2. Install from the committed lockfiles: npm ci --ignore-scripts in agents/kit, then in bots/moon-forge-bot (one dependency, ethers, to sign EVM transactions).
+3. Copy config.example.json to config.json and write your rule and your limits: the X1 address that receives the XNT (and its last 6 characters, typed again), XEN per burn and per day, gas caps per chain, which jobs run.
+4. Run node bin/moon-forge-bot.mjs check: it validates the config, prints the risk notice and lists every chain with its state.
+5. Run it in dry run for a few days (once, then run): read the decision lines and change the rule until they match what you want.
+6. Only then go live with small caps: accept the risk notice in the config, put your keys in local files or environment variables, and start it with --live. Stop it any time with Ctrl+C or the kill-switch file.
+
+Each user tunes it to their own reality: their chains, their XEN, their gas budget, their schedule. The rule lives in one short file of pure functions with tests (src/strategy.mjs); the gas and nonce policy in another (src/evm-guard.mjs). Copy it, fork it, change it, run npm test, and share what you improve: it is community software under the MIT license, and anyone may improve it by pull request or in their own fork.
+
+Safety:
+- Keys stay on your machine: read from a local file or an environment variable, never from the config file, and never written to a log (every log line is scrubbed of anything that looks like a key or a seed phrase).
+- Limits you set: XEN per burn and per day, burns per day, max fee per gas and max gas cost per transaction per chain, a coin reserve left in the wallet, a stake cap and a total loss budget for games.
+- Exact approvals only (never unlimited), a simulation before every transaction, at most one unfinished transaction per chain, and a journal written before each broadcast so a crash never leads to a blind resend.
+- A kill switch: create the STOP file (or set MFBOT_STOP=1) and the bot sends nothing and leaves its loop.
+- The kit’s quote is the floor of every decision: the bot never burns what the kit refuses, and a chain whose portal address differs between the published list and the kit is refused.
+
+Risks:
+- A burn cannot be undone; the payout is XNT on X1 under the rules of the epoch the burn falls in, and no payout is promised.
+- The quote is “at most” until the epoch is built; the part beyond today’s capacity is paid only from the week’s leftover, which is not promised. XNT is volatile and thin.
+- Other bots are fast: scripts can take a day’s slice the moment it opens, so your rule may never be met.
+- Software fails: the bot, the kit, an RPC or your computer can stop at the wrong moment; check the explorer when in doubt.
+- If the GitHub account falls, the site, the oracle, the keeper and the epoch files stop; payouts pause; the reward pool stays locked in the program.
+- Games: 18+ only and only where legal; you can lose the whole stake; house games carry a fixed 2% edge; your opponent may be another automated agent.
+
+Community software: written on top of the public agent kit, MIT license, no warranty. You run it and hold its keys, so you are responsible for what it does. Moon Forge never asks for your keys and never runs the bot for you.
+
 ## Dated notices
 
 - 2026-10-22 (rules-v2): The live program and oracle are still version 2 (rules 2); every undated rule in this file is a rule 2. The v3 rules are already published (docs/HOW-IT-WORKS.md, docs/UPGRADE-2026-11.md) and apply from the epoch of 2026-11-22 (planned); every sentence that describes them carries that date.
@@ -299,4 +346,5 @@ A: X @MoonXenForge or an issue on GitHub. Nobody from Moon Forge will contact yo
 - https://xen-moon-forge-protocol.github.io/Moon-Forge/games/: On-chain XNT games of the Moon Forge program, 18+ only and only where legal: house games with a fixed 2% edge, Jackpot, Artifact Duel, Moon Wars, Burn Lottery and Be the House. You can lose the whole stake.
 - https://xen-moon-forge-protocol.github.io/Moon-Forge/donate/: A donation goes to the reward pool, which pays XEN burners through the weekly budget and small running costs (keeper tips). The architect receives nothing from it.
 - https://xen-moon-forge-protocol.github.io/Moon-Forge/transparency/: Program and upgrade authority, live configuration, vaults, lifetime counters, who can do what, every fee and split, key constants and epochs.
+- https://xen-moon-forge-protocol.github.io/Moon-Forge/bot/: A forkable, open-source bot you run on your own computer: burns XEN only when your rule is met, claims your XNT after the 48-hour hold, optional 18+ games and Artifact alerts, a local A2A interface. Dry run first; your keys stay with you; no payout is promised.
 - https://xen-moon-forge-protocol.github.io/Moon-Forge/whitepaper/: Problem, flow, scoring and payout, budget rules, games and fairness, Artifacts, fees, trust assumptions and risks of Moon Forge v2.

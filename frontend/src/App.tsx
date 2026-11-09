@@ -23,6 +23,7 @@ const ArtifactsPage = lazy(() => import('./pages/ArtifactsPage'));
 const TransparencyPage = lazy(() => import('./pages/TransparencyPage'));
 const WhitepaperPage = lazy(() => import('./pages/WhitepaperPage'));
 const StartPage = lazy(() => import('./pages/StartPage'));
+const BotPage = lazy(() => import('./pages/BotPage'));
 
 function App() {
     return (
@@ -45,6 +46,7 @@ function App() {
                         <Route path="/games" element={<GamesPage />} />
                         <Route path="/donate" element={<DonationPage />} />
                         <Route path="/whitepaper" element={<WhitepaperPage />} />
+                        <Route path="/bot" element={<BotPage />} />
                         <Route path="/transparency" element={<TransparencyPage />} />
                         <Route path="*" element={<Home />} />
                     </Routes>

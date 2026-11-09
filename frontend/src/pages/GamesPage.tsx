@@ -6,6 +6,7 @@
  * are rendered outside it by ExitsPanel whenever the gate or a break hides the panels (R1).
  */
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { PublicKey } from '@solana/web3.js';
 import { Gamepad2 } from 'lucide-react';
 import { useWallet } from '../context/WalletContext';
@@ -129,7 +130,7 @@ export default function GamesPage() {
                     </li>
                     <li>
                         Jackpot, Burn Lottery, Duels and Moon Wars can only be entered by the wallet owner. Bots play house games only, through session keys that can never withdraw
-                        (<a href={PROJECT_LINKS.botsMd} target="_blank" rel="noopener noreferrer" className="underline">docs/BOTS.md</a>). In player-vs-player games your opponent may be an automated agent: the project's kit is public.
+                        (<a href={PROJECT_LINKS.botsMd} target="_blank" rel="noopener noreferrer" className="underline">docs/BOTS.md</a>). In player-vs-player games your opponent may be an automated agent: the project's kit is public, and so is the <Link to="/bot" className="underline">Moon Forge Bot</Link> built on it (games off by default, 18+, within a loss budget).
                     </li>
                     <li>
                         Predictions (XNT up/down rounds) are no longer offered on this site since 2026-10-22. If you entered a round before that, the exits (lock, settle, claim, refund) are at the bottom of this page.
