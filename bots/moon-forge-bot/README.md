@@ -14,7 +14,7 @@ It is community software under the MIT license, built on the Moon Forge [agent k
 
 ## What it does today (dated 2026-11-08)
 
-The binding quote exists only from the v3 switch epoch (planned for November 2026, announced at least one full epoch ahead). Until the week-so-far feed is published, every tick logs `decision=WAIT reason="no week-so-far feed published yet ..."` and **the bot does not burn**: the kit fails closed, and the bot never burns without the kit's quote. Claims work today (the bot finds and claims leaves of published epochs). Sealed games, the extra-pot rebates and Artifact listings need the final upgrade (planned, earliest 2026-11-18); the bot reads the rules from X1 and waits until then.
+The binding quote exists only from the v3 switch epoch (planned for November 2026, announced at least one full epoch ahead). Until the week-so-far feed is published, every tick logs `decision=WAIT reason="no week-so-far feed published yet ..."` and **the bot does not burn**: the kit fails closed, and the bot never burns without the kit's quote. Claims work today (the bot finds and claims leaves of published epochs). Sealed games, the extra-pot rebates and Artifact listings need the final upgrade (planned, earliest 2026-11-25); the bot reads the rules from X1 and waits until then.
 
 ## How a burn decision is made
 

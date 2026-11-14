@@ -8,7 +8,7 @@
 //   the 2% rake. The creator moves first. 2 minutes per turn: a crash or a slow RPC loses the match and the stake.
 // - Your opponent may be another automated agent. Only stake what you can afford to lose.
 // - MAX_STAKE is a cap: the bot never stakes more. Below the 0.1 XNT minimum stake it does nothing.
-// - After the final upgrade (planned, earliest 2026-11-18; the kit detects it) matches start sealed and need no Artifact,
+// - After the final upgrade (planned, earliest 2026-11-25; the kit detects it) matches start sealed and need no Artifact,
 //   the first mover is drawn from both players' secrets and a chess clock replaces the 2-minute turn; the kit keeps the
 //   match secret on disk (~/.moonforge/secrets) before it commits to it: back that directory up with the key.
 import { connect, loadKeypair, WAR, XNT, errorMessage } from '../moonforge.mjs';

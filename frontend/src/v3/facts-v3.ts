@@ -19,7 +19,7 @@
  *  - `date`: the UTC date (YYYY-MM-DD) of that last v2 publication (the planned date while the transaction does not exist);
  *  - `lastV2PublishTx`: its X1 transaction signature once it exists, null until then;
  *  - `releaseUtc`: the planned UTC time ("YYYY-MM-DD HH:MM") of the site release that names that transaction (round-4
- *    default, moved a week by the schedule change of 2026-11-02: Monday 2026-11-16 06:00, after the quiet period), disclosed by the Forge while it holds burns; null = not given.
+ *    default, moved a week by each of the schedule changes of 2026-11-02 and 2026-11-14: Monday 2026-11-23 06:00, after the quiet period), disclosed by the Forge while it holds burns; null = not given.
  * While V3_BOUNDARY is null the site behaves exactly as today and the dated interim notice (src/content/interim.ts) is
  * the only boundary text. From 00:00 UTC of `date` the Forge holds the burn until a release sets the transaction (it
  * cannot see the last v2 publication before then); once the transaction is set, rules detection reads rewards 3 as soon

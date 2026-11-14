@@ -97,15 +97,15 @@ echo "old binary: data length $OLD_LEN B, last-deploy slot $OLD_SLOT (the localn
 
 # --- S5: census on the old binary -----------------------------------------------------------------------------------
 echo "S5 census"
-C5=(--rpc "$LOCAL" --stage s5 --expect-deploy-slot "$OLD_SLOT" --expect-data-len "$OLD_LEN" --deploy-wallet "$ARCH_PUB" --keeper-wallet "$KEEPER_PUB" --deploy-at 2026-11-18T16:00:00Z)
+C5=(--rpc "$LOCAL" --stage s5 --expect-deploy-slot "$OLD_SLOT" --expect-data-len "$OLD_LEN" --deploy-wallet "$ARCH_PUB" --keeper-wallet "$KEEPER_PUB" --deploy-at 2026-11-25T16:00:00Z)
 expect 0 "census s5 green on the old binary" census-s5.log $U/census.mjs "${C5[@]}" --out "$WORK/run/census-s5.json"
 has "census s5 lists the pending legacy bet" census-s5.log 'legacy bet of'
 has "census s5 lists the OPEN Jackpot round" census-s5.log 'round [0-9]+: OPEN'
 has "census s5 lists the OPEN war and the LP withdrawal request" census-s5.log 'withdrawal of [0-9]+ unlocking'
 has "census s5: init_seat unknown to the old binary (programRules 2)" census-s5.log 'ok   init_seat on the live binary: InstructionFallbackNotFound'
 has "census s5: the seat bond is 10% of the free pool (above the 1-XNT floor)" census-s5.log 'init_seat bond now ([2-9]|[1-9][0-9])\.[0-9]+ XNT = max'
-expect 1 "census s5 refuses a window touching 12:00 UTC" census-s5-noon.log $U/census.mjs "${C5[@]/2026-11-18T16:00:00Z/2026-11-18T11:50:00Z}"
-expect 1 "census s5 refuses a window within 6 h of Sunday 00:00 UTC" census-s5-sunday.log $U/census.mjs "${C5[@]/2026-11-18T16:00:00Z/2026-11-22T03:00:00Z}"
+expect 1 "census s5 refuses a window touching 12:00 UTC" census-s5-noon.log $U/census.mjs "${C5[@]/2026-11-25T16:00:00Z/2026-11-25T11:50:00Z}"
+expect 1 "census s5 refuses a window within 6 h of Sunday 00:00 UTC" census-s5-sunday.log $U/census.mjs "${C5[@]/2026-11-25T16:00:00Z/2026-11-29T03:00:00Z}"
 expect 1 "census s5 refuses another upgrade authority" census-s5-auth.log $U/census.mjs "${C5[@]/$ARCH_PUB/$PAYEE_PUB}"
 expect 1 "census s5 refuses a short INITIAL_KEEPER balance" census-s5-keeper.log $U/census.mjs "${C5[@]}" --min-keeper 30
 has "census s5: the INITIAL_KEEPER needs only its fees (default 0.1 XNT, F1-b)" census-s5.log 'ok   INITIAL_KEEPER balance: [1-9A-HJ-NP-Za-km-z]+: [0-9.]+ XNT >= 0\.100000000 XNT'
@@ -215,7 +215,7 @@ echo "S9 freeze"
 S9B=(--rpc "$LOCAL" --deploy-key "$DK_PUB" --elf "$NEW_SO" --pins "$WORK/run/health-pins.json")
 S9=("${S9B[@]}" --expect-deploy-slot "$S6_SLOT")
 snap "$WORK/run/snap-s7.json"
-expect 1 "s9 dry run before 2026-12-02 is red (date gate)" s9-date.log $U/s9.mjs "${S9[@]}"
+expect 1 "s9 dry run before 2026-12-09 is red (date gate)" s9-date.log $U/s9.mjs "${S9[@]}"
 expect 0 "s9 dry run green (rehearsal date gate moved)" s9-dry.log $U/s9.mjs "${S9[@]}" --not-before 2026-10-01T00:00:00Z
 expect 3 "s9 --send refuses before the date" s9-send-date.log $U/s9.mjs "${S9[@]}" --deploy-key-file "$DK" --send
 expect 3 "s9 refuses a key file that is not the DEPLOY_KEY" s9-wrongkey.log $U/s9.mjs "${S9[@]}" --deploy-key-file "$PAYEE" --not-before 2026-10-01T00:00:00Z --send

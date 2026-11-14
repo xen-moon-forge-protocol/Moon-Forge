@@ -252,7 +252,7 @@ export type UpgradeStatusV3 = "upgraded" | "legacy" | "unknown";
  *    has no drop reserve, and no extra epoch would be built for it, so the extra pot's chain of epochs would stop):
  *    the owner re-pins V3_FIRST_EPOCH to this epoch (or clears the environment).
  * C-14 (r4-fix, review r4 finding 2): any outcome that would build a v2 epoch at or after the v2 boundary (V2_BOUNDARY_TS:
- * Monday 2026-11-16 06:00 UTC, the boundary release after the last v2 publication) is `v2Closed`: the caller builds and
+ * Monday 2026-11-23 06:00 UTC, the boundary release after the last v2 publication) is `v2Closed`: the caller builds and
  * publishes nothing, and the burns made after the last v2 file wait for the first v3 epoch, keeping their time.
  */
 export function rewardsVersionGatedV3(
@@ -265,16 +265,17 @@ export function rewardsVersionGatedV3(
 }
 
 /**
- * C-14 (owner default 2026-10-20, "boundary release": Monday 2026-11-16 06:00 UTC, after the quiet period; r4-fix, review
+ * C-14 (owner default 2026-10-20, "boundary release": Monday 2026-11-23 06:00 UTC, after the quiet period; r4-fix, review
  * r4 finding 2): the v2 rules close at this time. The last v2 epoch is the one published before it (the weekly epoch of
- * Sunday 2026-11-15). From then on the oracle builds and publishes NO v2 epoch, also when S6 slips and the live program
+ * Sunday 2026-11-22). From then on the oracle builds and publishes NO v2 epoch, also when S6 slips and the live program
  * is still the v2 binary: every burn after the last v2 file waits for the first v3 epoch, keeping its time (it is paid
  * under the v3 rules), exactly as POLICY-CHANGES.md "Precondition" (published with the boundary notice) and the site say. Defined by
  * a date, never by a future epoch number (POLICY-CHANGES rule 3: a week without burns publishes no v2 epoch).
  * V2_BOUNDARY_TS (seconds) overrides it for localnet rehearsals only; no workflow sets it. Moved a week by the schedule
- * change of 2026-11-02 (S6 on 2026-11-18; it was Monday 2026-11-09 06:00 UTC, 1_794_204_000).
+ * change of 2026-11-02 (S6 on 2026-11-18; it was Monday 2026-11-09 06:00 UTC, 1_794_204_000), and again by that of
+ * 2026-11-14 (S6 on 2026-11-25; it was Monday 2026-11-16 06:00 UTC, 1_794_808_800).
  */
-export const V2_BOUNDARY_TS_DEFAULT = 1_794_808_800; // 2026-11-16T06:00:00Z
+export const V2_BOUNDARY_TS_DEFAULT = 1_795_413_600; // 2026-11-23T06:00:00Z
 export const V2_CLOSED_TEXT = "v2 closed at the boundary: later burns wait for the first v3 epoch with their own time";
 export function v2BoundaryTsV3(env: Record<string, string | undefined> = process.env): number {
   const v = (env.V2_BOUNDARY_TS ?? "").trim();

@@ -4,7 +4,7 @@ Dates are UTC. Versions follow semver; the repository tag of a release is `kit-v
 version is deprecated when the agent card names a higher `minKitVersion`; `checkKitVersion(card)` (and
 `npm run watch -- --card`) report it. Never auto-update a funded agent: pin the tag you reviewed.
 
-## 2.0.0 (unreleased; tag `kit-v2.0.0` planned for the day of the final program upgrade, earliest 2026-11-18)
+## 2.0.0 (unreleased; tag `kit-v2.0.0` planned for the day of the final program upgrade, earliest 2026-11-25)
 
 Everything below that needs the v3 rules or the upgraded program is switched on by what the chain reports and is
 refused, with nothing sent, before that. Against the live program (tag `program-2026-10-12`) the kit sends the same
@@ -17,8 +17,9 @@ instructions as 1.0.0.
   does it add that ProgramData account as the one remaining account, so the program pays the floor without the Core
   burn that can no longer run. With Core working nothing changes. The result gains `coreHatch` (true when the hatch
   was used). `test/unit/v3-methods.test.mjs` covers both reads and the rule.
-- `PRICE_LAUNCH_TS` (`rules-v3.mjs`) is 1,795,564,800 (2026-11-25 00:00 UTC), the program's value for the 2026-11-18
-  upgrade window.
+- `PRICE_LAUNCH_TS` (`rules-v3.mjs`) is 1,795,564,800 (2026-11-25 00:00 UTC), the value of the reviewed program
+  source, set for the 2026-11-18 window; it follows the build commit, which sets 1,796,169,600 (2026-12-02 00:00 UTC) for
+  the window of 2026-11-25 (schedule change of 2026-11-14).
 - The bundled upgraded IDL is unchanged (sha256 `9617cd5e…a72f`): the amended program adds no IDL account, argument or
   error code.
 

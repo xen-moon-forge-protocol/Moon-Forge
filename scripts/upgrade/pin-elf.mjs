@@ -6,7 +6,7 @@
 //   - checks it against the published S2 hash (--expect-sha) and refuses a --features localnet build for the real pin;
 //   - with --rpc, checks the deployed ProgramData against it (the x1-v3.ts deployedElfV3 rule);
 //   - prints the exact line for oracle/src/x1-v3.ts, and writes it only with --write (a reviewed commit between the
-//     published hash, Mon 11-16 16:00 UTC, and S7);
+//     published hash, Mon 11-23 16:00 UTC, and S7);
 //   - --check: reads the pin that is in the file and checks it against the build (and the chain with --rpc).
 // It never sends a transaction.
 import fs from 'fs';

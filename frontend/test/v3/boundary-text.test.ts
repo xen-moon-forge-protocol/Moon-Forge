@@ -18,14 +18,14 @@ import { KEEPER_BOND_MIN } from '../../src/v3/constants';
 
 describe('C-14: the boundary texts', () => {
     it('before the transaction: the hold, its planned end, and never paid under the current rules', () => {
-        const t = boundaryText({ date: '2026-11-15', lastV2PublishTx: null, releaseUtc: '2026-11-16 06:00' });
-        expect(t.rest).toContain('From 00:00 UTC on 2026-11-15 this page holds new burns');
-        expect(t.rest).toContain('(planned for 2026-11-16 06:00 UTC)');
+        const t = boundaryText({ date: '2026-11-22', lastV2PublishTx: null, releaseUtc: '2026-11-23 06:00' });
+        expect(t.rest).toContain('From 00:00 UTC on 2026-11-22 this page holds new burns');
+        expect(t.rest).toContain('(planned for 2026-11-23 06:00 UTC)');
         expect(t.rest).toContain('no epoch under the current rules pays them');
-        expect(boundaryText({ date: '2026-11-15', lastV2PublishTx: null }).rest).not.toContain('planned for 2026-11-16');
+        expect(boundaryText({ date: '2026-11-22', lastV2PublishTx: null }).rest).not.toContain('planned for 2026-11-23');
     });
     it('after the transaction: a late upgrade delays those burns to the first v3 epoch, with their own time', () => {
-        const t = boundaryText({ date: '2026-11-15', lastV2PublishTx: '5'.repeat(88) });
+        const t = boundaryText({ date: '2026-11-22', lastV2PublishTx: '5'.repeat(88) });
         expect(t.lead).toBe('Since the publish transaction');
         expect(t.rest).toContain('keep their own time and wait for the first epoch built under the v3 rules');
         expect(t.rest).toContain('no epoch under the current rules pays them');

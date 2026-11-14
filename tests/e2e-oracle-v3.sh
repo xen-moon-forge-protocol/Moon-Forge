@@ -88,7 +88,7 @@ oracle_env() { # $1 = tag of the work tree
     E2E_RPC=$LOCAL E2E_FIXTURES="$ROOT/tests/fixtures" E2E_DIR="$top/driver" \
     FEED_URL="$WORLD/site/feed/week-so-far.json" V2_BOUNDARY_TS=99999999999
   # FEED_URL: the D-13 samples come from the test's own site (the preload also maps the site host; this names it).
-  # V2_BOUNDARY_TS: the v2 stage of this rehearsal runs whatever the calendar says (C-14 closes v2 on 2026-11-16 06:00
+  # V2_BOUNDARY_TS: the v2 stage of this rehearsal runs whatever the calendar says (C-14 closes v2 on 2026-11-23 06:00
   # UTC on mainnet; flow-v3.ts v2BoundaryTsV3, rehearsals only). r4-fix, review r4 finding 10 (c) and finding 2.
 }
 N=0

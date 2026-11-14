@@ -136,11 +136,11 @@ async function main() {
     assert.deepStrictEqual(g(6, v3prev, "upgraded", {}, 5), { version: 3, warning: null, v2Closed: false });
     assert.throws(() => g(6, v3prev, "upgraded", { REWARDS_VERSION: "2" }), /never goes back/);
     assert.throws(() => g(6, v3prev, "upgraded", {}, 7), /never goes back/);
-    // C-14 (r4-fix, review r4 finding 2): from the v2 boundary (Monday 2026-11-16 06:00 UTC) no v2 epoch is built, also
+    // C-14 (r4-fix, review r4 finding 2): from the v2 boundary (Monday 2026-11-23 06:00 UTC) no v2 epoch is built, also
     // when S6 slips: every outcome that would be v2 is v2Closed; the upgraded binary and a v3 history are unaffected
     const AT = V2_BOUNDARY_TS_DEFAULT;
     const gAt = (now: number, epoch: number, prev: any, verdict: "upgraded" | "legacy" | "unknown", env: Record<string, string> = {}, pinned: number | null = null) => rewardsVersionGatedV3(epoch, prev, verdict, env, pinned, now);
-    assert.strictEqual(V2_BOUNDARY_TS_DEFAULT, Date.UTC(2026, 10, 16, 6, 0, 0) / 1000, "Monday 2026-11-16 06:00 UTC");
+    assert.strictEqual(V2_BOUNDARY_TS_DEFAULT, Date.UTC(2026, 10, 23, 6, 0, 0) / 1000, "Monday 2026-11-23 06:00 UTC");
     assert.strictEqual(gAt(AT - 1, 2, epoch1, "legacy").v2Closed, false, "one second before: the last v2 epoch may still be built");
     for (const [verdict, pin] of [["legacy", null], ["legacy", 5], ["unknown", null]] as ["legacy" | "unknown", number | null][]) {
       const c = gAt(AT, 5, epoch1, verdict, {}, pin);

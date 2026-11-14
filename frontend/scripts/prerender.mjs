@@ -328,7 +328,7 @@ ${F.position}
 
 ${F.oldBurns}
 
-Rules described: program tag ${F.rules.program}, oracle ${F.rules.oracle}, valid from ${F.rules.validFrom} (texts checked on ${F.rules.describedAsOf}). Dated notices: ${F.notices.map((n) => `${n.id} (${n.date})`).join(', ')}; see llms-full.txt. Answers below that name the final upgrade (planned 2026-11-18) or the v3 rules (first epoch planned 2026-11-22) describe published plans, not the live program.
+Rules described: program tag ${F.rules.program}, oracle ${F.rules.oracle}, valid from ${F.rules.validFrom} (texts checked on ${F.rules.describedAsOf}). Dated notices: ${F.notices.map((n) => `${n.id} (${n.date})`).join(', ')}; see llms-full.txt. Answers below that name the final upgrade (planned 2026-11-25) or the v3 rules (first epoch planned 2026-11-29) describe published plans, not the live program.
 
 ## Start
 - [Start here](${site}start/): how to burn XEN for XNT step by step, verify-it-yourself checklist, FAQ
@@ -336,8 +336,8 @@ Rules described: program tag ${F.rules.program}, oracle ${F.rules.oracle}, valid
 - [FAQ](${site}faq/): the questions people ask, including where the XNT comes from, old burns, other XEN and X1 projects, games and the Genesis airdrop
 - [Transparency](${site}transparency/): program and upgrade authority, vaults, who can do what, every fee
 - [Whitepaper](${site}whitepaper/): scoring, budget, tiers, games, Artifacts, trust model (full text: ${L.whitepaperMd})
-- [Final upgrade](${L.upgradeMd}): the dated announcement and changelog of the final program upgrade (planned 2026-11-18)
-- [What is fixed, and the freeze plan](${L.immutabilityMd}): who can do what today and after the upgrade key is burned (earliest 2026-12-02, no later than 2026-12-31)
+- [Final upgrade](${L.upgradeMd}): the dated announcement and changelog of the final program upgrade (planned 2026-11-25)
+- [What is fixed, and the freeze plan](${L.immutabilityMd}): who can do what today and after the upgrade key is burned (earliest 2026-12-09, no later than 2026-12-31)
 - [Operators runbook](${L.operatorsMd}): how the community runs the oracle and the keeper, takes over a silent oracle seat, adds a chain, and what to do when something breaks
 - [Fork](${L.forkMd}): how to run a separate instance with its own program, portals and pool
 - [Full facts for AI readers](${L.llmsFull}): llms-full.txt
@@ -365,7 +365,7 @@ ${F.legacyPilot} Details: ${L.howItWorks} (section 6).
 
 ## Key rules (rules 2, live)
 - Burn payout: share of the weekly epoch budget = min(${F.epochRules.budgetPctOfFreePool}% of the free reward pool, ${F.epochRules.rateCapK} × the liquidity-adjusted value burned); a tenth of each budget is drawn at random as Forge Drops (18+, where legal) and the rest is paid in XNT. Each chain’s XEN is valued at its own market price with a liquidity discount L/(L+V), at one XNT price per epoch. Tier multipliers, relative to Launchpad: ${F.tiers.map((t) => `${t.name} ${t.multiplier}×${t.vestingDays ? ` over ${t.vestingDays} days` : ''}`).join(', ')}. Claims stay open ${F.epochRules.claimWindowDays} days.
-- Genesis airdrop (the only airdrop; no token airdrop): up to 120 Lunar Dust NFTs with no floor for the X1 validator withdraw authorities published on 2026-10-12; claims through 2026-12-31 under the live program, through 2027-03-31 from the final upgrade (planned 2026-11-18).
+- Genesis airdrop (the only airdrop; no token airdrop): up to 120 Lunar Dust NFTs with no floor for the X1 validator withdraw authorities published on 2026-10-12; claims through 2026-12-31 under the live program, through 2027-03-31 from the final upgrade (planned 2026-11-25).
 - Artifacts (Metaplex Core NFTs): ${F.forgeSplit.floorPct}% of the price stays inside as a floor you can take back, ${F.forgeSplit.poolPct}% goes to the reward pool, ${F.forgeSplit.lotteryPct}% lottery, ${F.forgeSplit.architectPct}% architect; recycle any time.
 - House games (Coin Flip, High-Low, Void Rush): fixed ${F.fees.houseEdgePct}% edge. Jackpot, Artifact Duel and Moon Wars: ${F.fees.p2pRakePct}% rake only when someone wins. Moon Wars real-XNT matches are paused on the site; Predictions are in the program but not offered by this site or the agent kit; the program still accepts entries sent to it directly, with the same 2% rake, and a round can be blocked or steered cheaply (known issue GAM-3).
 - 18+: ${F.ageNotice}
@@ -383,7 +383,7 @@ function llmsFullTxt(F, meta) {
     h('What it is');
     lines.push(`${I.name} is an open-source protocol on X1 (an SVM chain whose native token is XNT). People burn XEN on ${F.liveChains.map((c) => c.name).join(', ')} through a portal contract and receive XNT on X1 from a reward pool, through weekly epochs that anyone can recompute. No token, no presale, no team allocation: only XEN, which is burned, and XNT, which is received.`, '', F.position, '', ...F.disambiguation, '', F.oldBurns, '', `Plain guide (where the XNT comes from, how a burn is valued, Artifacts, games, the Legacy Pilot, chains, who controls what, how to check it, the risks): ${L.howItWorks}. Dated changelog of the final upgrade: ${L.upgradeMd}.`);
     h('Key questions (dated answers)');
-    lines.push('Sentences that name the final upgrade (planned 2026-11-18) or the v3 rules (first epoch planned 2026-11-22) describe published plans; the rest is true today.', '');
+    lines.push('Sentences that name the final upgrade (planned 2026-11-25) or the v3 rules (first epoch planned 2026-11-29) describe published plans; the rest is true today.', '');
     for (const k of F.keyQa) lines.push(`Q: ${k.q}`, `A: ${k.a}`, '');
     h('Quote a burn from the hourly feed (v3 rules)');
     lines.push(F.quoteFeed.today, '', `Feed: ${L.weekFeed}. ${F.quoteFeed.when}`, '', ...F.quoteFeed.recipe.map((r, i) => `${i + 1}. ${r}`), '', F.quoteFeed.example, '', `${F.quoteFeed.kit} Source: ${L.kitBurn}.`);
@@ -399,7 +399,7 @@ function llmsFullTxt(F, meta) {
     h('Epoch and payout rules (rules 2)');
     lines.push(`- Cadence: ${F.epochRules.cadence}; at least ${F.epochRules.minIntervalDays} days apart.`, `- ${F.epochRules.scoring}`, `- ${F.epochRules.budgetLine}`, `- ${F.epochRules.priceClamp}`, `- ${F.epochRules.dustRule}`, `- Claims stay open ${F.epochRules.claimWindowDays} days; then the rest goes back to the pool.`, `- An epoch pays at most ${F.epochRules.rateCapK}× / ${F.epochRules.rateCapK * 2}× / ${F.epochRules.rateCapK * 3}× the liquidity-adjusted market value burned (Launchpad / Orbit / Moon Landing). Nobody can promise an amount: what a week pays depends on the pool and on how much others burn.`);
     h('Tiers and vesting');
-    lines.push('Rules 2 (live): multipliers relative to Launchpad. From the first epoch under the v3 rules (planned 2026-11-22) Launchpad receives 1.25× the counted value, Orbit 2.5× and Moon Landing 3.75× (see the key questions).', '');
+    lines.push('Rules 2 (live): multipliers relative to Launchpad. From the first epoch under the v3 rules (planned 2026-11-29) Launchpad receives 1.25× the counted value, Orbit 2.5× and Moon Landing 3.75× (see the key questions).', '');
     for (const t of F.tiers) lines.push(`- ${t.name}: ${t.multiplier}×, ${t.vestingDays ? `linear vesting over ${t.vestingDays} days, ${t.penaltyPct}% penalty on the unvested part if ejected early (to the pool)` : 'paid at claim'}`);
     h('Fees and splits (compile-time constants of the program)');
     lines.push(`- Burn → claim → vesting → withdrawal: ${F.fees.burnPathPct}%`, `- House edge: ${F.fees.houseEdgePct}% (${F.fees.edgeToPoolPct}% reward pool, ${F.fees.edgeToArchitectPct}% architect, ${F.fees.edgeToBankrollPct}% bankroll)`, `- P2P rake (Jackpot, Artifact Duel, Moon Wars), only when someone wins: ${F.fees.p2pRakePct}% (${F.fees.rakeToPoolPct}% pool, ${F.fees.rakeToArchitectPct}% architect, ${F.fees.rakeToDrawPct}% lottery)`, `- Burn Lottery ticket: ${F.fees.p2pRakePct}% at purchase; the winner gets 50% of the vault`, `- Artifact forge price: ${F.forgeSplit.floorPct}% floor kept inside the NFT, ${F.forgeSplit.poolPct}% reward pool, ${F.forgeSplit.lotteryPct}% lottery, ${F.forgeSplit.architectPct}% architect`, `- Secondary royalty where honored: ${F.fees.secondaryRoyaltyPct}%`, `- Keeper tips, paid by the pool: ${F.fees.keeperTipXnt} XNT per claim ≥ ${F.fees.keeperTipMinClaimXnt} XNT; ${F.fees.dropKeeperTipXnt} XNT per Forge Drop`, `- A bet can win at most ${F.fees.maxExposurePct}% of the free bankroll; unsettled payouts stay under ${F.fees.maxTotalExposurePct}% of it; daily circuit breaker at ${F.fees.maxDailyLossPct}%`);
@@ -413,7 +413,7 @@ function llmsFullTxt(F, meta) {
     lines.push('', F.gameRules.expectedLoss, F.gameRules.randomness, F.gameRules.settlement, F.gameRules.circuitBreaker, F.gameRules.sessionKeys);
     h('Verification');
     lines.push(`Each epoch file (burns, prices, liquidity, every leaf) is public at ${L.epochIndex} and hash-committed on-chain. Anyone can run \`cd oracle && npm run verify -- epoch-N.json --full\` from ${L.github} and get the same result.`);
-    lines.push('', `Program binary: the README gives the sha256 of the deployed v2 binary (tag ${F.rules.program}); for the final upgrade (planned 2026-11-18) the tag program-2026-11-18 and its hashes are published at least 48 hours ahead, and anyone can rebuild it and compare with solana-verify get-program-hash on X1: ${L.buildHashMd}. Upgrade authority, live: ${I.x1Explorer}/address/${I.programId}.`);
+    lines.push('', `Program binary: the README gives the sha256 of the deployed v2 binary (tag ${F.rules.program}); for the final upgrade (planned 2026-11-25) the tag program-2026-11-25 and its hashes are published at least 48 hours ahead, and anyone can rebuild it and compare with solana-verify get-program-hash on X1: ${L.buildHashMd}. Upgrade authority, live: ${I.x1Explorer}/address/${I.programId}.`);
     lines.push('', `Portals: exact source match on Sourcify on every live chain (links under Chains); addresses and start blocks in ${L.portalsJson}.`);
     lines.push('', `Hourly week-so-far feed: ${L.weekFeed} (from the first window under the v3 rules; HTTP 404 before).`);
     lines.push('', `Public counter: ${L.counter} gives the XEN removed from supply through Moon Forge per chain and the XNT the published epochs set aside for burners, computed only from the epoch files and rebuilt at every site build.`);

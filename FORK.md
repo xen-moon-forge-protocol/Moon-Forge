@@ -9,7 +9,7 @@ Moon Forge is MIT licensed: anyone may copy, run or change it. Before you fork, 
 | keep **this** Moon Forge running (the program `57UE1U1t23ztg2noLp8pcpGW1B1Xw25rLH6ra9Mchea9`, its five portals, its pools, its users and Artifacts) after its operator went quiet | **continue it**: run the keeper, verify every epoch, void a wrong one during its hold, and take the oracle seat or the house keeper seat by the program's own rules: [Community takeover runbook](OPERATORS.md#community-takeover-runbook). A fork of the repository is then only where you keep your copy of the code, the site and the epoch files | the same reward pool, extra pot, bankroll and Artifacts, paid out only by the program's rules. You cannot change any rule, fee or split (after the freeze nobody can); you run the open oracle code within the program's bounds |
 | other rules, fees, chains or branding, or a program you control | **fork it**: a new instance with its own program id, portals, pools and name (below) | empty pools and no users at the start; nothing from this instance's pools, Artifacts or burns moves to it, and its burners are paid only from its own pool |
 
-Continuing needs the final program (upgrade planned for Wednesday 2026-11-18): the oracle seat, the bonded void and the house keeper seat do not exist in the v2 program that runs until then. What can break, and who can fix it, is in [When something breaks](OPERATORS.md#when-something-breaks).
+Continuing needs the final program (upgrade planned for Wednesday 2026-11-25): the oracle seat, the bonded void and the house keeper seat do not exist in the v2 program that runs until then. What can break, and who can fix it, is in [When something breaks](OPERATORS.md#when-something-breaks).
 
 ## A new instance
 

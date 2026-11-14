@@ -29,7 +29,7 @@
  *   - the v3 burn module (burn.mjs): the binding quote with every refusal, address helpers, a planner, the burn itself;
  *     it fails closed until the v3 switch epoch (planned for November 2026, announced at least one full epoch ahead);
  *   - the final upgrade's games and Artifacts (games-v3.mjs, artifacts-v3.mjs), used only once detect.mjs reports the
- *     upgraded program (planned, earliest 2026-11-18; its source and changelog published at least 7 days before it, and its
+ *     upgraded program (planned, earliest 2026-11-25; its source and changelog published at least 7 days before it, and its
  *     binary hash at least 48 hours before).
  * The interface (IDL) is the one bundled with the kit for the rules in force, pinned by sha256 (idl.mjs).
  */
@@ -771,7 +771,7 @@ export class MoonForge {
     }
     if (r !== 3) {
       const hint = this.mainnet ? '' : ' (not X1 mainnet: pass connect({ rules: 3 }) or connect({ rules: \'detect\' }) to use a local build of the upgraded program)';
-      throw new Error(`${what}: this needs the final program upgrade (planned, earliest 2026-11-18; its source and changelog are published at least 7 days before it, and its binary hash at least 48 hours before); the live program does not have it${hint}. Nothing was sent.`);
+      throw new Error(`${what}: this needs the final program upgrade (planned, earliest 2026-11-25; its source and changelog are published at least 7 days before it, and its binary hash at least 48 hours before); the live program does not have it${hint}. Nothing was sent.`);
     }
     if (ix && !this.hasIx(ix)) throw new Error(`${what}: the IDL in use is not the upgraded program's (it has no ${ix}); omit connect({ idl }) and unset MOONFORGE_IDL to use the kit's bundled IDL. Nothing was sent.`);
     return r;

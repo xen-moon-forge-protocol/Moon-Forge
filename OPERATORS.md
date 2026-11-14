@@ -4,7 +4,7 @@ The oracle is stateless: its memory is the epoch files in `frontend/public/epoch
 
 This page is written so that the community can keep Moon Forge running with nobody from the project around: [When something breaks](#when-something-breaks) · [Community takeover runbook](#community-takeover-runbook) · [Becoming the house keeper](#becoming-the-house-keeper) · [Add a chain](#add-a-chain) · [Fork or continue](FORK.md#fork-or-continue).
 
-**Two programs, one page.** Until the final upgrade (planned Wednesday 2026-11-18, 16:00–20:00 UTC: [docs/UPGRADE-2026-11.md](docs/UPGRADE-2026-11.md)) the v2 program runs. Everything this page says about the oracle seat, voids, the 48-hour claim hold, the house keeper seat and the Artifact floor hatch applies from that upgrade on; the seat commands refuse to run against the v2 program.
+**Two programs, one page.** Until the final upgrade (planned Wednesday 2026-11-25, 16:00–20:00 UTC: [docs/UPGRADE-2026-11.md](docs/UPGRADE-2026-11.md)) the v2 program runs. Everything this page says about the oracle seat, voids, the 48-hour claim hold, the house keeper seat and the Artifact floor hatch applies from that upgrade on; the seat commands refuse to run against the v2 program.
 
 ## Setup
 
@@ -101,7 +101,7 @@ Five more settings, each read by the workflows but normally absent. Only the ope
 
 **Today (v2 program):** house bets must be settled within ~3 minutes or they count as lost, which GitHub Actions cannot guarantee (see the keeper's cadence above). The site settles each bet immediately; for extra safety run `npm run keeper` on any always-on machine (any funded X1 key works — keeping is permissionless). If a run is delayed and a draw expires, it is never re-drawn: the Jackpot round is refunded entry by entry, and the lottery round has no winner — its would-be prize (50% of the vault) goes to the burners' reward pool.
 
-**From the final upgrade (planned 2026-11-18):** an unsettled bet no longer counts as lost. A house bet is anchored to the next block by anyone (the site does it about 2 seconds after placing); a bet nobody anchors within 512 slots (about 3 minutes) is refunded in full, and an anchored bet the house keeper does not reveal within 235,000 slots (about a day) is paid to the player as a win from the keeper's bond. A Jackpot round the keeper does not settle in time refunds every entry. No new Burn Lottery round can open (a round open at the upgrade settles under its old rule), and a donation to its prize vault is refused. `npm run keeper` (any funded key) anchors bets and sends every refund and settlement that is due.
+**From the final upgrade (planned 2026-11-25):** an unsettled bet no longer counts as lost. A house bet is anchored to the next block by anyone (the site does it about 2 seconds after placing); a bet nobody anchors within 512 slots (about 3 minutes) is refunded in full, and an anchored bet the house keeper does not reveal within 235,000 slots (about a day) is paid to the player as a win from the keeper's bond. A Jackpot round the keeper does not settle in time refunds every entry. No new Burn Lottery round can open (a round open at the upgrade settles under its old rule), and a donation to its prize vault is refused. `npm run keeper` (any funded key) anchors bets and sends every refund and settlement that is due.
 
 ### Becoming the house keeper
 
@@ -157,7 +157,7 @@ Optional repository variables the check reads: `X1_RPC_URLS` and `X1_RPC_URL` (t
 
 ## When something breaks
 
-Find the row by what you see: a red or amber row of the daily health check (its name in quotes, as printed by `npm run health` and in the job summary of each `health.yml` run, which anyone can open in the repository's Actions tab), or what a user sees. Commands run in `oracle/` unless said otherwise; `gh` is GitHub's command-line tool, run in a clone of the repository. Rows about the oracle seat, voids, the house keeper seat, SlotHashes and the floor hatch apply from the final upgrade (planned 2026-11-18).
+Find the row by what you see: a red or amber row of the daily health check (its name in quotes, as printed by `npm run health` and in the job summary of each `health.yml` run, which anyone can open in the repository's Actions tab), or what a user sees. Commands run in `oracle/` unless said otherwise; `gh` is GitHub's command-line tool, run in a clone of the repository. Rows about the oracle seat, voids, the house keeper seat, SlotHashes and the floor hatch apply from the final upgrade (planned 2026-11-25).
 
 Who can apply the fix: **anyone** = any funded X1 key, no permission needed; **repo writer** = write access to this GitHub repository (after the freeze the builder plans no routine action, so without a writer the same fix is made in a fork: [Community takeover runbook](#community-takeover-runbook)); **seat holder** = the oracle seat's hot key; **cold-key holder** = the seat's cold key; **house keeper** = the key that holds the house keeper seat; **X1** = X1's core developers and validators (with Metaplex for its Core program).
 
@@ -191,7 +191,7 @@ Who can apply the fix: **anyone** = any funded X1 key, no permission needed; **r
 
 ## Community takeover runbook
 
-*Applies from the final upgrade (planned Wednesday 2026-11-18): the oracle seat, voids and the house keeper seat do not exist in the v2 program that runs until then.*
+*Applies from the final upgrade (planned Wednesday 2026-11-25): the oracle seat, voids and the house keeper seat do not exist in the v2 program that runs until then.*
 
 How anyone, starting from a fork or a clone of the public repository and holding none of the project's secrets, keeps Moon Forge running on the same program and the same pools. Nothing here needs anyone's permission, and nobody can veto it.
 
@@ -323,7 +323,7 @@ A warm run (cargo, the Solana toolchain and the Core dump cached) takes roughly 
 
 The oracle key is the one role that stays alive after the upgrade authority is burned, so treat it as the most important secret of the protocol.
 
-**Today (v2 program, until the final upgrade planned for 2026-11-18):**
+**Today (v2 program, until the final upgrade planned for 2026-11-25):**
 
 - **Only the current oracle key can publish epochs and hand the role over.** Nobody else can replace it through the v2 program; until the upgrade, only a program upgrade could.
 - **If it is lost,** no new epoch can be published until the final upgrade; epochs that are already published can still be claimed until their 90-day windows end.

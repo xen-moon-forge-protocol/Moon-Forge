@@ -45,7 +45,7 @@ Details for every step: [DEPLOY.md](DEPLOY.md). Status as of 2026-10-22. The v2 
 - [ ] Before any release of copy: `node scripts/wording-check.mjs` passes (the `Wording` CI job: [docs/WORDING.md §6](docs/WORDING.md#6-the-ci-check)) and every new public claim has a row in [docs/CLAIMS.md](docs/CLAIMS.md)
 
 ## Final upgrade and freeze
-- [ ] Final upgrade deployed with the announced hash (earliest 2026-11-18)
+- [ ] Final upgrade deployed with the announced hash (earliest 2026-11-25)
 - [ ] Mainnet proof plan complete with transaction links (every front once, small amounts, with or without external users)
 - [ ] 14 consecutive daily health runs with no FAIL
-- [ ] `anchor idl erase-authority` + `solana program set-upgrade-authority … --final` in one session (earliest 2026-12-02; no later than 2026-12-31 on the then-current binary); both signatures recorded in SECURITY.md, IMMUTABILITY.md and the README
+- [ ] `anchor idl erase-authority` + `solana program set-upgrade-authority … --final` in one session (earliest 2026-12-09; no later than 2026-12-31 on the then-current binary); both signatures recorded in SECURITY.md, IMMUTABILITY.md and the README
