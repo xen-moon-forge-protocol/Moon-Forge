@@ -39,7 +39,7 @@ export const rules = {
     /** First day these rules were live on X1. */
     validFrom: '2026-10-12',
     /** Date the texts below were last checked against the live program. */
-    describedAsOf: '2026-11-02',
+    describedAsOf: '2026-11-14',
 } as const;
 
 export const identity = {
@@ -313,15 +313,70 @@ export const ageNotice =
  * snapshot's sha256 is pinned in the oracle (LEGACY_SNAPSHOT_SHA256) before the first v3 epoch is built.
  */
 export const legacyPilot =
-    'Legacy Pilot (planned, dated): a one-time recognition for EVM addresses that burned XEN before 2026-11-01 00:00 UTC on Ethereum, Base, Optimism, Polygon, BSC or Avalanche '
-    + '(recorded by XEN’s own contract as a transfer to the zero address). From the first epoch under the v3 rules (planned 2026-11-29), and only if the public list '
-    + 'deployments/legacy-burners.json is built and its sha256 pinned in the oracle before that epoch is built (not yet done on 2026-11-02). (1) The first new burn of a '
-    + 'listed address on one of the five chains, paid under the rule (burns paid under the current rules do not count), receives up to 50% more than the normal rules pay it, '
-    + 'as Launchpad XNT, once per address; the top-ups come only from the week’s capacity left after every normal payout (together at most 25% of that leftover, none in '
-    + 'a week the pool falls short), so nobody receives less in the week one is paid, and the pool then grows a little more slowly. (2) An X1 wallet named in a burn of a '
+    'Legacy Pilot (planned, dated, not in force yet): a one-time recognition for EVM addresses that burned XEN before 2026-11-01 00:00 UTC on Ethereum, Base, Optimism, Polygon, BSC or Avalanche '
+    + '(recorded by XEN’s own contract as a transfer to the zero address). It is not in force until its public address list (deployments/legacy-burners.json) is published and its sha256 '
+    + 'pinned in the oracle before the first epoch under the v3 rules (planned 2026-11-29) is built; as of 2026-11-14 the list is not published, so nothing applies yet. (1) The first new burn of a '
+    + 'listed address through a Moon Forge portal (from the same EVM address, on one of the five chains), paid under the rule (burns paid under the current rules do not count), receives up to 50% more than the normal rules pay it, '
+    + 'as Launchpad XNT, once per address; the top-ups come only from the week’s capacity left after every normal payout (together at most 25% of that leftover each week, none in '
+    + 'a week the pool falls short; when that is short, earlier burns are served first). (2) An X1 wallet named in a burn of a '
     + 'listed address: the first new Artifact (forged after the final upgrade, in the week of such a burn or later) that it holds at a weekly snapshot receives 20% of its '
     + 'forge price from the extra pot, only from what that pot’s weekly release leaves after the normal holder rebates, paid over later weeks when one week is not enough; '
-    + 'once per wallet and once per address. Old burns themselves are still not paid, and nothing has to be claimed, signed or paid for it.';
+    + 'once per wallet and once per address. Disclosure across weeks: nobody receives less in the week a top-up is paid, but that leftover would otherwise stay in the pool, so the pool '
+    + 'grows a little more slowly and some later weeks can have a slightly lower capacity; in the project’s 104-week simulation the rule paid 140.75 XNT (4.75 XNT of burn top-ups, about 136 XNT of Artifact rebates) '
+    + 'and later burners received 4.27 XNT less in total. Old burns themselves are still not paid, nothing has to be claimed, signed or paid for it, and no payout is promised.';
+
+/** The date the AI-facing status texts below were last checked (owner request 2026-11-14, after a chat bot quoted a 12-day-old state). */
+export const STATUS_AS_OF = '2026-11-14';
+
+/**
+ * The answer an AI reader most often needs (a chat bot's answers, 2026-11-13): "I hold or burned XEN on a side chain: what now?".
+ * Shown first in llms.txt and llms-full.txt. Neutral to every other project (docs/WORDING.md §3).
+ */
+export const sideChainAnswer: readonly string[] = [
+    `New burns: liquid XEN on Base, Optimism, Polygon, BSC (BNB Chain) or Avalanche, burned through the Moon Forge portal ${identity.portal} on The Forge (${SITE_URL}forge/), is valued in the next weekly epoch and can receive XNT on X1. Zero protocol fee on this path: the only cost is gas.`,
+    `It is paid from a small public reward pool: on ${SCALE_DATE} it held about 6.5 XNT, so one week can pay at most about 0.5 to 0.65 XNT to all burners together. The live balance is on the Start page (${SITE_URL}start/) and the Transparency page (reward pool account ${identity.rewardVaultPda} on X1). No payout is promised: what a week pays depends on the pool and on what others burn.`,
+    'Old burns (made before the portals existed, or anywhere else) pay nothing by themselves. A one-time Legacy Pilot for addresses that burned XEN before 2026-11-01 00:00 UTC is planned; it adds only to a new burn or a new Artifact, and it is not in force until its address list is published and pinned (see "Legacy Pilot" below).',
+    'Staked XEN, XEN still unclaimed inside a XENFT or a mint, XEN on an exchange, and wrapped or bridged XEN do not count until they are liquid XEN in your own wallet on one of the five chains. A XENFT itself is not burned here.',
+    'Ethereum XEN already has its own path in the XEN ecosystem; Moon Forge has no portal on Ethereum or PulseChain and none is planned by this project.',
+    'Burned XEN cannot be recovered. Try a small burn first. Moon Forge never asks anyone to sign or pay to claim anything.',
+    `Optional, never needed to burn: Artifacts (Metaplex Core NFTs; half the price stays inside as a floor you take back by recycling), on-chain games (18+ only, only where legal; any stake can be lost) and the forkable Moon Forge Bot (${SITE_URL}bot/), which you run yourself with your own keys.`,
+];
+
+/** Status and dates, stamped (owner request 2026-11-14): the same lines in llms.txt, llms-full.txt and both agent cards. */
+export const statusDates: readonly string[] = [
+    `As of ${STATUS_AS_OF}; check the site (${SITE_URL}) for updates. Each date is a plan until its transaction exists.`,
+    'Live today: program tag program-2026-10-12 (upgradeable during the public test period) and the current (v2) reward rules.',
+    'Sunday 2026-11-22: last epoch planned under the current reward rules.',
+    'Monday 2026-11-23 16:00 UTC at the latest: the build commit (tag program-2026-11-25) and the binary hash of the final upgrade are published, at least 48 hours ahead.',
+    'Wednesday 2026-11-25, 16:00–20:00 UTC: the final program upgrade (the same hours a week later if a gate is not green).',
+    'Sunday 2026-11-29: first epoch planned under the new (v3) reward rules, and the start of the Legacy Pilot only if its address list is pinned by then.',
+    'Between 2026-12-09 and 2026-12-31: the freeze (the upgrade key is burned), on the published freeze conditions.',
+];
+
+/** Supported and not supported chains, as one machine-readable pair of lines. */
+export const chainSupport = {
+    supported: `Supported (portal ${identity.portal} on each): Base (chain id 8453), Optimism (10), Polygon (137), BNB Chain / BSC (56), Avalanche C-Chain (43114).`,
+    notSupported: 'Not supported by Moon Forge: Ethereum (Ethereum XEN already has its own path in the XEN ecosystem), PulseChain, and every other chain (for example Moonbeam, Fantom, Evmos, OKX, Dogechain, EthPoW). Never send or approve XEN to the portal address on a chain not listed as supported.',
+} as const;
+
+/** Full identity and neutral disambiguation in one line (WORDING §3: one neutral sentence, no judgement). */
+export const identityLine =
+    `Moon Forge (full name Moon Forge Protocol; site ${SITE_URL}; X1 program ${identity.programId}) is not X1 Forge, not the "Moon Party", not XEN Prime and not X1 Labs: separate projects, each with its own rules, and none speaks for the others.`;
+
+/**
+ * How the reward pool grows (owner request 2026-11-14). Shares as the code defines them: the published program source of the final
+ * upgrade (programs/moon-forge/src/constants.rs: FORGE_POOL_BPS 2000, FORGE_EXTRA_BPS 2500, EDGE_TO_POOL_BPS 100, RAKE_TO_POOL_BPS 150,
+ * MARKET_POOL_BPS 200, TIER_PENALTY_BPS 6000/7500, VOID_BOND_BPS) and the v3 oracle rules (8% of the free pool a week). Plain and numeric.
+ */
+export const poolGrowth: readonly string[] = [
+    'Artifact forge price: 20% to the reward pool, plus 25% to a separate extra pot that pays only Artifact holders who burn (from the final upgrade, planned 2026-11-25; today 40% to the reward pool and no extra pot). 50% stays in the Artifact as its floor; 5% goes to the architect.',
+    'House games (Coin Flip, High-Low, Void Rush): 1% of each bet (from the final upgrade minus the house keeper’s settle tip, at most 0.0005 XNT per bet).',
+    'Player-versus-player pots (Duel, Moon Wars, Jackpot), only when a game is decided: 1.5% of the pot from the final upgrade (1% today).',
+    'Sales of an Artifact on the native market: 2% of the price (from the final upgrade).',
+    'Penalties: 60% (Orbit) or 75% (Moon Landing) of the part not yet released on an early exit; void bonds and forfeited bonds (from the final upgrade); the floor of an Artifact burned outside Moon Forge.',
+    'Donations: 100%.',
+    'What leaves it: under the new (v3) rules a week pays burners at most 8% of the free pool (10% under today’s rules), so the weekly capacity follows the pool: a pool of 6.5 XNT allows at most 0.52 XNT a week. The program cannot create XNT and no instruction lets anyone withdraw the pool. No payout is promised.',
+];
 
 /**
  * The hourly week-so-far feed (src/lib/quote.ts WeekSoFarFeed; agents/kit/burn.mjs FEED CONTRACT) and how a quote is computed
@@ -453,7 +508,9 @@ export interface FaqFact { q: string; a: string }
  */
 export const faq: readonly FaqFact[] = [
     { q: 'Can I use Moon Forge alongside other XEN programs?', a: 'Yes. Moon Forge is one option among several in the XEN and X1 ecosystem and replaces none of them. Each XEN can be burned only once, so holders who use several paths use a different part of their XEN for each. A burn here is paid only under Moon Forge’s rules; Moon Forge does not promise that it counts in any other program, so check each program’s own rules.' },
-    { q: 'I burned XEN before Moon Forge. Is there anything for me?', a: `Old burns are not paid here. A separate, one-time Legacy Pilot is planned for addresses that burned XEN before 2026-11-01 00:00 UTC: up to 50% more on their first new burn through a Moon Forge portal (from the same EVM address, on one of the five chains), paid only from capacity the normal payouts leave unused, and 20% of the price of a first new Artifact held by a wallet such a burn names, paid only from what the extra pot’s weekly release leaves; from the first epoch under the v3 rules (planned 2026-11-29) and only once its public address list is built and pinned. Nothing has to be claimed, signed or paid for it; anyone asking you to is running a scam.` },
+    { q: 'I burned XEN before Moon Forge. Is there anything for me?', a: `Old burns are not paid here. A separate, one-time Legacy Pilot is planned for addresses that burned XEN before 2026-11-01 00:00 UTC: up to 50% more on their first new burn through a Moon Forge portal (from the same EVM address, on one of the five chains), paid only from capacity the normal payouts leave unused, and 20% of the price of a first new Artifact held by a wallet such a burn names, paid only from what the extra pot’s weekly release leaves; from the first epoch under the v3 rules (planned 2026-11-29) and only once its public address list is built and pinned; as of 2026-11-14 the list is not published, so nothing applies yet. No payout is promised. Nothing has to be claimed, signed or paid for it; anyone asking you to is running a scam.` },
+    { q: 'I burned XEN on a side chain to mint XENFTs (for example on Polygon). Does that count?', a: 'Not by itself. XEN burned to mint a XENFT, or any burn made outside the Moon Forge portals, is not paid here, and a XENFT itself is not burned here. The XEN a matured XENFT releases counts once it is liquid XEN in your own wallet on Base, Optimism, Polygon, BSC or Avalanche and you burn it through the portal. If your address burned XEN before 2026-11-01 00:00 UTC, the planned Legacy Pilot may add a one-time top-up to a new burn, only once its address list is published and pinned (as of 2026-11-14 it is not). No payout is promised.' },
+    { q: 'Does staked, unclaimed, wrapped or bridged XEN count?', a: 'Only liquid XEN counts: XEN held in your own wallet on Base, Optimism, Polygon, BSC or Avalanche and burned through the Moon Forge portal. XEN locked in a stake, still unclaimed inside a XENFT or a mint, sitting on an exchange, or wrapped or bridged does not count until it becomes liquid XEN in your wallet on one of those chains. Ethereum XEN already has its own path in the XEN ecosystem; Moon Forge has no portal on Ethereum or PulseChain. No payout is promised.' },
     { q: 'My X1 wallet is brand new. Where does a tiny payout go?', a: 'To your wallet, as long as it ends with at least about 0.00089 XNT (the chain’s minimum for an account). A smaller payment to an empty wallet is credited to your game balance instead; move it with Withdraw in the Games page (that needs your signature and a little XNT for the fee).' },
     { q: 'Can I calculate what I will get?', a: 'Yes, after the fact, exactly: the epoch file lists every burn, its price and your share, and the program checks the totals. Before the epoch you can only estimate, because your share depends on what others burn that week. The estimator on The Forge shows the upper bound, and the Transparency page shows, chain by chain, what the same burn is worth right now and why.' },
     { q: 'Is there a minimum?', a: 'Any amount above zero can be burned. A burn worth less than a millionth of a dollar after the liquidity discount scores zero. A payout under 0.02 XNT carries no keeper tip. Today the project’s oracle and keeper submit every unclaimed payout, tipped or not, when they run; if yours is still unclaimed, claiming it yourself costs a network fee and a small rent deposit (the receipt’s rent can be recovered after the epoch closes). All your burns to one X1 address in one tier and epoch are paid as one payout.' },
@@ -491,6 +548,10 @@ export const keyQa: readonly KeyQaFact[] = [
     {
         start: true, q: 'Which XEN counts? Do old burns or Ethereum XEN count?',
         a: `Fresh burns only: the chain’s own XEN, held in your own wallet, burned through the Moon Forge portal ${identity.portal} on Base (8453), Optimism (10), Polygon (137), BNB Chain (56) or Avalanche (43114), each one recorded in XEN’s own burn ledger (userBurns) for your address. XEN on an exchange, in a stake or a XENFT, or wrapped or bridged does not count until it is liquid XEN in your wallet on one of those chains. Ethereum XEN: no. Moon Forge has no portal on Ethereum or PulseChain and none is planned by this project; Ethereum XEN already has its own path in the XEN ecosystem. Old burns: not paid here. The planned Legacy Pilot (FAQ) adds a one-time top-up only to a new burn made on one of the five chains from the same EVM address.`,
+    },
+    {
+        start: true, q: 'I hold or burned XEN on a side chain. What now?',
+        a: `Liquid XEN on Base, Optimism, Polygon, BSC or Avalanche, burned through the Moon Forge portal ${identity.portal} on The Forge, is valued in the next weekly epoch and can receive XNT on X1, with zero protocol fee (only gas). It is paid from a small public reward pool: on ${SCALE_DATE} it held about 6.5 XNT, so one week can pay at most about 0.5 to 0.65 XNT to all burners together; the live balance is on this Start page and the Transparency page. No payout is promised. Old burns pay nothing by themselves; the planned Legacy Pilot for addresses that burned XEN before 2026-11-01 00:00 UTC adds only to a new burn or a new Artifact and is not in force until its address list is published and pinned. Staked, unclaimed, wrapped or bridged XEN and XENFTs do not count until they are liquid XEN in your wallet. Ethereum XEN already has its own path in the XEN ecosystem.`,
     },
     {
         q: 'How do I burn, step by step, on each chain?',
@@ -545,7 +606,7 @@ export const keyQa: readonly KeyQaFact[] = [
         a: `Today anyone can run the keeper (npm run keeper in the oracle folder, with a funded X1 key), recompute every epoch (npm run verify -- epoch-N.json --full), host the site (MIT license) and mirror the epoch files, which the agent kit checks against the data stored on X1; publishing an epoch still needs the oracle key. From the final upgrade (planned 2026-11-25) anyone can cancel (void) a wrong epoch during its 48-hour hold by paying a bond into the pool (10% of its budget, at least 0.05 XNT); if no epoch survives its hold for 28 days, the largest voider can take the oracle seat from day 28 and anyone from day 29, with a bond of 10% of the free pool (at least 1 XNT), and keep publishing on the same pools with the same code. From 2026-12-16 anyone can create a house-keeper seat that was never created, with a bond of at least 20 XNT (npm run keeper-arm), and anyone can take a keeper seat idle for 28 days, with nothing pending and the same bond (npm run keeper-take). Nobody can veto either. Runbooks (setup, commands, the takeover, what to do when something breaks): ${officialLinks.operatorsMd}.`,
     },
     {
-        q: 'What is the Moon Forge Bot, and how do AI agents use Moon Forge?',
+        start: true, q: 'What is the Moon Forge Bot, and how do AI agents use Moon Forge?',
         a: `The Moon Forge Bot (${officialLinks.botPage}; source ${officialLinks.botSource}, MIT) is community software you run on your own computer with your own keys: it burns XEN only when your rule is met (XNT per XEN above your threshold, at least what selling would fetch, today’s capacity still open, your daily and gas caps), claims your XNT, and only if you switch them on plays 18+ games within a loss budget and watches your Artifacts. It starts in dry run and signs nothing until you go live; fork it and change the rule in one small file. An optional A2A interface (local HTTP/JSON on 127.0.0.1, with its own agent card) lets another agent ask it for a quote or a plan; it never signs on request. Before the v3 rules no binding quote exists, so the bot waits and does not burn. AI agents use the same program with their own keypair through the agent kit (${officialLinks.agentKit}) and the skill file (${officialLinks.skillFile}); the site’s agent card (${officialLinks.agentCard}, also at /.well-known/agent-card.json) lists every service. No payout is promised.`,
     },
     {
@@ -647,7 +708,7 @@ export const sitemapFiles: readonly string[] = ['llms.txt', 'llms-full.txt', 'ag
 
 export const facts = {
     INTERIM, rules, identity, officialLinks, chains, liveChains, epochRules, tiers, fees, artifacts, forgeSplit, artifactRules,
-    games, gameRules, notices, disambiguation, position, scale, SCALE_DATE, oldBurns, ageNotice, legacyPilot, quoteFeed, never, notOfficial, xNote, verify, risks, trust, verifyChecklist, steps,
+    games, gameRules, notices, disambiguation, position, scale, SCALE_DATE, oldBurns, ageNotice, legacyPilot, STATUS_AS_OF, sideChainAnswer, statusDates, chainSupport, identityLine, poolGrowth, quoteFeed, never, notOfficial, xNote, verify, risks, trust, verifyChecklist, steps,
     faq, keyQa, startQa, whitepaper, routes, sitemapFiles, bot,
 } as const;
 

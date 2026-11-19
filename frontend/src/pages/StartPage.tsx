@@ -16,7 +16,8 @@ import { AddrLink, Notice, Xnt } from '../components/ui';
 import PublicCounter from '../components/PublicCounter';
 import { DATED, INTERIM } from '../content/interim';
 import { LINKS, LINKS_URL, officialLink, PUBLIC_PLACES } from '../lib/links';
-import { faq as FAQ, officialLinks, SCALE_DATE, startQa } from '../facts';
+import { faq as FAQ, officialLinks, poolGrowth, SCALE_DATE, startQa } from '../facts';
+import { formatXnt, poolPanel } from '../lib/pool-panel';
 
 const WEEK = 7 * 86_400;
 const SUNDAY_0 = 3 * 86_400; // 1970-01-04 00:00 UTC
@@ -77,6 +78,10 @@ export default function StartPage() {
     useEffect(() => { fetchXntUsd().then(setXntUsd).catch(() => setXntUsd(null)); }, []);
 
     const d = proto.data;
+    // The live pool panel shows only a fresh, successful read: the read time is stamped when a new snapshot arrives.
+    const [readAtMs, setReadAtMs] = useState<number | null>(null);
+    useEffect(() => { if (d) setReadAtMs(Date.now()); }, [d]);
+    const pool = poolPanel(d && readAtMs !== null ? { freeLamports: d.rewardFree, initialized: d.initialized, atMs: readAtMs } : null, !!proto.error);
     const budget = d ? toXnt(d.nextEpochBudget) : null;
     const drops = d ? toXnt(d.nextDropReserve) : null;
     const nextEpoch = now - ((now - SUNDAY_0) % WEEK) + WEEK;
@@ -136,6 +141,40 @@ export default function StartPage() {
                     Answers that name the final upgrade or the v3 rules describe published, dated plans. The long form, with worked examples:{' '}
                     <a className="text-forge-orange hover:underline" href={officialLinks.howItWorks} target="_blank" rel="noopener noreferrer">How Moon Forge works</a>.
                 </p>
+            </section>
+
+            {/* ── the reward pool, live from X1 (nothing is shown when the read fails: never a stale number) ── */}
+            <section className="glass-card space-y-3" aria-labelledby="pool-live">
+                <h2 id="pool-live" className="font-space text-xl">Reward pool</h2>
+                {pool && (
+                    <>
+                        <div className="grid sm:grid-cols-3 gap-4 text-sm">
+                            <div className="bg-space-700/40 rounded-xl p-4">
+                                <div className="text-lunar-400 text-xs mb-1">Free reward pool, live from X1</div>
+                                <div className="font-mono text-2xl text-white">{formatXnt(pool.poolXnt)} XNT</div>
+                            </div>
+                            <div className="bg-space-700/40 rounded-xl p-4">
+                                <div className="text-lunar-400 text-xs mb-1">Most one week can pay, today's rules (10%)</div>
+                                <div className="font-mono text-2xl text-white">{formatXnt(pool.todayMaxXnt)} XNT</div>
+                                <div className="text-lunar-500 text-xs">The rules that apply today, to all burners together</div>
+                            </div>
+                            <div className="bg-space-700/40 rounded-xl p-4">
+                                <div className="text-lunar-400 text-xs mb-1">The same under the v3 rules (8%)</div>
+                                <div className="font-mono text-2xl text-white">{formatXnt(pool.v3MaxXnt)} XNT</div>
+                                <div className="text-lunar-500 text-xs">Planned from the first v3 epoch (2026-11-29)</div>
+                            </div>
+                        </div>
+                        <p className="text-xs text-lunar-500">
+                            Read at {pool.readAt} from the reward pool account <AddrLink address={PDA.rewardVault().toBase58()} />. These are upper limits for everyone together, not a quote. No payout is promised.
+                        </p>
+                    </>
+                )}
+                <div className="text-sm">
+                    <div className="text-white mb-1">How the reward pool grows</div>
+                    <ul className="list-disc list-inside space-y-1 text-lunar-400">
+                        {poolGrowth.map((x) => <li key={x}>{x}</li>)}
+                    </ul>
+                </div>
             </section>
 
             {/* ── this week, in real numbers ── */}

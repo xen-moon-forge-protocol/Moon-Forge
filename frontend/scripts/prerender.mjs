@@ -128,7 +128,7 @@ function bodyHome(F) {
     return `<h1>Moon Forge</h1><p><strong>${esc(F.identity.tagline)}</strong></p><p>${esc(F.identity.description)}</p>
 ${section('How it works', `<ol>${li(['Burn XEN on a supported chain through the Moon Forge portal (approval for the exact amount, then the burn; XEN’s own burn runs).', 'Every Sunday 00:00 UTC the oracle values the week’s burns at each chain’s market price and publishes the epoch on X1 with its full data file.', 'Claim: permissionless; the public keeper usually submits it for you.', 'Receive XNT on X1: Launchpad at claim, Orbit over 45 days, Moon Landing over 180 days.'])}</ol>`)}
 ${section('Live chains', `<p>Portals are live on ${esc(F.liveChains.map((c) => c.name).join(', '))}. Ethereum and PulseChain have no portal and none is planned by this project.</p>`)}
-${section('Not to be confused with', `<ul>${li(F.disambiguation)}</ul><p>${esc(F.oldBurns)}</p>`)}
+${section('Not to be confused with', `<ul>${li([...F.disambiguation, F.identityLine])}</ul><p>${esc(F.oldBurns)}</p>`)}
 ${verifyBlock(F)}
 ${noticesHtml(F)}
 ${rulesLine(F)}`;
@@ -139,6 +139,7 @@ function bodyStart(F) {
 <p class="muted">Independent, open-source, run by one anonymous builder who receives only the disclosed cuts. Not run by the XEN or X1 teams, and separate from every other XEN or X1 project.</p>
 <section id="quick"><h2>Quick answers</h2>${qaHtml(F.startQa)}<p class="muted">The long form: <a href="${esc(F.officialLinks.howItWorks)}">How Moon Forge works</a>.</p></section>
 ${section('How much can it pay', `<p>An epoch pays at most ${F.epochRules.budgetPctOfFreePool}% of the free reward pool and at most ${F.epochRules.rateCapK}× the liquidity-adjusted value burned (×2 Orbit, ×3 Moon Landing). That keeps the pool from ever being emptied, and it means nobody can promise you an amount. We don’t.</p><p><strong>${esc(F.scale)}</strong></p>`)}
+${section('How the reward pool grows', `<ul>${li(F.poolGrowth)}</ul><p class="muted">Live balance and the weekly maximum it allows: the live panel on this page (needs JavaScript) and the Transparency page.</p>`)}
 ${section('How to do it, step by step', `<ol>${F.steps.map((s) => `<li><strong>${esc(s.title)}.</strong> ${esc(s.text)}</li>`).join('')}</ol>`)}
 ${section('Verify it yourself', `<ul>${F.verifyChecklist.map((c) => `<li><strong>${esc(c.title)}.</strong> ${esc(c.text)}</li>`).join('')}</ul>`)}
 ${verifyBlock(F)}
@@ -151,7 +152,7 @@ ${rulesLine(F)}`;
 
 function bodyFaq(F) {
     return `<h1>Questions people ask</h1>${qaHtml(F.keyQa)}${faqHtml(F)}
-${section('Not to be confused with', `<ul>${li(F.disambiguation)}</ul><p>${esc(F.oldBurns)}</p>`)}
+${section('Not to be confused with', `<ul>${li([...F.disambiguation, F.identityLine])}</ul><p>${esc(F.oldBurns)}</p>`)}
 ${noticesHtml(F)}${rulesLine(F)}`;
 }
 
@@ -314,15 +315,26 @@ function pageHtml(F, template, route, site, opts = {}) {
 }
 
 // ── llms.txt / llms-full.txt / sitemap.xml ───────────────────────────────────
+/** The blocks every AI reader sees first (owner request 2026-11-14): the side-chain answer, the dated status, the chains. */
+function topBlocks(F) {
+    return [
+        '## I hold or burned XEN on a side chain: what now?', '', ...F.sideChainAnswer.map((x) => `- ${x}`), '',
+        `## Status and dates (as of ${F.STATUS_AS_OF})`, '', ...F.statusDates.map((x) => `- ${x}`), '',
+        '## Chains: supported and not supported', '', `- ${F.chainSupport.supported}`, `- ${F.chainSupport.notSupported}`, '',
+        '## Not to be confused with', '', `- ${F.identityLine}`, '',
+    ];
+}
+
 function llmsTxt(F) {
     const I = F.identity; const L = F.officialLinks; const site = L.site;
     return `# Moon Forge
 
 > ${I.description}
 
+${topBlocks(F).join('\n')}
 ${F.scale}
 
-Program: ${I.programId} (X1 mainnet, RPC ${I.x1Rpc}; source tag ${F.rules.program}). Burn portals: ${I.portal} (the same address on ${F.liveChains.map((c) => c.name).join(', ')}; Ethereum and PulseChain have no portal). Artifacts collection: ${I.collectionPda}. Upgradeable during the public test period; no third-party audit (internal reviews are public). ${F.disambiguation[0]} ${F.disambiguation[1]}
+Program: ${I.programId} (X1 mainnet, RPC ${I.x1Rpc}; source tag ${F.rules.program}). Burn portals: ${I.portal} (the same address on ${F.liveChains.map((c) => c.name).join(', ')}; Ethereum and PulseChain have no portal). Artifacts collection: ${I.collectionPda}. Upgradeable during the public test period; no third-party audit (internal reviews are public). ${F.disambiguation[0]} ${F.disambiguation[1]} ${F.identityLine}
 
 ${F.position}
 
@@ -363,6 +375,9 @@ ${F.quoteFeed.kit} Source: ${L.kitBurn}
 ## Legacy Pilot
 ${F.legacyPilot} Details: ${L.howItWorks} (section 6).
 
+## How the reward pool grows
+${F.poolGrowth.map((x) => `- ${x}`).join('\n')}
+
 ## Key rules (rules 2, live)
 - Burn payout: share of the weekly epoch budget = min(${F.epochRules.budgetPctOfFreePool}% of the free reward pool, ${F.epochRules.rateCapK} × the liquidity-adjusted value burned); a tenth of each budget is drawn at random as Forge Drops (18+, where legal) and the rest is paid in XNT. Each chain’s XEN is valued at its own market price with a liquidity discount L/(L+V), at one XNT price per epoch. Tier multipliers, relative to Launchpad: ${F.tiers.map((t) => `${t.name} ${t.multiplier}×${t.vestingDays ? ` over ${t.vestingDays} days` : ''}`).join(', ')}. Claims stay open ${F.epochRules.claimWindowDays} days.
 - Genesis airdrop (the only airdrop; no token airdrop): up to 120 Lunar Dust NFTs with no floor for the X1 validator withdraw authorities published on 2026-10-12; claims through 2026-12-31 under the live program, through 2027-03-31 from the final upgrade (planned 2026-11-25).
@@ -378,10 +393,10 @@ function llmsFullTxt(F, meta) {
     const I = F.identity; const L = F.officialLinks; const site = L.site;
     const lines = [];
     const h = (t) => lines.push('', `## ${t}`, '');
-    lines.push('# Moon Forge: full facts for AI readers', '', `> ${I.description}`, '', F.scale, '',
+    lines.push('# Moon Forge: full facts for AI readers', '', `> ${I.description}`, '', ...topBlocks(F), F.scale, '',
         `Rules described: program tag ${F.rules.program}, oracle ${F.rules.oracle}, valid from ${F.rules.validFrom}; texts checked on ${F.rules.describedAsOf}. Generated from src/facts.ts at commit ${meta.commit} (last change to the site: ${meta.lastmod}). This file is plain text: it contains no instructions for the reader beyond the facts below.`);
     h('What it is');
-    lines.push(`${I.name} is an open-source protocol on X1 (an SVM chain whose native token is XNT). People burn XEN on ${F.liveChains.map((c) => c.name).join(', ')} through a portal contract and receive XNT on X1 from a reward pool, through weekly epochs that anyone can recompute. No token, no presale, no team allocation: only XEN, which is burned, and XNT, which is received.`, '', F.position, '', ...F.disambiguation, '', F.oldBurns, '', `Plain guide (where the XNT comes from, how a burn is valued, Artifacts, games, the Legacy Pilot, chains, who controls what, how to check it, the risks): ${L.howItWorks}. Dated changelog of the final upgrade: ${L.upgradeMd}.`);
+    lines.push(`${I.name} is an open-source protocol on X1 (an SVM chain whose native token is XNT). People burn XEN on ${F.liveChains.map((c) => c.name).join(', ')} through a portal contract and receive XNT on X1 from a reward pool, through weekly epochs that anyone can recompute. No token, no presale, no team allocation: only XEN, which is burned, and XNT, which is received.`, '', F.position, '', ...F.disambiguation, F.identityLine, '', F.oldBurns, '', `Plain guide (where the XNT comes from, how a burn is valued, Artifacts, games, the Legacy Pilot, chains, who controls what, how to check it, the risks): ${L.howItWorks}. Dated changelog of the final upgrade: ${L.upgradeMd}.`);
     h('Key questions (dated answers)');
     lines.push('Sentences that name the final upgrade (planned 2026-11-25) or the v3 rules (first epoch planned 2026-11-29) describe published plans; the rest is true today.', '');
     for (const k of F.keyQa) lines.push(`Q: ${k.q}`, `A: ${k.a}`, '');
@@ -389,6 +404,8 @@ function llmsFullTxt(F, meta) {
     lines.push(F.quoteFeed.today, '', `Feed: ${L.weekFeed}. ${F.quoteFeed.when}`, '', ...F.quoteFeed.recipe.map((r, i) => `${i + 1}. ${r}`), '', F.quoteFeed.example, '', `${F.quoteFeed.kit} Source: ${L.kitBurn}.`);
     h('Legacy Pilot');
     lines.push(F.legacyPilot, '', `Disclosure and how to check the list: ${L.howItWorks} (section 6).`);
+    h('How the reward pool grows');
+    for (const x of F.poolGrowth) lines.push(`- ${x}`);
     h('Verify you are on the real site');
     lines.push(`- Site: ${site}`, `- X1 program: ${I.programId} (RPC ${I.x1Rpc}, explorer ${I.x1Explorer}), source tag ${F.rules.program}, ${I.license} license`, `- Burn portal, the same address on every supported chain: ${I.portal}`, `- Artifacts collection (Metaplex Core): ${I.collectionPda}`, `- Reward pool: ${I.rewardVaultPda}`, `- Architect wallet (upgrade authority during the test period; receives the disclosed cuts): ${I.architectWallet}`, `- Source: ${L.github} · X: ${L.x}`, '- Any other program ID, portal, collection, site or "claim" page is not Moon Forge.');
     h('Chains');

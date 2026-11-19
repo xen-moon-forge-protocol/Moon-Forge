@@ -63,6 +63,8 @@ Every XNT a burner receives comes out of one program account on X1, the **reward
 | Artifacts burned outside Moon Forge | their floor | their floor |
 | The architect's cuts while its wallet would sit below rent | 100% | 100%, and every cut after the payee renounces for good |
 
+**How the reward pool grows, in numbers** (shares as the published program source of the final upgrade defines them, `programs/moon-forge/src/constants.rs`): 20% of every Artifact forge price (`FORGE_POOL_BPS`), plus 25% to the separate extra pot for holders who burn (`FORGE_EXTRA_BPS`); 1% of each house bet (`EDGE_TO_POOL_BPS`); 1.5% of each decided player-versus-player pot, Duel, Moon Wars or Jackpot (`RAKE_TO_POOL_BPS`); 2% of each native-market Artifact sale (`MARKET_POOL_BPS`); penalties: 60% or 75% of the unreleased part on an early exit (`TIER_PENALTY_BPS`), void and forfeited bonds, and the floor of an Artifact burned outside Moon Forge; donations, 100%. What leaves it for burners: under the v3 rules a week pays at most 8% of the free pool (10% under today's rules), so the weekly capacity follows the pool: a pool of 6.5 XNT allows at most 0.52 XNT a week. The Start page shows the live balance and both weekly maximums. No payout is promised.
+
 The first funding came from the project's own launch funding, sent as donations. Unclaimed payouts never leave the pool: after 90 days they become free again for later weeks.
 
 From the final upgrade there is also a second, separate pot, the **extra pot** (`GRGxMQDjNg4DwoL69y2p1x14fSzeaKeCHVLkAb67Z9d2`). It does not exist before the upgrade. Its **only** source is 25% of every Artifact forge price, and it pays only Artifact holders who burn (section 4). The two pots never pay each other.
@@ -249,7 +251,7 @@ An Artifact is an optional NFT (Metaplex Core) that you forge on X1 with XNT. **
 
 ## 6. Legacy Pilot
 
-*Planned, dated: applies from the first rules-3 payout (planned 2026-11-29) only if the public list of addresses is built and its hash pinned in the oracle before that payout is built. As of 2026-11-02 the list is not built yet, so the rule is not in force.*
+*Planned, dated: applies from the first rules-3 payout (planned 2026-11-29) only if the public list of addresses is built and its hash pinned in the oracle before that payout is built. As of 2026-11-14 the list is not published yet, so the rule is not in force.*
 
 **What it is.** A one-time recognition for people who burned XEN before Moon Forge's final rules. **Eligible:** any EVM address that burned XEN (a transfer to the zero address recorded by XEN's own contract) on Ethereum, Base, Optimism, Polygon, BSC or Avalanche before **2026-11-01 00:00 UTC**. Old burns are still not paid as burns; the Legacy Pilot adds to new ones:
 
