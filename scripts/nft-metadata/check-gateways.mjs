@@ -5,10 +5,12 @@
 //   2 path manifests (images + that set's metadata, read raw, every path -> id exactly as recorded)
 //   12 images and 13 JSON through the manifests (HTTP 200, right content type, sha256 equal to the repository bytes)
 // on EVERY listed gateway, plus the same 27 items rebuilt from Arweave L1 chunks (bundle mined AND data seeded).
-// A set passes a day only with 27/27 on each gateway and 27/27 on L1, and only if the record's imageBaseUri and
-// metadataBaseUri are exactly the bases that were checked. A URI may be compiled only after 7 consecutive passing
-// UTC days of that exact metadataBaseUri, up to the latest day in the log (verdict(): per set AND URI; reports
-// without L1 or without every default gateway do not count).
+// Rule of 2026-11-19 (decision D-32): a set passes a day only with 27/27 on ITS OWN gateway (the gateway in its
+// metadataBaseUri, the one that gets compiled) and 27/27 on L1, and only if the record's imageBaseUri and
+// metadataBaseUri are exactly the bases that were checked. Every other listed gateway is still checked and reported;
+// a miss there is a warning, never a failure. A URI may be compiled only after 7 consecutive passing UTC days of that
+// exact metadataBaseUri, up to the latest day in the log (verdict(): per set AND URI; reports without L1 or without
+// every default gateway do not count).
 //
 // Usage:
 //   node scripts/nft-metadata/check-gateways.mjs [--record deployments/nft-arweave-final.json] [--gateways a,b]
@@ -141,6 +143,21 @@ export async function checkSetOnL1(rec, set, exp, { imagesOnly = false, opts, ct
   return { ok: results.reduce((a, b) => a + b, 0), total: items.length, failures, bundles };
 }
 
+const complete = (g) => !!g && Number.isInteger(g.total) && g.total > 0 && g.ok === g.total;
+
+// The day's result of one set (pure; tested): no drift, its OWN gateway complete (it must have been checked), and
+// Arweave L1 complete (when l1 is false the report never counts for the verdict anyway). Other gateways do not decide.
+export function setPasses(ownGateway, s, { l1 = true } = {}) {
+  if (!s || (s.drift ?? []).length) return false;
+  if (!complete(s.gateways?.[ownGateway])) return false;
+  return !l1 || complete(s.l1);
+}
+
+// The informational result: every other checked gateway that did not serve all paths (a warning, never a failure).
+export const otherGatewayWarnings = (ownGateway, gateways = {}) =>
+  Object.entries(gateways).filter(([gw, g]) => gw !== ownGateway && !complete(g))
+    .map(([gw, g]) => `${gw} ${g.ok}/${g.total} (informational, not part of the gate${g.failures?.[0] ? `; first miss ${g.failures[0].item}: ${g.failures[0].why}` : ''})`);
+
 export async function runCheck(rec, { gateways = DEFAULT_GATEWAYS, only, l1 = true, imagesOnly = false, opts, ctx = l1Context() } = {}) {
   const now = new Date().toISOString();
   const report = { checkedAt: now, day: now.slice(0, 10), legacy: !!rec.legacy, sandbox: !!rec.sandbox, uploadedAt: rec.uploadedAt ?? null, gateways, l1, imagesOnly, sets: {} };
@@ -160,7 +177,8 @@ export async function runCheck(rec, { gateways = DEFAULT_GATEWAYS, only, l1 = tr
     const out = { metadataBaseUri: set.metadataBaseUri, imageBaseUri: set.imageBaseUri, drift, gateways: {} };
     for (const gw of gateways) out.gateways[gw] = await checkSetOnGateway(rec, set, exp, gw, { imagesOnly, opts });
     if (l1) out.l1 = await checkSetOnL1(rec, set, exp, { imagesOnly, opts, ctx });
-    out.pass = !drift.length && Object.values(out.gateways).every((g) => g.ok === g.total) && (!l1 || out.l1.ok === out.l1.total);
+    out.warnings = otherGatewayWarnings(set.gateway, out.gateways);
+    out.pass = setPasses(set.gateway, out, { l1 });
     report.sets[set.gateway] = out;
   }
   return report;
@@ -173,12 +191,14 @@ export function printReport(report) {
     if (s.drift.length) console.log(`  DRIFT: the record does not match the repository bytes or the checked bases: ${s.drift.join('; ')}`);
     const rows = [...Object.entries(s.gateways), ...(s.l1 ? [['Arweave L1', s.l1]] : [])];
     for (const [gw, g] of rows) {
-      console.log(`  ${gw.padEnd(20)} ${String(g.ok).padStart(2)}/${g.total}`);
+      const role = gw === 'Arweave L1' || gw === name ? 'gate' : 'informational';
+      console.log(`  ${gw.padEnd(20)} ${String(g.ok).padStart(2)}/${g.total}  (${role})`);
       for (const f of g.failures.slice(0, 6)) console.log(`      ${f.item}: ${f.why}`);
       if (g.failures.length > 6) console.log(`      ... ${g.failures.length - 6} more`);
     }
     if (s.l1) for (const [b, v] of Object.entries(s.l1.bundles)) console.log(`  bundle ${b}: height ${v.height ?? '?'}, confirmations ${v.confirmations ?? '?'}, chunks proven from ${v.nodes?.length ? v.nodes.join(' ') : '-'}`);
-    console.log(`  => ${s.pass ? 'PASS' : 'FAIL'}`);
+    for (const w of s.warnings ?? []) console.log(`  WARNING: ${w}`);
+    console.log(`  => ${s.pass ? 'PASS' : 'FAIL'} (gate: ${name} and Arweave L1)`);
   }
 }
 
@@ -196,6 +216,10 @@ export function readReports(src) {
 export const isFullReport = (r, gateways = DEFAULT_GATEWAYS) =>
   !r.imagesOnly && !r.legacy && !r.sandbox && r.l1 === true && gateways.every((g) => (r.gateways ?? []).includes(g));
 
+// The day's result of a set in a stored report: recomputed with setPasses() when the report carries the counts (so
+// reports written before the rule of 2026-11-19 are read under it), else the stored pass.
+export const reportSetPasses = (name, s) => (s?.gateways && s?.l1 ? setPasses(name, s) : !!s?.pass);
+
 // Per (set, metadataBaseUri), because the URI is what gets compiled: a re-upload under the same set name starts a
 // new streak. A UTC day passes when it has at least one full report and every full report passed. The streak is the
 // run of consecutive passing days ending at the LATEST day of any full report in the log, so a URI that is no longer
@@ -209,7 +233,7 @@ export function verdict(reports, days = 7, { gateways = DEFAULT_GATEWAYS } = {})
     for (const [name, s] of Object.entries(r.sets ?? {})) {
       const key = `${name} ${s.metadataBaseUri}`;
       const u = (perUri[key] ??= { set: name, metadataBaseUri: s.metadataBaseUri ?? null, days: {} });
-      u.days[r.day] = (u.days[r.day] ?? true) && !!s.pass;
+      u.days[r.day] = (u.days[r.day] ?? true) && reportSetPasses(name, s);
     }
   }
   const out = {};
@@ -257,6 +281,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   });
   report.record = path.relative(root, recordPath).split(path.sep).join('/');
   printReport(report);
+  if (process.env.GITHUB_ACTIONS === 'true') {
+    for (const [name, s] of Object.entries(report.sets)) for (const w of s.warnings ?? []) console.log(`::warning::set ${name}: ${w}`);
+  }
   if (opt('--json')) fs.writeFileSync(opt('--json'), JSON.stringify(report, null, 2));
   if (opt('--log')) fs.appendFileSync(opt('--log'), JSON.stringify(report) + '\n');
   const passes = Object.values(report.sets).map((s) => s.pass);

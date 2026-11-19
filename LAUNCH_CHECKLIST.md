@@ -15,7 +15,7 @@ Details for every step: [DEPLOY.md](DEPLOY.md). Status as of 2026-10-22. The v2 
 - [x] `solana program deploy` (upgrade, auto-extends) + `anchor idl upgrade` (2026-10-07; second upgrade 2026-10-12, tag `program-2026-10-12`)
 - [x] `npm run init` (initialize_v2, init_artifacts, sweep_legacy)
 - [x] Transparency page shows config, vaults and the upgrade authority
-- [ ] Artifact metadata on Arweave: the upload recorded in `deployments/nft-arweave.json` does not serve every file from every gateway; its JSON (v2 utility texts) will not be used, and its images are reused only if every file serves from the chosen gateway with a matching hash, otherwise re-uploaded; re-upload the final texts, check every file on two gateways for 7 days, then set `METADATA_BASE_URI` in the final upgrade and run `npm run refresh-collection`
+- [ ] Artifact metadata on Arweave: the upload recorded in `deployments/nft-arweave.json` does not serve every file from every gateway; its JSON (v2 utility texts) will not be used, and its images are reused only if every file serves from the chosen gateway with a matching hash, otherwise re-uploaded; re-upload the final texts, check every file on the chosen set's own gateway and on Arweave L1 for 7 consecutive days (rule of 2026-11-19; the other gateway is reported only), then set `METADATA_BASE_URI` in the final upgrade and run `npm run refresh-collection`
 
 ## EVM
 - [x] Portals deployed on exactly five chains: Base, Optimism, Polygon, BSC, Avalanche (2026-10-07). Ethereum and PulseChain: no portal, none planned by this project (left to the community as forks, [FORK.md](FORK.md)); no chain is added after the freeze

@@ -11,7 +11,7 @@ import { buildV2 } from '../texts-v2.mjs';
 import { buildFinal, serialize, SPLIT, EXTERNAL_URL } from '../texts-final.mjs';
 import { lintFiles, lintIdl, lintText, IDL_DESCRIPTION } from '../lint-permanent.mjs';
 import { l1Payload, scanWebp, sha256, validateDataPath, verifyChunk } from '../arweave.mjs';
-import { normalizeRecord, expectedBytes, runCheck, verdict } from '../check-gateways.mjs';
+import { normalizeRecord, expectedBytes, runCheck, verdict, setPasses, otherGatewayWarnings } from '../check-gateways.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const read = (p) => fs.readFileSync(path.join(root, p), 'utf8');
@@ -311,6 +311,50 @@ test('7-day verdict: only reports with Arweave L1 and both gateways count', () =
   // one partial report on a day does not fail that day's full reports, and does not count either
   const v = verdict([...DAYS.map((d) => rep(d, true)), rep(DAYS[6], false, { l1: false })]);
   assert.equal(entry(v, TURBO_URI).streak, 7);
+});
+
+// Rule of 2026-11-19 (D-32): a set passes on its own gateway + Arweave L1; the other gateway only warns.
+const counts = (ok, total = 27) => ({ ok, total, failures: ok === total ? [] : [{ item: 'metadata/x.json', why: 'HTTP 503' }] });
+const detailed = (turbo, ario, l1, drift = []) => ({ drift, gateways: { 'turbo-gateway.com': counts(turbo), 'ar-io.dev': counts(ario) }, l1: counts(l1) });
+
+test('gate rule: own gateway 27/27 and L1 27/27 pass; the other gateway warns, never fails', () => {
+  assert.equal(setPasses('turbo-gateway.com', detailed(27, 0, 27)), true);
+  assert.deepEqual(otherGatewayWarnings('turbo-gateway.com', detailed(27, 0, 27).gateways).length, 1);
+  assert.match(otherGatewayWarnings('turbo-gateway.com', detailed(27, 0, 27).gateways)[0], /^ar-io\.dev 0\/27 \(informational/);
+  assert.deepEqual(otherGatewayWarnings('turbo-gateway.com', detailed(27, 27, 27).gateways), []);
+  // everything else stays strict
+  assert.equal(setPasses('turbo-gateway.com', detailed(26, 27, 27)), false); // own gateway short
+  assert.equal(setPasses('turbo-gateway.com', detailed(27, 27, 26)), false); // L1 short
+  assert.equal(setPasses('turbo-gateway.com', detailed(27, 27, 27, ['metadataBaseUri x'])), false); // drift
+  assert.equal(setPasses('ar-io.dev', detailed(27, 0, 27)), false); // the ar-io.dev set fails on its own gateway
+  assert.equal(setPasses('arweave.net', detailed(27, 27, 27)), false); // own gateway not checked: no pass
+  assert.equal(setPasses('turbo-gateway.com', { drift: [], gateways: { 'turbo-gateway.com': counts(0, 0) }, l1: counts(27) }), false); // 0/0 is not a pass
+  assert.equal(setPasses('turbo-gateway.com', { drift: [], gateways: { 'turbo-gateway.com': counts(27) } }), false); // no L1
+});
+
+test('7-day verdict under the rule of 2026-11-19: stored reports are re-read; the other gateway does not break a streak', () => {
+  // the stored pass is false (written under the earlier two-gateway rule) on the days ar-io.dev answered 503/504
+  const stored = (day, ario) => ({
+    day, ...FULL,
+    sets: {
+      'turbo-gateway.com': { ...detailed(27, ario, 27), pass: ario === 27, metadataBaseUri: TURBO_URI },
+      'ar-io.dev': { ...detailed(27, ario, 27), pass: ario === 27, metadataBaseUri: ARIO_URI },
+    },
+  });
+  let v = verdict(DAYS.map((d, i) => stored(d, i === 2 || i === 6 ? 0 : 27)));
+  assert.equal(entry(v, TURBO_URI).streak, 7);
+  assert.equal(entry(v, TURBO_URI).ready, true);
+  assert.equal(entry(v, ARIO_URI).streak, 0); // its own gateway missed on the last day
+  // a miss on the compiled set's own gateway still resets the streak
+  const r = stored(DAYS[3], 27);
+  r.sets['turbo-gateway.com'].gateways['turbo-gateway.com'] = counts(26);
+  v = verdict(DAYS.map((d, i) => (i === 3 ? r : stored(d, 27))));
+  assert.equal(entry(v, TURBO_URI).streak, 3);
+  // and so does a miss on L1
+  const l = stored(DAYS[5], 27);
+  l.sets['turbo-gateway.com'].l1 = counts(25);
+  v = verdict(DAYS.map((d, i) => (i === 5 ? l : stored(d, 27))));
+  assert.equal(entry(v, TURBO_URI).streak, 1);
 });
 
 test('runCheck flags a record whose base URIs are not the bases it checks', async () => {

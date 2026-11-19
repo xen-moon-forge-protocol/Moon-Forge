@@ -7,7 +7,9 @@
 #   mainnet  the permanent upload; needs confirm = PERMANENT and a green wording check (docs/WORDING.md section 4).
 #            Commit the run artifact's result.json as deployments/nft-arweave-final.json.
 #   check    gateway + Arweave L1 check of deployments/nft-arweave-final.json (also runs daily on the schedule).
-# METADATA_BASE_URI (constants.rs) is set at S2 only from a metadata set with 7 consecutive passing daily checks.
+# METADATA_BASE_URI (constants.rs) is set at S2 only from a metadata set with 7 consecutive passing daily checks. A set
+# passes a day with 27/27 on its own gateway (the one compiled) and 27/27 on Arweave L1 (rule of 2026-11-19, D-32);
+# the other gateway is still checked and reported as a warning, never a failure.
 # Actions are pinned to commit SHAs (version in the comment); runner image pinned; Node 22.
 name: NFT metadata to Arweave
 
@@ -164,6 +166,6 @@ jobs:
             out/check.txt
           if-no-files-found: ignore
           retention-days: 90
-      - name: Fail when no metadata set passed today
+      - name: Fail when no metadata set passed today (own gateway + Arweave L1; the other gateway only warns)
         if: steps.check.outputs.status != '0'
         run: exit 1

@@ -11,7 +11,8 @@
 //      image = https://G/A/<tier>/<variant>.webp -> manifest B_G. The JSON embeds its image gateway forever, so the
 //      gateway is chosen AFTER the 7-day check by picking the set: METADATA_BASE_URI = https://G/B_G/.
 //   4. result.json = the record (commit it as deployments/nft-arweave-final.json); a first serve check per set.
-// Then check-gateways.mjs runs daily: 27/27 per set on two gateways and on L1 for 7 consecutive days.
+// Then check-gateways.mjs runs daily: 27/27 per set on its own gateway and on L1 for 7 consecutive days (the other
+// gateway is reported as a warning; rule of 2026-11-19).
 //
 // Usage: node scripts/nft-metadata/upload-arweave.mjs <out-dir> [--dry-run] [--sandbox] [--images <manifest id>]
 //                                                     [--image-gateways turbo-gateway.com,ar-io.dev]
@@ -204,7 +205,7 @@ const record = {
   texts: 'final',
   images: { manifest: imagesManifest, manifestSha256: imagesManifestSha, reused, files: imageFiles },
   sets: [],
-  note: 'Pick ONE set after 7 consecutive passing days of check-gateways.mjs (27/27 on two gateways and on L1); METADATA_BASE_URI = its metadataBaseUri.',
+  note: 'Pick ONE set after 7 consecutive passing days of check-gateways.mjs (27/27 on its own gateway and on L1); METADATA_BASE_URI = its metadataBaseUri.',
 };
 const resultPath = path.join(OUT, 'result.json');
 const save = () => fs.writeFileSync(resultPath, JSON.stringify(record, null, 2));
