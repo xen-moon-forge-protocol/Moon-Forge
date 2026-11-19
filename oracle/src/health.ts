@@ -626,12 +626,13 @@ async function xenPriceChecks(prev: Snapshot | null) {
   next.xenPrice = prev?.xenPrice ?? {}; // kept as it was if this group cannot finish
   const files = publishedEpochFilesOf(EPOCHS_DIR);
   const probes: R.XenPriceProbe[] = [];
-  // one chain after the other: GeckoTerminal allows 30 requests a minute (pricing.ts paces them)
+  // one chain after the other: GeckoTerminal's public API now allows a burst of about 5 requests, then about 5 a minute
+  // (pricing.ts paces them and waits out a 429); 180 s per chain leaves room for one 429 wait on each of its 2 requests
   for (const chain of CHAINS.filter((c) => c.portal)) {
     const base = { chainId: chain.chainId, chain: chain.name };
     let gecko: string;
     try {
-      await withTimeout(xenMarketV3(chain), 90_000, "GeckoTerminal");
+      await withTimeout(xenMarketV3(chain), 180_000, "GeckoTerminal");
       probes.push({ ...base, source: "gecko", detail: "" });
       continue;
     } catch (e) {

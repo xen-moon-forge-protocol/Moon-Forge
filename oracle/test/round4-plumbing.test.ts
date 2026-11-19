@@ -11,7 +11,7 @@ import { CHAINS, ChainConfig } from "../src/config";
 import { EpochFile } from "../src/epoch";
 import { chunkedLogsV3, isRangeErrorV3 } from "../src/evm";
 import { assembleInputsV3, buildV3, fixtureSources, gateDecisionV3, isNoMarketErrorV3, gateHoldsV3, gateRecordOf, GateRecordV3, RecordedSourcesV3, sidecarKeysV3, sidecarSha256V3, SourcesV3, verifyPriceSidecarV3 } from "../src/flow-v3";
-import { CHAINLINK_QUOTE_FEEDS_V3, closesFromOhlcvV3, getJsonV3, poolFeeBpsV3, QUOTE_ALLOWLIST, quoteUsdDiffBpsV3, retryAfterMs, xenMarketOfV3 } from "../src/pricing";
+import { CHAINLINK_QUOTE_FEEDS_V3, closesFromOhlcvV3, getJsonV3, GT_429_MIN_WAIT_MS, GT_FAST_INTERVAL_MS, GT_SLOW_INTERVAL_MS, gtRetryWaitMs, poolFeeBpsV3, QUOTE_ALLOWLIST, quoteUsdDiffBpsV3, retryAfterMs, xenMarketOfV3 } from "../src/pricing";
 import { anomalyGateV3, EpochFileV3, EpochInputsV3, GATE_HOLD_SECONDS, sidecarFileV3, verifyAny } from "../src/rewards";
 import { parseCpmmPoolV3, tokenAmountV3, WXNT_MINT, xdexReadingFromV3, XDEX_POOL_V3 } from "../src/xdex-v3";
 
@@ -116,14 +116,58 @@ async function main() {
     let calls = 0;
     const fetcher = (async () => {
       calls++;
-      if (calls === 1) return { ok: false, status: 429, headers: { get: (h: string) => (h === "retry-after" ? "3" : null) } };
-      if (calls === 2) return { ok: false, status: 503, headers: { get: () => null } };
+      if (calls === 1) return { ok: false, status: 429, headers: { get: (h: string) => (h === "retry-after" ? "20" : null) } };
+      if (calls === 2) return { ok: false, status: 503, headers: { get: (h: string) => (h === "retry-after" ? "3" : null) } };
       return { ok: true, status: 200, json: async () => ({ fine: true }) };
     }) as unknown as typeof fetch;
-    const j = await getJsonV3("https://example.invalid/x", fetcher, async (ms) => void waits.push(ms));
+    const pace = { intervalMs: GT_FAST_INTERVAL_MS };
+    const j = await getJsonV3("https://example.invalid/x", fetcher, async (ms) => void waits.push(ms), { failures: 0 }, pace);
     assert.deepStrictEqual(j, { fine: true });
-    assert.deepStrictEqual(waits.slice(-2), [3_000, 10_000], "the server's 3 s, then the second backoff step");
-    await assert.rejects(getJsonV3("https://example.invalid/y", (async () => ({ ok: false, status: 404, headers: { get: () => null } })) as unknown as typeof fetch, async () => {}), /HTTP 404/);
+    assert.deepStrictEqual(waits.slice(-2), [20_000, 3_000], "the server's 20 s on a 429, then its 3 s on a 503");
+    await assert.rejects(getJsonV3("https://example.invalid/y", (async () => ({ ok: false, status: 404, headers: { get: () => null } })) as unknown as typeof fetch, async () => {}, { failures: 0 }, { intervalMs: GT_FAST_INTERVAL_MS }), /HTTP 404/);
+  });
+
+  await test("GeckoTerminal 2026-11-19: a 429 with 'Retry-After: 0' waits at least 15 s × the try and slows the pacing to 12.5 s for the run", async () => {
+    // the live API answers 429 with Retry-After: 0 once its burst (about 5 requests) is spent and refills about one request
+    // every 12 s: retrying at once (the old rule) failed all 4 tries in a row, so the health row saw 3 chains with no source
+    const pace = { intervalMs: GT_FAST_INTERVAL_MS };
+    assert.strictEqual(gtRetryWaitMs(503, null, 1, pace), 10_000, "a 5xx keeps the backoff");
+    assert.strictEqual(pace.intervalMs, GT_FAST_INTERVAL_MS, "a 5xx does not slow the pacing");
+    assert.strictEqual(gtRetryWaitMs(429, "0", 0, pace), GT_429_MIN_WAIT_MS);
+    assert.strictEqual(pace.intervalMs, GT_SLOW_INTERVAL_MS);
+    assert.strictEqual(gtRetryWaitMs(429, "0", 1, pace), 30_000);
+    assert.strictEqual(gtRetryWaitMs(429, null, 3, pace), 60_000, "at most 60 s");
+    assert.strictEqual(gtRetryWaitMs(429, "45", 0, pace), 45_000, "a longer Retry-After is kept");
+    // a token bucket like the live one: 5 requests, then one more per 12 s of the fake clock
+    let clock = 0;
+    let tokens = 5;
+    let last = 0;
+    const bucket = (async () => {
+      tokens = Math.min(5, tokens + (clock - last) / 12_000);
+      last = clock;
+      if (tokens < 1) return { ok: false, status: 429, headers: { get: (h: string) => (h === "retry-after" ? "0" : null) } };
+      tokens -= 1;
+      return { ok: true, status: 200, json: async () => ({ ok: true }) };
+    }) as unknown as typeof fetch;
+    const sleep = async (ms: number) => void (clock += ms);
+    const breaker = { failures: 0 };
+    const p2 = { intervalMs: GT_FAST_INTERVAL_MS };
+    // the health check's 10 requests (2 per chain, 5 chains), then 4 candle reads: every one answers
+    for (let n = 0; n < 14; n++) assert.deepStrictEqual(await getJsonV3(`https://example.invalid/${n}`, bucket, sleep, breaker, p2), { ok: true }, `request ${n}`);
+    assert.strictEqual(breaker.failures, 0);
+    assert.strictEqual(p2.intervalMs, GT_SLOW_INTERVAL_MS);
+    // a connection error ("fetch failed") is a failed try, retried after the backoff; 4 in a row throw it
+    let k = 0;
+    const flaky = (async () => {
+      if (k++ === 0) throw new TypeError("fetch failed");
+      return { ok: true, status: 200, json: async () => ({ ok: 2 }) };
+    }) as unknown as typeof fetch;
+    const w: number[] = [];
+    assert.deepStrictEqual(await getJsonV3("https://example.invalid/f", flaky, async (ms) => void w.push(ms), { failures: 0 }, { intervalMs: 0 }), { ok: 2 });
+    assert.deepStrictEqual(w.filter((x) => x > 0), [5_000]);
+    const b2 = { failures: 0 };
+    await assert.rejects(getJsonV3("https://example.invalid/g", (async () => { throw new TypeError("fetch failed"); }) as unknown as typeof fetch, async () => {}, b2, { intervalMs: 0 }), /fetch failed/);
+    assert.strictEqual(b2.failures, 1);
   });
 
   await test("the v3 market read: xenMarket's eligibility and spot, plus the price pool's age, quote token, its USD and its fee", () => {

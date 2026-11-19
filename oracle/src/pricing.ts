@@ -24,16 +24,44 @@ import { withFailover } from "./evm";
 
 const GT = "https://api.geckoterminal.com/api/v2";
 let lastCall = 0;
-async function getJson(url: string): Promise<any> {
-  // GeckoTerminal public API: 30 requests/minute
-  const wait = lastCall + 2100 - Date.now();
-  if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+/**
+ * GeckoTerminal's public API, measured 2026-11-19 (live probe, one address): a burst of about 5 requests, then about one
+ * every 12 s (about 5 a minute, no longer the documented 30); a 429 carries "Retry-After: 0", which is wrong (an
+ * immediate retry is refused again). So the pacing starts at 2.1 s (the burst) and drops to GT_SLOW_INTERVAL_MS for the
+ * rest of the process after the first 429, and a 429 waits at least GT_429_MIN_WAIT_MS × the try number.
+ */
+export interface GtPaceV3 {
+  intervalMs: number;
+}
+export const GT_FAST_INTERVAL_MS = 2_100;
+export const GT_SLOW_INTERVAL_MS = 12_500;
+export const GT_429_MIN_WAIT_MS = 15_000;
+/** the process-wide pacing of every GeckoTerminal request (v2 and v3 readers) */
+export const GT_PACE: GtPaceV3 = { intervalMs: GT_FAST_INTERVAL_MS };
+/**
+ * The wait after the failed try `i` (0-based) answered `status`: a 5xx keeps the server's Retry-After or the backoff
+ * 5 s × (i + 1); a 429 waits the longer of the server's Retry-After and GT_429_MIN_WAIT_MS × (i + 1), at most 60 s, and
+ * slows `pace` to GT_SLOW_INTERVAL_MS.
+ */
+export function gtRetryWaitMs(status: number, retryAfter: string | null, i: number, pace: GtPaceV3 = GT_PACE): number {
+  const backoff = 5000 * (i + 1);
+  if (status !== 429) return retryAfterMs(retryAfter, backoff);
+  pace.intervalMs = Math.max(pace.intervalMs, GT_SLOW_INTERVAL_MS);
+  return Math.min(60_000, Math.max(retryAfterMs(retryAfter, 0), GT_429_MIN_WAIT_MS * (i + 1)));
+}
+async function gtPaced(sleep: (ms: number) => Promise<unknown>, pace: GtPaceV3): Promise<void> {
+  const wait = lastCall + pace.intervalMs - Date.now();
+  if (wait > 0) await sleep(wait);
   lastCall = Date.now();
+}
+async function getJson(url: string): Promise<any> {
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  await gtPaced(sleep, GT_PACE);
   for (let i = 0; i < 4; i++) {
     const r = await fetch(url, { headers: { accept: "application/json" } });
     if (r.ok) return r.json();
     if (r.status !== 429 && r.status < 500) throw new Error(`${url} -> HTTP ${r.status}`);
-    await new Promise((res) => setTimeout(res, 5000 * (i + 1)));
+    await sleep(gtRetryWaitMs(r.status, r.headers?.get?.("retry-after") ?? null, i));
   }
   throw new Error(`${url} -> unavailable`);
 }
@@ -272,28 +300,35 @@ export async function xntHourlyClosesV3(hourStart: number, sink?: (r: RawCandles
 
 // ── v3 (round 4): the market read with what D-13, A5-c and the kit's route need; v2 above is unchanged ─────────
 /**
- * T1-9 / O-22: GeckoTerminal with its Retry-After honoured. A 429 (or a 5xx) waits what the server asks (seconds or an
- * HTTP date, at most 60 s), else the backoff of getJson; the same 30-requests-a-minute pacing. v3 readers only.
+ * T1-9 / O-22: GeckoTerminal with its Retry-After honoured. A 5xx waits what the server asks (seconds or an HTTP date,
+ * at most 60 s), else the backoff of getJson; a 429 waits at least GT_429_MIN_WAIT_MS × the try and slows the pacing
+ * (gtRetryWaitMs: the server's "Retry-After: 0" is not trusted). The same pacing as getJson. v3 readers only.
  */
-export async function getJsonV3(url: string, fetcher: typeof fetch = fetch, sleep = (ms: number) => new Promise((r) => setTimeout(r, ms)), breaker: GtBreakerV3 = GT_BREAKER): Promise<any> {
+export async function getJsonV3(url: string, fetcher: typeof fetch = fetch, sleep = (ms: number) => new Promise((r) => setTimeout(r, ms)), breaker: GtBreakerV3 = GT_BREAKER, pace: GtPaceV3 = GT_PACE): Promise<any> {
   // FEATURE-MATRIX gap 3: once GeckoTerminal failed GT_BREAKER_LIMIT requests in a row, this process stops asking it, so
   // an outage costs minutes, not the step's whole budget; the callers then use the on-chain market (xen-onchain-v3.ts)
   // or the engine's existing fallback prices (no candle: the build spot / the build XNT price)
   if (breaker.failures >= GT_BREAKER_LIMIT) throw new Error(`${url} -> not asked: GeckoTerminal failed ${breaker.failures} requests in a row in this run`);
-  const wait = lastCall + 2100 - Date.now();
-  if (wait > 0) await sleep(wait);
-  lastCall = Date.now();
+  await gtPaced(sleep, pace);
   try {
     for (let i = 0; i < 4; i++) {
-      // a request that hangs counts as a failed try (fetch itself has no limit)
-      const r = await fetcher(url, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(GT_TIMEOUT_MS) });
+      // a request that hangs counts as a failed try (fetch itself has no limit); so does a connection error ("fetch
+      // failed", seen 2026-11-19 on one request out of ten): it is retried after the backoff, the last one is thrown
+      let r: Response;
+      try {
+        r = await fetcher(url, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(GT_TIMEOUT_MS) });
+      } catch (net) {
+        if (i === 3) throw net;
+        await sleep(5000 * (i + 1));
+        continue;
+      }
       if (r.ok) {
         const j = await r.json();
         breaker.failures = 0;
         return j;
       }
       if (r.status !== 429 && r.status < 500) throw new Error(`${url} -> HTTP ${r.status}`);
-      await sleep(retryAfterMs(r.headers?.get?.("retry-after") ?? null, 5000 * (i + 1)));
+      await sleep(gtRetryWaitMs(r.status, r.headers?.get?.("retry-after") ?? null, i, pace));
     }
     throw new Error(`${url} -> unavailable`);
   } catch (e) {
