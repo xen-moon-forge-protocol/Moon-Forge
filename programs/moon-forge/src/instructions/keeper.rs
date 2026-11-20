@@ -1390,7 +1390,7 @@ mod keeper_tests {
         #[cfg(not(feature = "localnet"))]
         {
             assert_eq!(KEEPER_OPEN_TS, 1_797_379_200);
-            assert_eq!(KEEPER_OPEN_TS, PRICE_LAUNCH_TS + 21 * 86_400); // PRICE_LAUNCH_TS (2026-11-25) + 21 days
+            assert_eq!(KEEPER_OPEN_TS, PRICE_LAUNCH_TS + 14 * 86_400); // PRICE_LAUNCH_TS (2026-12-02) + 14 days
             assert_eq!(KEEPER_OPEN_TS, 1_794_960_000 + KEEPER_DEAD_DELAY); // 2026-11-18 00:00 UTC + 28 days
         }
         let stranger = Pubkey::new_unique();

@@ -53,7 +53,9 @@ build() { # $1 = tree, $2 = log; uses its own target dir inside the tree's base
      --sbf-out-dir "$(dirname "$1")/deploy" "${locked[@]}") >"$2" 2>&1
 }
 THROWAWAY=0
-if [ "${REPRO_FORCE_THROWAWAY:-0}" = 1 ] || grep -qE 'pubkey!\("11111111111111111111111111111111"\)|ARWEAVE_MANIFEST_ID_TBD' "$A/programs/moon-forge/src/constants.rs"; then
+# (only the definitions count: the localnet SEAT_REFUND_INITIAL is the default key on purpose, and a unit test quotes
+# the Arweave placeholder to show that the URI guard refuses it)
+if [ "${REPRO_FORCE_THROWAWAY:-0}" = 1 ] || grep -qE '^pub const (INITIAL_KEEPER|SEAT_COLD_INITIAL): Pubkey = pubkey!\("11111111111111111111111111111111"\);|^pub const METADATA_BASE_URI: &str = "[^"]*_TBD' "$A/programs/moon-forge/src/constants.rs"; then
   THROWAWAY=1
   solana-keygen new --no-bip39-passphrase --silent --force -o "$BASE_A/k.json" >/dev/null
   solana-keygen new --no-bip39-passphrase --silent --force -o "$BASE_A/c.json" >/dev/null
@@ -88,7 +90,9 @@ LOCK_SRC=$(sed 's/\r$//' "$SRC/Cargo.lock" | sha256sum | cut -d' ' -f1)
   if command -v solana-verify >/dev/null; then
     echo "solana-verify $(solana-verify --version 2>/dev/null | head -1): get-executable-hash A $(solana-verify get-executable-hash "$SO_A" 2>/dev/null | tail -1), B $(solana-verify get-executable-hash "$SO_B" 2>/dev/null | tail -1)"
   else echo "solana-verify not on PATH: executable hash computed as the zero-stripped sha256 (the same definition)"; fi
-  [ "$THROWAWAY" = 1 ] && echo "values: throwaway substitution (placeholders still in constants.rs): hashes are NOT the S2 hashes"
+  # (an if, not `[ ] && echo`: a false test as the group's last command would fail the pipeline under pipefail)
+  if [ "$THROWAWAY" = 1 ]; then echo "values: throwaway substitution (placeholders still in constants.rs): hashes are NOT the S2 hashes"
+  else echo "values: the build-time values of constants.rs as they are (no substitution)"; fi
 } | tee "$OUT/repro.txt"
 [ "$LOCK_A" = "$LOCK_B" ] || { echo "the two builds resolved different Cargo.lock files" | tee -a "$OUT/repro.txt"; exit 1; }
 if [ "${REPRO_KEEP:-0}" = 1 ]; then cp "$SO_A" "$OUT/moon_forge.a.so"; cp "$SO_B" "$OUT/moon_forge.b.so"; fi

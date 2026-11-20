@@ -75,6 +75,9 @@ DK="$WORK/usb/deploy-key.json"; PAYEE="$WORK/usb/payee.json"
 solana-keygen new --no-bip39-passphrase --silent --force -o "$DK"; solana-keygen new --no-bip39-passphrase --silent --force -o "$PAYEE"
 DK_PUB=$(solana-keygen pubkey "$DK"); PAYEE_PUB=$(solana-keygen pubkey "$PAYEE")
 echo "keys: deploy wallet $ARCH_PUB, DEPLOY_KEY $DK_PUB, payee $PAYEE_PUB, INITIAL_KEEPER $KEEPER_PUB, seat cold $COLD_PUB, seat refund $ERASED (the pool)"
+# METADATA_BASE_URI of the source under test (not gated by the localnet feature, so the localnet build carries it too)
+MB=$(sed -n 's/^pub const METADATA_BASE_URI: &str = "\([^"]*\)";$/\1/p' programs/moon-forge/src/constants.rs)
+[ -n "$MB" ] || { echo "METADATA_BASE_URI not found in programs/moon-forge/src/constants.rs" >&2; exit 1; }
 
 # --- validator with the old binary ----------------------------------------------------------------------------------
 mkdir -p "$WORK/obs"; cp tests/fixtures/make-observation.cjs "$WORK/obs/"; [ -f "$WORK/old-src/tests/fixtures/make-observation.cjs" ] && cp "$WORK/old-src/tests/fixtures/make-observation.cjs" "$WORK/obs/"
@@ -110,7 +113,7 @@ expect 1 "census s5 refuses another upgrade authority" census-s5-auth.log $U/cen
 expect 1 "census s5 refuses a short INITIAL_KEEPER balance" census-s5-keeper.log $U/census.mjs "${C5[@]}" --min-keeper 30
 has "census s5: the INITIAL_KEEPER needs only its fees (default 0.1 XNT, F1-b)" census-s5.log 'ok   INITIAL_KEEPER balance: [1-9A-HJ-NP-Za-km-z]+: [0-9.]+ XNT >= 0\.100000000 XNT'
 snap "$WORK/run/snap-s5.json"
-S7=(--rpc "$LOCAL" --deploy-wallet "$ARCH_PUB" --payee "$PAYEE_PUB" --keeper "$KEEPER_PUB" --seat-cold "$COLD_PUB" --seat-refund "$ERASED" --deploy-key "$DK_PUB" --elf "$NEW_SO" --legacy-deploy-slot "$OLD_SLOT" --metadata-base https://arweave.net/ARWEAVE_MANIFEST_ID_TBD/ --pins "$WORK/run/health-pins.json" --localnet-oracle)
+S7=(--rpc "$LOCAL" --deploy-wallet "$ARCH_PUB" --payee "$PAYEE_PUB" --keeper "$KEEPER_PUB" --seat-cold "$COLD_PUB" --seat-refund "$ERASED" --deploy-key "$DK_PUB" --elf "$NEW_SO" --legacy-deploy-slot "$OLD_SLOT" --metadata-base "$MB" --pins "$WORK/run/health-pins.json" --localnet-oracle)
 cp oracle/src/health-pins.json "$WORK/run/health-pins.json"
 expect 3 "s7 refuses on the old binary (preflight), sends nothing" s7-before-s6.log $U/s7.mjs "${S7[@]}" --deploy-wallet-key "$ARCH" --payee-key "$PAYEE" --send
 has "s7 on the old binary: refused by the preflight" s7-before-s6.log 'S6 has not landed'
@@ -202,7 +205,7 @@ has "s7: pins written" s7-send.log 'written .*health-pins.json'
 [ -z "$(solana account -u "$LOCAL" Hb8Er2uoJKEWDgkJPncFQa5sVidqr34NEatqEDqnhj85 --output json 2>/dev/null)" ] && { PASS=$((PASS+1)); echo "  ok   no HouseKeeper account after S7"; } || { FAILN=$((FAILN+1)); echo "  FAIL a HouseKeeper exists after S7"; }
 expect 0 "s7 --send again: every step is skipped (idempotent)" s7-again.log $U/s7.mjs "${S7[@]}" --deploy-wallet-key "$ARCH" --payee-key "$PAYEE" --send
 [ "$(grep -c 'done already' "$LOG/s7-again.log")" = 5 ] && { PASS=$((PASS+1)); echo "  ok   five steps report done already"; } || { FAILN=$((FAILN+1)); echo "  FAIL s7 re-run did not skip all five steps"; }
-expect 0 "census s7 green (payee, Royalties locked, seat, extra, no HouseKeeper: F1-b)" census-s7.log $U/census.mjs --stage s7 "${CK[@]}" --payee "$PAYEE_PUB" --metadata-base https://arweave.net/ARWEAVE_MANIFEST_ID_TBD/ --out "$WORK/run/census-s7.json"
+expect 0 "census s7 green (payee, Royalties locked, seat, extra, no HouseKeeper: F1-b)" census-s7.log $U/census.mjs --stage s7 "${CK[@]}" --payee "$PAYEE_PUB" --metadata-base "$MB" --out "$WORK/run/census-s7.json"
 has "census s7: HouseKeeper not armed (F1-b)" census-s7.log 'ok   HouseKeeper not armed \(F1-b\)'
 expect 1 "census s7 --keeper-armed is red while no keeper is armed" census-s7-armed.log $U/census.mjs --stage s7 "${CK[@]}" --payee "$PAYEE_PUB" --keeper-armed
 expect 0 "pins s7 dry: the file already holds the S7 pins" pins-s7.log $U/pins.mjs --stage s7 --rpc "$LOCAL" --deploy-key "$DK_PUB" --payee "$PAYEE_PUB" --seat-cold "$COLD_PUB" --seat-refund "$ERASED" --keeper "$KEEPER_PUB" --pins "$WORK/run/health-pins.json"

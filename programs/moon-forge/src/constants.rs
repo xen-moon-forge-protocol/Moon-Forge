@@ -15,10 +15,10 @@ pub const ARCHITECT: Pubkey = pubkey!("7PuG8ELKXzvZqVLawFnmjDJqq4KEyRhssKQEq7aQM
 /// and hand its role to a new key (two-step). It cannot move funds.
 #[cfg(not(feature = "localnet"))]
 pub const INITIAL_ORACLE: Pubkey = pubkey!("J5CU45Didfq7ng9JHXyxYqN7TwAGjMgEyhUcrV7Aixba");
-/// First house keeper (hash-chain randomness). Generated on the keeper VPS, NEVER the GitHub KEEPER_PRIVATE_KEY (K-4). OD-25.
-/// Placeholder until OD-25 is filled: the mainnet compile guard below refuses Pubkey::default().
+/// First house keeper (hash-chain randomness): the key the project's keeper runs with (K-4 default, OD-25; decision
+/// sheet section 5). Filled at S2; the mainnet compile guards below refuse the zero placeholder and a published test key.
 #[cfg(not(feature = "localnet"))]
-pub const INITIAL_KEEPER: Pubkey = pubkey!("11111111111111111111111111111111");
+pub const INITIAL_KEEPER: Pubkey = pubkey!("XjMMmtbDN1zFiVoihyRjwdFXiyxXX5wegNWeeSQ2YFN");
 
 // Test-only identities (keys in tests/fixtures, worthless). Used ONLY by `--features localnet`.
 #[cfg(feature = "localnet")]
@@ -31,12 +31,16 @@ pub const INITIAL_KEEPER: Pubkey = pubkey!("HUvv7t99FhH7oxgAwjiBweqQGA7V6fpsuF4U
 
 /// Cold key of the first oracle seat (offline, never on GitHub). MANDATORY on mainnet (S-2): the guard refuses Pubkey::default(). OD-16.
 #[cfg(not(feature = "localnet"))]
-pub const SEAT_COLD_INITIAL: Pubkey = pubkey!("11111111111111111111111111111111");
+pub const SEAT_COLD_INITIAL: Pubkey = pubkey!("2jYC9zxXL8zPXi5J3Yfu3irVEHK3PpBwJGc8FtfCDXq1");
 /// tests/fixtures/test-cold.json (worthless). init_seat takes no arguments, so the localnet seat needs a real cold
 /// key for the cold-only paths (void_epoch → rotate_hot, resign_seat, S-2) before any take_seat (theft §7).
 #[cfg(feature = "localnet")]
 pub const SEAT_COLD_INITIAL: Pubkey = pubkey!("36qXRZdsTVnsmRVjY6j8vnZqu12ePSNh7uuQ9tw1u81q");
-/// Where the first seat's bond goes on a graceful resign. Pubkey::default() = the reward pool. OD-20.
+/// Where the first seat's bond goes on a graceful resign. Pubkey::default() = the reward pool. OD-20: the cold key.
+#[cfg(not(feature = "localnet"))]
+pub const SEAT_REFUND_INITIAL: Pubkey = pubkey!("2jYC9zxXL8zPXi5J3Yfu3irVEHK3PpBwJGc8FtfCDXq1");
+/// Localnet: the reward pool (the local suites resign the seat into the pool).
+#[cfg(feature = "localnet")]
 pub const SEAT_REFUND_INITIAL: Pubkey = pubkey!("11111111111111111111111111111111");
 
 // === FINAL-UPGRADE BLOCKERS === a mainnet SBF build fails until OD-25 (keeper) and OD-16 (cold key) are filled.
@@ -475,9 +479,9 @@ pub const MAX_PRICE_MULTIPLE: u64 = 10;
 /// walk ×50/51 from 100 XNT leaves 3,004,481,921 lamports after 177 steps and reaches the 3 XNT minimum at 178;
 /// LB-4/ECO-8). 180 keeps a margin; Cosmic/Solar/Void need 62.
 pub const PRICE_MAX_STEPS: u64 = 180;
-/// Decay start for never-forged tiers: the planned S7 date + 7 days (OD-23). 2026-11-25 00:00 UTC (S7 on 2026-11-18).
+/// Decay start for never-forged tiers: the planned S7 date + 7 days (OD-23). 2026-12-02 00:00 UTC (S7 on 2026-11-25).
 #[cfg(not(feature = "localnet"))]
-pub const PRICE_LAUNCH_TS: i64 = 1_795_564_800;
+pub const PRICE_LAUNCH_TS: i64 = 1_796_169_600;
 /// Localnet: DAY = 1 s on a wall-clock validator, so a real date would put every never-forged tier at its floor
 /// from day one. i64::MAX = 0 decay periods: a never-forged tier sits at base until its first forge (B-7 is
 /// deterministic). Decay from launch is covered by the unit tests, which build with the mainnet constants.
@@ -560,12 +564,11 @@ pub const MARKET_MAX_LISTING: i64 = 90 * DAY;
 const _: () = assert!(MARKET_ROYALTY_BPS + MARKET_POOL_BPS < BPS);
 
 // ─── Metadata ───────────────────────────────────────────────────────────────
-/// === FINAL-UPGRADE BLOCKER === Arweave path manifest with collection.json, lunar_dust/0..5.json,
-/// cosmic_shard/0..2.json, solar_core/0..1.json, void_anomaly/0.json (13 paths, final texts, no boost promise).
-/// Replace the placeholder with the metadataBaseUri of ONE set in deployments/nft-arweave-final.json, only after 7
-/// consecutive passing UTC days of scripts/nft-metadata/check-gateways.mjs (27/27 on turbo-gateway.com, ar-io.dev and
-/// Arweave L1; runbook S2). Never manifest rdVTds….
-pub const METADATA_BASE_URI: &str = "https://arweave.net/ARWEAVE_MANIFEST_ID_TBD/";
+/// Arweave path manifest with collection.json, lunar_dust/0..5.json, cosmic_shard/0..2.json, solar_core/0..1.json,
+/// void_anomaly/0.json (13 paths, final texts, no boost promise). Set at S2 (D-32): the metadataBaseUri of the
+/// turbo-gateway.com set of deployments/nft-arweave-final.json, after 7 consecutive passing UTC days of
+/// scripts/nft-metadata/check-gateways.mjs (27/27 on the set's own gateway and on Arweave L1; rule of 2026-11-19).
+pub const METADATA_BASE_URI: &str = "https://turbo-gateway.com/MiZZ0Y4GM4YLtuYLPLfT8zGYJCyUQEKuBhWfm2eR6FU/";
 #[allow(dead_code)] // used by the mainnet compile guards and the unit tests
 pub(crate) const fn mf_contains(s: &[u8], p: &[u8]) -> bool {
     let mut i = 0;
@@ -653,7 +656,7 @@ mod constant_tests {
         assert_eq!(SEAT_WALK_MAX, 5);
         assert_eq!(DROP_BACKING, 5 * XNT);
         #[cfg(not(feature = "localnet"))]
-        assert_eq!(PRICE_LAUNCH_TS, 1_795_564_800); // 2026-11-25 00:00 UTC
+        assert_eq!(PRICE_LAUNCH_TS, 1_796_169_600); // 2026-12-02 00:00 UTC
         assert_eq!(ARTIFACT_WEEKLY_CHIPS, [0, 0, 0, 0]);
     }
 
@@ -661,7 +664,9 @@ mod constant_tests {
     fn uri_guard_accepts_a_manifest_and_rejects_the_placeholder() {
         assert!(mf_uri_is_final(b"https://arweave.net/abcdefghijklmnopqrstuvwxyz0123456789ABCDE-_/"));
         assert!(mf_uri_is_final(b"https://ar-io.net/abcdefghijklmnopqrstuvwxyz0123456789ABCDE-_/"));
-        assert!(!mf_uri_is_final(METADATA_BASE_URI.as_bytes())); // the placeholder
+        assert!(!mf_uri_is_final(b"https://arweave.net/ARWEAVE_MANIFEST_ID_TBD/")); // the placeholder
+        assert!(mf_uri_is_final(METADATA_BASE_URI.as_bytes())); // the S2 value
+        assert_eq!(METADATA_BASE_URI, "https://turbo-gateway.com/MiZZ0Y4GM4YLtuYLPLfT8zGYJCyUQEKuBhWfm2eR6FU/"); // D-32
         assert!(!mf_uri_is_final(b"https://arweave.net/abcdefghijklmnopqrstuvwxyz0123456789ABCDE-/")); // 42 chars
         assert!(!mf_uri_is_final(b"https://arweave.net/abcdefghijklmnopqrstuvwxyz0123456789ABCDE-_")); // no trailing /
         assert!(!mf_uri_is_final(b"http://arweave.net/abcdefghijklmnopqrstuvwxyz0123456789ABCDE-_/")); // not https
@@ -673,7 +678,15 @@ mod constant_tests {
     #[test]
     fn pubkey_guard_predicate() {
         #[cfg(not(feature = "localnet"))]
-        assert!(mf_pk_eq(&SEAT_COLD_INITIAL, &Pubkey::default())); // OD-16 placeholder until S2
+        {
+            // the S2 values (decision sheet section 5; sign-off section 1)
+            assert!(!mf_pk_eq(&SEAT_COLD_INITIAL, &Pubkey::default()) && !mf_pk_eq(&INITIAL_KEEPER, &Pubkey::default()));
+            assert!(mf_pk_eq(&SEAT_COLD_INITIAL, &pubkey!("2jYC9zxXL8zPXi5J3Yfu3irVEHK3PpBwJGc8FtfCDXq1"))); // OD-16
+            assert!(mf_pk_eq(&SEAT_REFUND_INITIAL, &SEAT_COLD_INITIAL)); // OD-20: the cold key
+            assert!(mf_pk_eq(&INITIAL_KEEPER, &pubkey!("XjMMmtbDN1zFiVoihyRjwdFXiyxXX5wegNWeeSQ2YFN"))); // K-4 / OD-25
+        }
+        #[cfg(feature = "localnet")]
+        assert!(mf_pk_eq(&SEAT_REFUND_INITIAL, &Pubkey::default())); // localnet: the reward pool
         assert!(!mf_pk_eq(&INITIAL_ORACLE, &ARCHITECT));
         assert!(mf_pk_eq(&MPL_CORE_ID, &MPL_CORE_ID));
     }

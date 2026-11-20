@@ -17,9 +17,9 @@ instructions as 1.0.0.
   does it add that ProgramData account as the one remaining account, so the program pays the floor without the Core
   burn that can no longer run. With Core working nothing changes. The result gains `coreHatch` (true when the hatch
   was used). `test/unit/v3-methods.test.mjs` covers both reads and the rule.
-- `PRICE_LAUNCH_TS` (`rules-v3.mjs`) is 1,795,564,800 (2026-11-25 00:00 UTC), the value of the reviewed program
-  source, set for the 2026-11-18 window; it follows the build commit, which sets 1,796,169,600 (2026-12-02 00:00 UTC) for
-  the window of 2026-11-25 (schedule change of 2026-11-14).
+- `PRICE_LAUNCH_TS` (`rules-v3.mjs`) is 1,796,169,600 (2026-12-02 00:00 UTC), the value of the build commit (tag
+  `program-2026-11-25`) for the window of 2026-11-25 (schedule change of 2026-11-14); the reviewed program source held
+  1,795,564,800 (2026-11-25 00:00 UTC), set for the 2026-11-18 window.
 - The bundled upgraded IDL is unchanged (sha256 `9617cd5e…a72f`): the amended program adds no IDL account, argument or
   error code.
 

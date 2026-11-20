@@ -125,6 +125,15 @@ if (cmd === 'guard') {
   const col = await conn.getAccountInfo(pda('collection'));
   if (col) await expectSim(conn, 'lock_collection_royalties simulated (config.architect)', await program.methods.lockCollectionRoyalties().accountsPartial({ config, collection: pda('collection'), artifactAuthority: pda('artifact_authority'), architect, coreProgram: CORE, systemProgram: SystemProgram.programId }).instruction(), architect, 'ok');
   else ok('no Core collection on mainnet yet: lock_collection_royalties needs init_artifacts first (skipped)');
+  // S7 step 1: refresh_collection_uri is permissionless -> sent; the collection then points at METADATA_BASE_URI
+  // (read from constants.rs, the value compiled into this build) + collection.json
+  if (col) {
+    const base = /pub const METADATA_BASE_URI: &str = "([^"]*)";/.exec(fs.readFileSync(path.join(here, '../programs/moon-forge/src/constants.rs'), 'utf8'))?.[1];
+    await program.methods.refreshCollectionUri().accountsPartial({ config, collection: pda('collection'), artifactAuthority: pda('artifact_authority'), payer, coreProgram: CORE, systemProgram: SystemProgram.programId }).rpc();
+    const after = await conn.getAccountInfo(pda('collection'));
+    const want = Buffer.from(`${base}collection.json`);
+    (base && after && after.data.includes(want) ? ok : bad)(`refresh_collection_uri sent: the collection URI is ${base ? `${base}collection.json` : '(METADATA_BASE_URI not found in constants.rs)'} (${col.data.length} -> ${after ? after.data.length : '-'} B)`);
+  }
   await program.methods.initSeat().accounts({ payer }).rpc(); ok('init_seat sent');
   await program.methods.initExtra().accounts({ payer }).rpc(); ok('init_extra sent');
   // dry void on the newest epoch: HoldOver, or BondTooSmall / SeatMissing when still inside its hold (then 6.1's hold case is live)
@@ -135,16 +144,25 @@ if (cmd === 'guard') {
   const keeperFile = process.env.FORK_KEEPER_KEY || path.join(here, 'fixtures/test-keeper.json');
   const so = fs.readFileSync(path.join(dir, 'deployed.so'));
   const keeper = kp(keeperFile);
-  if (keyChunks(so, keeper.publicKey) === 4) {
+  const armed = keyChunks(so, keeper.publicKey) === 4;
+  if (armed) {
     await conn.confirmTransaction(await conn.requestAirdrop(keeper.publicKey, 30e9), 'confirmed');
     const kprog = new anchor.Program(NEW_IDL, new anchor.AnchorProvider(conn, new anchor.Wallet(keeper), { commitment: 'confirmed' }));
     await kprog.methods.armKeeper(Array(32).fill(9), new anchor.BN(1_000_000), new anchor.BN(20e9)).accounts({ keeper: keeper.publicKey }).rpc();
     ok('arm_keeper sent by the throwaway INITIAL_KEEPER (20 XNT bond)');
-  } else ok('arm_keeper: INITIAL_KEEPER is a real key (needs the VPS key): not sent');
-  for (const [name, k] of [['OracleSeat', pda('oracle_seat')], ['ExtraState', pda('extra_state')], ['extra_vault', pda('extra_vault')], ['HouseKeeper', pda('house_keeper')]]) {
+  } else ok('arm_keeper: INITIAL_KEEPER is a real key, not armed at S7 (F1-b): not sent');
+  for (const [name, k] of [['OracleSeat', pda('oracle_seat')], ['ExtraState', pda('extra_state')], ['extra_vault', pda('extra_vault')]]) {
     const a = await conn.getAccountInfo(k);
     (a ? ok : bad)(`census: ${name} ${k.toBase58()} ${a ? `${a.data.length} B, ${a.lamports} lamports` : 'missing'}`);
   }
+  // init_seat wrote the compiled-in SEAT_COLD_INITIAL / SEAT_REFUND_INITIAL (the default key = the reward pool)
+  const seat = await program.account.oracleSeat.fetch(pda('oracle_seat'));
+  (keyChunks(so, seat.cold) === 4 ? ok : bad)(`seat cold key ${seat.cold.toBase58()} (compiled in)`);
+  (seat.refund.equals(PublicKey.default) || keyChunks(so, seat.refund) === 4 ? ok : bad)(`seat refund key ${seat.refund.toBase58()}${seat.refund.equals(PublicKey.default) ? ' (the reward pool)' : ' (compiled in)'}`);
+  // the HouseKeeper exists only after arm_keeper: present when this run armed it, absent otherwise (F1-b: no arm at S7)
+  const hk = await conn.getAccountInfo(pda('house_keeper'));
+  if (armed) (hk ? ok : bad)(`census: HouseKeeper ${pda('house_keeper').toBase58()} ${hk ? `${hk.data.length} B, ${hk.lamports} lamports` : 'missing'}`);
+  else (hk ? bad : ok)(`census: no HouseKeeper ${hk ? `(found ${pda('house_keeper').toBase58()}, ${hk.data.length} B)` : '(not armed at S7, F1-b)'}`);
   // informational: which cloned accounts the first-run steps wrote (the upgrade itself changed none, checked above)
   for (const k of Object.keys(census)) {
     const a = await conn.getAccountInfo(new PublicKey(k)); const s = snap(k);

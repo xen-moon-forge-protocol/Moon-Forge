@@ -42,6 +42,13 @@ solana program set-upgrade-authority 57UE1U1t23ztg2noLp8pcpGW1B1Xw25rLH6ra9Mchea
 
 Until then, treat the program as upgradeable: whoever holds that key can replace the code, including fees and vault logic. The Transparency page reads the current authority directly from the chain.
 
+**The announced hash of the final upgrade (S2).** The build commit is the commit tagged `program-2026-11-25` ([docs/UPGRADE-2026-11.md, section 2](docs/UPGRADE-2026-11.md#2-source-binary-and-how-to-check-the-hash), with the rebuild procedure): `target/deploy/moon_forge.so`, 1,402,408 bytes, sha256 `4be7e34db410c416a3f97f97896e331c6eabf9ed2ccbbc195fc61fbcce6199b5`, executable hash `802f5769158e5f5198c77abdc66ef45bf7ec7ac40c746575013026852cf61800`. From the upgrade (planned Wednesday 2026-11-25, 16:00–20:00 UTC) to the freeze, the upgrade authority and the IDL authority are the deploy key `DGeGqSjsdWK385DmFYmy2ZKpoebEur3ZQrSiVPn6Ah7X` (OD-32). After the deploy, anyone can check both:
+
+```bash
+solana-verify get-program-hash -u https://rpc.mainnet.x1.xyz 57UE1U1t23ztg2noLp8pcpGW1B1Xw25rLH6ra9Mchea9   # = the executable hash above
+solana program show 57UE1U1t23ztg2noLp8pcpGW1B1Xw25rLH6ra9Mchea9 -u https://rpc.mainnet.x1.xyz            # Authority: the deploy key above, until the freeze
+```
+
 **Custody.** The upgrade key is held by the anonymous operator: it is never stored in GitHub or in its secrets, so no scheduled run ever sees it; it is used only to sign the announced final upgrade and the freeze; and from the final upgrade to the freeze the authority is a new deploy key, kept offline, never in GitHub. If it were lost before the freeze, nobody could upgrade or burn the authority: the program would stay as deployed, with an authority nobody holds. The oracle and keeper keys are separate hot keys kept as repository secrets; they can be rotated (two-step `propose-oracle` / `accept-oracle` for the oracle; the keeper is permissionless).
 
 ## What depends on GitHub
