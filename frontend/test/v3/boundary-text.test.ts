@@ -30,8 +30,8 @@ describe('C-14: the boundary texts', () => {
         expect(t.rest).toContain('keep their own time and wait for the first epoch built under the v3 rules');
         expect(t.rest).toContain('no epoch under the current rules pays them');
     });
-    it('is not set today (the site behaves as the live release)', () => {
-        expect(V3_BOUNDARY).toBeNull();
+    it('is announced (2026-11-20): the last v2 epoch planned for 2026-11-22, the release that names it for 2026-11-23 06:00 UTC', () => {
+        expect(V3_BOUNDARY).toEqual({ date: '2026-11-22', lastV2PublishTx: null, releaseUtc: '2026-11-23 06:00' });
     });
 });
 

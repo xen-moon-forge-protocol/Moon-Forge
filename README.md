@@ -42,6 +42,8 @@ No token, zero fee on the burn path, no payout promised. The plain guide, with w
 
 ## Interim notice (2026-10-22)
 
+**Rules boundary (notice of 2026-11-20).** The last epoch under the current (v2) reward rules is planned to be published on Sunday 2026-11-22. A burn made after its publish transaction is never paid under the v2 rules: it keeps its own time and is paid under the v3 rules by the first epoch built under them, planned for Sunday 2026-11-29 (later, in the same order, if the final upgrade is late). From Monday 2026-11-23 06:00 UTC the oracle builds no v2 epoch (`oracle/src/flow-v3.ts`, `V2_BOUNDARY_TS_DEFAULT`). From 00:00 UTC on 2026-11-22 the site's Forge does not offer new burns; a site release names the last v2 publish transaction (planned for 2026-11-23 06:00 UTC) and publishes the v3 rules in full, and the Forge offers burns again, with a quote, once the upgraded program and its hourly week-so-far file are live (after the upgrade window of 2026-11-25).
+
 Everything in "How it works", "Fees" and "What's inside" below describes the **v2 program and oracle that are live today**. Two dated changes are decided and not yet live; neither changes a burn already made or a floor already paid:
 
 | What | Today (v2, live) | From the first v3 epoch — planned for **2026-11-29** (the date and the last v2 publish transaction are announced at least one full epoch ahead) | After the final program upgrade — earliest **2026-11-25** (moved from 2026-11-11 on 2026-11-02 and from 2026-11-18 on 2026-11-14), announced at least 7 days ahead with the source and the changelog; the binary hash at least 48 hours ahead |

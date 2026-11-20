@@ -27,8 +27,11 @@
  * (fail-closed on any read failure). C-14 (round 4): burns made after that transaction are never paid under the v2
  * rules; if the final upgrade is late they wait for the first v3 epoch with their own time, and the texts say so.
  * Set it (date and releaseUtc, transaction null) in a release before the quiet period that starts the day before `date`.
+ * Announced 2026-11-20 (schedule change of 2026-11-14): the last v2 epoch is planned for Sunday 2026-11-22, the oracle builds
+ * no v2 epoch from Monday 2026-11-23 06:00 UTC (oracle/src/flow-v3.ts V2_BOUNDARY_TS_DEFAULT), and the boundary release that
+ * names the transaction is planned for that time.
  */
-export const V3_BOUNDARY: { date: string; lastV2PublishTx: string | null; releaseUtc?: string | null } | null = null;
+export const V3_BOUNDARY: { date: string; lastV2PublishTx: string | null; releaseUtc?: string | null } | null = { date: '2026-11-22', lastV2PublishTx: null, releaseUtc: '2026-11-23 06:00' };
 
 /** The boundary sentence (TheForge, rules banner): dated, names the transaction once it exists, no epoch number. */
 export function boundaryText(b: { date: string; lastV2PublishTx: string | null; releaseUtc?: string | null }): { lead: string; rest: string } {

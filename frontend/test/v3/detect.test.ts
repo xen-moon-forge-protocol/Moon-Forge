@@ -83,8 +83,8 @@ describe('the v2/v3 boundary (X-034, T9-25: burns after the last v2 publish tx a
     const fake = (m: Record<string, any>) => (async (u: string) => (u in m ? { ok: true, status: 200, json: async () => m[u] } : { ok: false, status: 404, json: async () => null })) as any;
     const epoch1Tx = (index as any).epochs[0].tx as string;
 
-    it('today: no boundary announced, the shipped constant is null and nothing changes', async () => {
-        expect(V3_BOUNDARY).toBeNull();
+    it('announced, transaction not named yet: the shipped constant names no transaction, so the files alone decide', async () => {
+        expect(V3_BOUNDARY?.lastV2PublishTx).toBeNull();
         expect(await readRewards(fake(files), '/r/')).toEqual({ rewards: 2, newestEpoch: 1, newestVersion: 2, boundaryPassed: false });
     });
     it('a version-2 newest entry whose tx is the announced boundary = rewards 3, a week before any version-3 file', async () => {

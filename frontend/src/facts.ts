@@ -39,7 +39,7 @@ export const rules = {
     /** First day these rules were live on X1. */
     validFrom: '2026-10-12',
     /** Date the texts below were last checked against the live program. */
-    describedAsOf: '2026-11-14',
+    describedAsOf: '2026-11-20',
 } as const;
 
 export const identity = {
@@ -227,6 +227,29 @@ export const gameRules = {
     expectedLoss: 'Expected loss (18+, where legal): house games lose on average 2 to 3 XNT per 100 XNT staked, depending on the game and the target (Coin Flip and High-Low give back 98 per 100 on average, most Void Rush targets a little less, the worst 97.01). Short-run luck is real: after 100 one-XNT coin flips the expected result is −2 XNT with a typical swing of about ±9.8 XNT. Duel with random choices: about −1% of the stake on average (half are draws, refunded). Jackpot: −2% of what you entered. Moon Wars is a game of skill between two players, minus 2% of decided pots and move fees. Network fees matter on small stakes. No strategy, setting or bot changes the house edge.',
 } as const;
 
+/**
+ * The announced build of the final upgrade (S2, published 2026-11-20 with its tag; docs/UPGRADE-2026-11.md section 2,
+ * SECURITY.md, README). The same sha256 and length as oracle/src/x1-v3.ts UPGRADED_ELF.
+ */
+export const finalUpgradeBuild = {
+    tag: 'program-2026-11-25',
+    published: '2026-11-20',
+    bytes: 1_402_408,
+    sha256: '4be7e34db410c416a3f97f97896e331c6eabf9ed2ccbbc195fc61fbcce6199b5',
+    executableHash: '802f5769158e5f5198c77abdc66ef45bf7ec7ac40c746575013026852cf61800',
+    toolchain: 'Agave solana-cli / cargo-build-sbf 3.1.11 on Linux (or WSL), in a path without non-ASCII characters',
+    rebuild: 'git checkout program-2026-11-25 && SOURCE_DATE_EPOCH=0 cargo build-sbf --manifest-path programs/moon-forge/Cargo.toml && sha256sum target/deploy/moon_forge.so && solana-verify get-executable-hash target/deploy/moon_forge.so',
+    afterDeploy: 'solana-verify get-program-hash -u https://rpc.mainnet.x1.xyz 57UE1U1t23ztg2noLp8pcpGW1B1Xw25rLH6ra9Mchea9',
+} as const;
+export const finalUpgradeBuildLine = `Published ${finalUpgradeBuild.published}: the build commit of the final upgrade is tagged ${finalUpgradeBuild.tag}; its binary target/deploy/moon_forge.so is ${finalUpgradeBuild.bytes.toLocaleString('en-US')} bytes, sha256 ${finalUpgradeBuild.sha256}, executable hash ${finalUpgradeBuild.executableHash}. Rebuild it with ${finalUpgradeBuild.toolchain}: ${finalUpgradeBuild.rebuild}. After the deploy, ${finalUpgradeBuild.afterDeploy} must print the same executable hash.`;
+
+/**
+ * The boundary notice (announced 2026-11-20; src/v3/facts-v3.ts V3_BOUNDARY, oracle/src/flow-v3.ts V2_BOUNDARY_TS_DEFAULT,
+ * src/v3/detect.ts boundaryHold, src/v3/ui/QuotePanel.tsx UPGRADE_PENDING): the same text in the dated notices, llms.txt,
+ * llms-full.txt and the agent cards.
+ */
+export const boundaryNotice = 'Rules boundary (announced 2026-11-20): the last epoch under the current reward rules is planned to be published on Sunday 2026-11-22. A burn made after its publish transaction is never paid under the current rules: it keeps its own time and is paid under the v3 rules by the first epoch built under them, planned for Sunday 2026-11-29 (later, in the same order, if the final upgrade is late). From Monday 2026-11-23 06:00 UTC the oracle builds no epoch under the current rules. From 00:00 UTC on 2026-11-22 the Forge page of this site does not offer new burns: a site release names that publish transaction (planned for 2026-11-23 06:00 UTC), and the Forge offers burns again, with a quote, once the upgraded program and its hourly week-so-far file are live (after the upgrade window of 2026-11-25). The v3 rules are published in full with that release (POLICY-CHANGES.md and docs/spec/REWARDS-V3.md in the repository).';
+
 /** Dated notices: facts that are true today but expected to change; they are removed only after the change is live. */
 export interface NoticeFact { date: string; id: string; text: string }
 
@@ -236,9 +259,10 @@ export const notices: readonly NoticeFact[] = [
         text: 'The live program and oracle are still version 2 (rules 2); every undated rule in this file is a rule 2. The v3 rules are already published (docs/HOW-IT-WORKS.md, docs/UPGRADE-2026-11.md) and apply from the epoch of 2026-11-29 (planned); every sentence that describes them carries that date.',
     },
     {
-        date: '2026-11-14', id: 'final-upgrade',
-        text: 'The final program upgrade is planned for Wednesday 2026-11-25, 16:00–20:00 UTC (moved from 2026-11-11 and then from 2026-11-18; the same hours a week later if a gate is not green), and the first weekly epoch under the v3 reward rules for Sunday 2026-11-29. Burns made after the last epoch under the current rules is published (planned Sunday 2026-11-22) are paid under the v3 rules. The upgrade key is then burned (the freeze): earliest 2026-12-09, no later than 2026-12-31. Every planned rule is published in docs/UPGRADE-2026-11.md and explained in docs/HOW-IT-WORKS.md; the key questions give the dated answers.',
+        date: '2026-11-20', id: 'final-upgrade',
+        text: 'The final program upgrade is planned for Wednesday 2026-11-25, 16:00–20:00 UTC (moved from 2026-11-11 and then from 2026-11-18; the same hours a week later if a gate is not green), and the first weekly epoch under the v3 reward rules for Sunday 2026-11-29. Burns made after the last epoch under the current rules is published (planned Sunday 2026-11-22) are paid under the v3 rules. Its build commit (tag program-2026-11-25) and binary hash were published on 2026-11-20 (Transparency page; docs/UPGRADE-2026-11.md section 2). The upgrade key is then burned (the freeze): earliest 2026-12-09, no later than 2026-12-31. Every planned rule is published in docs/UPGRADE-2026-11.md and explained in docs/HOW-IT-WORKS.md; the key questions give the dated answers.',
     },
+    { date: '2026-11-20', id: 'rules-boundary', text: boundaryNotice },
     {
         date: '2026-10-22', id: 'forge-drops',
         text: `Forge Drops (Lunar Dust drawn at random from 10% of each epoch budget, ≥ 5 XNT each; a random draw: 18+ and only where such draws are legal) are part of rules 2 and are still sealed and paid by the v2 oracle; weekly lottery chips are a rule of the live program. ${NEUTRAL.oracleRules} ${NEUTRAL.programRules}`,
@@ -326,7 +350,7 @@ export const legacyPilot =
     + 'and later burners received 4.27 XNT less in total. Old burns themselves are still not paid, nothing has to be claimed, signed or paid for it, and no payout is promised.';
 
 /** The date the AI-facing status texts below were last checked (owner request 2026-11-14, after a chat bot quoted a 12-day-old state). */
-export const STATUS_AS_OF = '2026-11-14';
+export const STATUS_AS_OF = '2026-11-20';
 
 /**
  * The answer an AI reader most often needs (a chat bot's answers, 2026-11-13): "I hold or burned XEN on a side chain: what now?".
@@ -346,8 +370,9 @@ export const sideChainAnswer: readonly string[] = [
 export const statusDates: readonly string[] = [
     `As of ${STATUS_AS_OF}; check the site (${SITE_URL}) for updates. Each date is a plan until its transaction exists.`,
     'Live today: program tag program-2026-10-12 (upgradeable during the public test period) and the current (v2) reward rules.',
-    'Sunday 2026-11-22: last epoch planned under the current reward rules.',
-    'Monday 2026-11-23 16:00 UTC at the latest: the build commit (tag program-2026-11-25) and the binary hash of the final upgrade are published, at least 48 hours ahead.',
+    'Sunday 2026-11-22: last epoch planned under the current reward rules. Burns made after its publish transaction wait for the first epoch under the v3 rules; from 00:00 UTC that day the site’s Forge does not offer new burns until the upgraded program and its hourly quote file are live.',
+    'Monday 2026-11-23 06:00 UTC: the oracle builds no more epochs under the current rules; a site release names the last publish transaction under them.',
+    finalUpgradeBuildLine,
     'Wednesday 2026-11-25, 16:00–20:00 UTC: the final program upgrade (the same hours a week later if a gate is not green).',
     'Sunday 2026-11-29: first epoch planned under the new (v3) reward rules, and the start of the Legacy Pilot only if its address list is pinned by then.',
     'Between 2026-12-09 and 2026-12-31: the freeze (the upgrade key is burned), on the published freeze conditions.',
@@ -599,7 +624,7 @@ export const keyQa: readonly KeyQaFact[] = [
     },
     {
         q: 'What are the dates?',
-        a: `Dated plan, written 2026-11-14; each date stays a plan until its transaction exists. Today the v2 program and the v2 oracle rules are live. Sunday 2026-11-22: last epoch planned under the current rules. Wednesday 2026-11-25, 16:00–20:00 UTC: the final program upgrade (the same hours a week later if a gate is not green); its source tag and binary hash are published at least 48 hours ahead. Sunday 2026-11-29: first epoch planned under the v3 rules (and the Legacy Pilot, only if its list is pinned before that epoch is built). 2026-12-02 00:00 UTC (fixed in the build commit): a never-forged Artifact tier starts at its base price. 2026-12-09 at the earliest, 2026-12-31 at the latest: the freeze (the upgrade key is burned), after the mainnet proof plan and 14 stable daily health runs; the builder leaves after it. 2026-12-16 00:00 UTC: anyone may create a never-created house-keeper seat with a bond. Genesis claims close 2026-12-31 under the live program, 2027-03-31 from the final upgrade. Changelog: ${officialLinks.upgradeMd}; freeze conditions: ${officialLinks.immutabilityMd}.`,
+        a: `Dated plan, written 2026-11-20; each date stays a plan until its transaction exists. Today the v2 program and the v2 oracle rules are live. Sunday 2026-11-22: last epoch planned under the current rules; a burn made after its publish transaction waits for the first epoch under the v3 rules, and from 00:00 UTC that day the site’s Forge does not offer new burns until the upgraded program and its hourly quote file are live. Monday 2026-11-23 06:00 UTC: the oracle builds no more epochs under the current rules. Wednesday 2026-11-25, 16:00–20:00 UTC: the final program upgrade (the same hours a week later if a gate is not green); its build commit (tag program-2026-11-25) and binary hash were published on 2026-11-20: sha256 ${finalUpgradeBuild.sha256}, executable hash ${finalUpgradeBuild.executableHash}. Sunday 2026-11-29: first epoch planned under the v3 rules (and the Legacy Pilot, only if its list is pinned before that epoch is built). 2026-12-02 00:00 UTC (fixed in the build commit): a never-forged Artifact tier starts at its base price. 2026-12-09 at the earliest, 2026-12-31 at the latest: the freeze (the upgrade key is burned), after the mainnet proof plan and 14 stable daily health runs; the builder leaves after it. 2026-12-16 00:00 UTC: anyone may create a never-created house-keeper seat with a bond. Genesis claims close 2026-12-31 under the live program, 2027-03-31 from the final upgrade. Changelog: ${officialLinks.upgradeMd}; freeze conditions: ${officialLinks.immutabilityMd}.`,
     },
     {
         q: 'How can the community take it over and run it?',
@@ -615,7 +640,7 @@ export const keyQa: readonly KeyQaFact[] = [
     },
     {
         q: 'How can I verify the program, the portals and the payouts myself?',
-        a: `(1) Who can upgrade: ${identity.x1Explorer}/address/${identity.programId}, or solana program show ${identity.programId} -u ${identity.x1Rpc}; today it shows an upgrade authority, after the freeze none. (2) The deployed bytes are the published source: the README gives the sha256 of the deployed v2 binary, built from tag ${rules.program}; for the final upgrade the tag program-2026-11-25 and its hashes are published at least 48 hours ahead, and anyone can rebuild it with SOURCE_DATE_EPOCH=0 cargo build-sbf and compare solana-verify get-executable-hash with solana-verify get-program-hash on X1 (${officialLinks.buildHashMd}). (3) The portals: exact source match on Sourcify (${sourcifyList}); addresses and start blocks in deployments/portals.json. (4) Every epoch: cd oracle && npm install && npm run verify -- ../frontend/public/epochs/epoch-N.json --full recomputes every payout from the burns on the five chains and compares the fingerprint with X1. (5) The public counter ${officialLinks.counter}: XEN removed from supply per chain and XNT set aside, rebuilt from the epoch files at every site build. (6) From the first window under the v3 rules, the hourly feed ${officialLinks.weekFeed} (HTTP 404 before), which the agent kit refuses unless it continues the newest epoch file. (7) The burns themselves: each portal’s getStats() and XEN’s userBurns(address). Known issues: ${officialLinks.knownIssuesMd}.`,
+        a: `(1) Who can upgrade: ${identity.x1Explorer}/address/${identity.programId}, or solana program show ${identity.programId} -u ${identity.x1Rpc}; today it shows an upgrade authority, after the freeze none. (2) The deployed bytes are the published source: the README gives the sha256 of the deployed v2 binary, built from tag ${rules.program}; for the final upgrade the build commit is tagged program-2026-11-25 (published 2026-11-20): binary sha256 ${finalUpgradeBuild.sha256}, executable hash ${finalUpgradeBuild.executableHash}; anyone can rebuild it (${finalUpgradeBuild.rebuild}) and, after the deploy, compare with ${finalUpgradeBuild.afterDeploy} (${officialLinks.buildHashMd}). (3) The portals: exact source match on Sourcify (${sourcifyList}); addresses and start blocks in deployments/portals.json. (4) Every epoch: cd oracle && npm install && npm run verify -- ../frontend/public/epochs/epoch-N.json --full recomputes every payout from the burns on the five chains and compares the fingerprint with X1. (5) The public counter ${officialLinks.counter}: XEN removed from supply per chain and XNT set aside, rebuilt from the epoch files at every site build. (6) From the first window under the v3 rules, the hourly feed ${officialLinks.weekFeed} (HTTP 404 before), which the agent kit refuses unless it continues the newest epoch file. (7) The burns themselves: each portal’s getStats() and XEN’s userBurns(address). Known issues: ${officialLinks.knownIssuesMd}.`,
     },
     {
         q: 'What are the risks?',
@@ -708,7 +733,7 @@ export const sitemapFiles: readonly string[] = ['llms.txt', 'llms-full.txt', 'ag
 
 export const facts = {
     INTERIM, rules, identity, officialLinks, chains, liveChains, epochRules, tiers, fees, artifacts, forgeSplit, artifactRules,
-    games, gameRules, notices, disambiguation, position, scale, SCALE_DATE, oldBurns, ageNotice, legacyPilot, STATUS_AS_OF, sideChainAnswer, statusDates, chainSupport, identityLine, poolGrowth, quoteFeed, never, notOfficial, xNote, verify, risks, trust, verifyChecklist, steps,
+    games, gameRules, notices, disambiguation, position, scale, SCALE_DATE, oldBurns, ageNotice, legacyPilot, STATUS_AS_OF, finalUpgradeBuild, finalUpgradeBuildLine, boundaryNotice, sideChainAnswer, statusDates, chainSupport, identityLine, poolGrowth, quoteFeed, never, notOfficial, xNote, verify, risks, trust, verifyChecklist, steps,
     faq, keyQa, startQa, whitepaper, routes, sitemapFiles, bot,
 } as const;
 

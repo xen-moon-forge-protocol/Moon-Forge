@@ -17,6 +17,7 @@ import PublicCounter from '../components/PublicCounter';
 import { INTERIM } from '../content/interim';
 import { lazy, Suspense } from 'react';
 import { useRules3 } from '../v3/detect';
+import { finalUpgradeBuild as FUB, officialLinks } from '../facts';
 
 const UpgradedProgramCard = lazy(() => import('../v3/ui/UpgradedProgramCard'));
 
@@ -93,6 +94,20 @@ export default function TransparencyPage() {
                     </Notice>
                 )}
                 {noAuthority && <Notice kind="success" className="mt-4">No upgrade authority: no key can deploy new code to this program.</Notice>}
+                {/* the announced build of the final upgrade (S2, src/facts.ts finalUpgradeBuild; docs/UPGRADE-2026-11.md section 2) */}
+                <div className="mt-4 text-sm text-lunar-300">
+                    <p>
+                        <strong>Final upgrade, announced build</strong> (published {FUB.published}): build commit tagged{' '}
+                        <a href={officialLinks.buildHashMd} target="_blank" rel="noopener noreferrer" className="text-forge-orange hover:underline font-mono text-xs">{FUB.tag}</a>,
+                        binary <code>target/deploy/moon_forge.so</code> of {formatNumber(FUB.bytes)} bytes.
+                    </p>
+                    <Row label="sha256"><span className="font-mono text-xs break-all">{FUB.sha256}</span></Row>
+                    <Row label="Executable hash"><span className="font-mono text-xs break-all">{FUB.executableHash}</span></Row>
+                    <p className="text-xs text-lunar-400 mt-2">Rebuild it yourself ({FUB.toolchain}):</p>
+                    <pre className="text-xs font-mono text-green-300 overflow-x-auto whitespace-pre-wrap break-all">{FUB.rebuild.split(' && ').join('\n')}</pre>
+                    <p className="text-xs text-lunar-400 mt-2">After the deploy, this must print the same executable hash:</p>
+                    <pre className="text-xs font-mono text-green-300 overflow-x-auto whitespace-pre-wrap break-all">{FUB.afterDeploy}</pre>
+                </div>
                 {upg.error && <Notice kind="error" className="mt-4">{upg.error}</Notice>}
             </section>
 
