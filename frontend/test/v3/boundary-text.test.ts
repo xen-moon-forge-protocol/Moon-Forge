@@ -11,7 +11,7 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { PublicKey } from '@solana/web3.js';
-import { boundaryText, V3_BOUNDARY } from '../../src/v3/facts-v3';
+import { boundaryPublication, boundaryText, V3_BOUNDARY } from '../../src/v3/facts-v3';
 import { artifactRulesS7, gamesS7 } from '../../src/v3/facts-s7';
 import { houseNoBetsNoticeShown, jackpotOffered, keeperSeatReady, newHouseBetsOffered, type Liveness } from '../../src/v3/keeper';
 import { KEEPER_BOND_MIN } from '../../src/v3/constants';
@@ -31,7 +31,44 @@ describe('C-14: the boundary texts', () => {
         expect(t.rest).toContain('no epoch under the current rules pays them');
     });
     it('is announced (2026-11-20): the last v2 epoch planned for 2026-11-22, the release that names it for 2026-11-23 06:00 UTC', () => {
-        expect(V3_BOUNDARY).toEqual({ date: '2026-11-22', lastV2PublishTx: null, releaseUtc: '2026-11-23 06:00' });
+        expect(V3_BOUNDARY).toEqual({ date: '2026-11-22', lastV2PublishTx: null, lastV2PublishUtc: null, releaseUtc: '2026-11-23 06:00' });
+    });
+    it('a named transaction always carries its own block time (the date the texts show)', () => {
+        if (V3_BOUNDARY?.lastV2PublishTx) expect(V3_BOUNDARY.lastV2PublishUtc).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
+        else expect(V3_BOUNDARY?.lastV2PublishUtc ?? null).toBeNull();
+    });
+});
+
+describe('the boundary release in both cases (the planned Sunday publishes, or publishes nothing)', () => {
+    const tx = '5'.repeat(88);
+    it('the planned date publishes: the texts name that transaction with its own time, nothing about an earlier epoch', () => {
+        const b = { date: '2026-11-22', lastV2PublishTx: tx, lastV2PublishUtc: '2026-11-22 01:40', releaseUtc: '2026-11-23 06:00' };
+        const t = boundaryText(b);
+        expect(t.rest.startsWith('of 2026-11-22 01:40 UTC, new burns are paid under the v3 rules')).toBe(true);
+        expect(t.rest).not.toContain('No epoch under the current rules was published');
+        expect(boundaryPublication(b)).toBe('the publish transaction of 2026-11-22 01:40 UTC');
+    });
+    it('the planned date publishes nothing: the texts name the earlier publication with its own date, never the hold date', () => {
+        const b = { date: '2026-11-22', lastV2PublishTx: tx, lastV2PublishUtc: '2026-10-18 01:38', releaseUtc: '2026-11-23 06:00' };
+        const t = boundaryText(b);
+        expect(t.rest.startsWith('of 2026-10-18 01:38 UTC, new burns are paid under the v3 rules')).toBe(true);
+        expect(t.rest).toContain('No epoch under the current rules was published on 2026-11-22: that earlier publication is the last one.');
+        expect(t.rest).not.toContain('of 2026-11-22');
+        expect(boundaryPublication(b)).toBe('the publish transaction of 2026-10-18 01:38 UTC');
+        expect(boundaryPublication(b)).not.toContain('2026-11-22');
+    });
+    it('a transaction without a valid block time is never dated with the hold date', () => {
+        for (const u of [null, undefined, '2026-10-18', 'bad']) {
+            const b = { date: '2026-11-22', lastV2PublishTx: tx, lastV2PublishUtc: u };
+            expect(boundaryText(b).rest).toContain('of the last epoch under the current reward rules, new burns');
+            expect(boundaryText(b).rest).not.toContain('2026-11-22');
+            expect(boundaryPublication(b)).not.toContain('2026-11-22');
+        }
+    });
+    it('the rules banner dates the boundary only through boundaryPublication', () => {
+        const src = readFileSync(new URL('../../src/v3/ui/RulesChangedBanner.tsx', import.meta.url), 'utf8');
+        expect(src).toContain('boundaryPublication(V3_BOUNDARY)');
+        expect(src).not.toContain('V3_BOUNDARY.date');
     });
 });
 

@@ -125,13 +125,16 @@ before, with the balances of that day and the S2 size. The earlier totals (≈ 5
 
 ## 5. S6 commands (one session)
 
-Shell variables for the session (the paths are examples; no key material is written into any file of the repo):
+Shell variables for the session (the paths are examples; no key material is written into any file of the repo). Run every
+command from the repository root: `anchor` refuses anywhere else ("Not in anchor workspace.", found in the dry run of
+2026-11-20 on a local fork of the mainnet accounts):
 
 ```bash
 RPC=https://rpc.mainnet.x1.xyz
 PROGRAM=57UE1U1t23ztg2noLp8pcpGW1B1Xw25rLH6ra9Mchea9
 WALLET=~/.config/solana/deploy-wallet.json   # 7PuG8…, the current upgrade + IDL authority
 SO=target/deploy/moon_forge.so               # the S2 binary, built from the S2 tag
+IDL=target/idl/moon_forge.json               # the S2 IDL as built (LF line ends); never a Windows checkout copy, whose CRLF line ends change the sha256
 S2_SHA=4be7e34db410c416a3f97f97896e331c6eabf9ed2ccbbc195fc61fbcce6199b5   # section 2
 NEW=$(stat -c %s "$SO")                      # must equal section 2
 DEPLOY_KEY=DGeGqSjsdWK385DmFYmy2ZKpoebEur3ZQrSiVPn6Ah7X  # OD-32 public key (section 1)
@@ -147,10 +150,10 @@ DEPLOY_KEY_FILE=____                         # a copy of the deploy key file in 
 | 4 | `solana program deploy --buffer "$BUF" --program-id "$PROGRAM" --upgrade-authority "$WALLET" -k "$WALLET" -u "$RPC"` | steps 0-3 all yes; the S5 census is < 30 min old; no jackpot round DRAWING right now; the repository variable `KEEPER_ENABLED` is off for the deploy minutes (set by the operator through the API with the project token, which has Variables write; no GitHub web session at S6) and no keeper run is in progress | a signature is printed; the buffer rent is back on the wallet |
 | 5 | `solana program show "$PROGRAM" -u "$RPC"`; `solana program dump "$PROGRAM" /tmp/live.so -u "$RPC"`; `head -c "$NEW" /tmp/live.so \| sha256sum`; `solana-verify get-program-hash -u "$RPC" "$PROGRAM"` (or the zero-stripped sha256 of /tmp/live.so) | | a new last-deploy slot; sha256 = `$S2_SHA`; executable hash = section 2. A mismatch: STOP, nothing else runs (section 6) |
 | 6 | Wait ≥ 1 slot. Simulations of SPEC 6.3 step 1: `init_seat` (not custom error 101), `create_war` (SealedJoinRequired), `place_bet` (KeeperRequired) | step 5 all yes | the three expected answers |
-| 7 | `anchor idl upgrade --filepath target/idl/moon_forge.json "$PROGRAM" --provider.cluster "$RPC" --provider.wallet "$WALLET"` then `anchor idl fetch "$PROGRAM" --provider.cluster "$RPC" > /tmp/idl.json` | the IDL file sha256 = section 2 | `/tmp/idl.json` equals the file as JSON (the rehearsal compares them the same way) |
-| 8 | `anchor idl set-authority --program-id "$PROGRAM" --new-authority "$DEPLOY_KEY" --provider.cluster "$RPC" --provider.wallet "$WALLET"`; `anchor idl authority "$PROGRAM" --provider.cluster "$RPC"` | step 7 green | the IDL authority = `$DEPLOY_KEY` |
-| 9 | `solana program set-upgrade-authority "$PROGRAM" --upgrade-authority "$WALLET" --new-upgrade-authority "$DEPLOY_KEY_FILE" -u "$RPC"` (the new key signs, so a typo cannot hand the program to an unknown key; never use `--skip-new-upgrade-authority-signer-check`) | steps 5-8 green | `solana program show`: authority = `$DEPLOY_KEY` |
-| 10 | Delete the session copy of the deploy key file (`rm -f "$DEPLOY_KEY_FILE"`; it lived in /dev/shm, so it never reached a disk). `solana program show "$PROGRAM" -u "$RPC"`; `anchor idl authority "$PROGRAM" --provider.cluster "$RPC"` | | both authorities = `$DEPLOY_KEY`; the hot wallet 7PuG8… holds no upgrade or IDL power from here to S9 (it stays the architect payee until `set_architect` runs at S7) |
+| 7 | From the repository root: `anchor idl upgrade --filepath "$IDL" "$PROGRAM" --provider.cluster "$RPC" --provider.wallet "$WALLET"` then `anchor idl fetch "$PROGRAM" --provider.cluster "$RPC" --provider.wallet "$WALLET" > /tmp/idl.json` | `sha256sum "$IDL"` = the IDL sha256 of section 2 (the LF file: a CRLF copy of the same JSON gives another hash) | `/tmp/idl.json` equals the file as JSON (the rehearsal compares them the same way) |
+| 8 | From the repository root: `anchor idl set-authority --program-id "$PROGRAM" --new-authority "$DEPLOY_KEY" --provider.cluster "$RPC" --provider.wallet "$WALLET"`; `anchor idl authority "$PROGRAM" --provider.cluster "$RPC" --provider.wallet "$WALLET"` | step 7 green | the IDL authority = `$DEPLOY_KEY` |
+| 9 | `solana program set-upgrade-authority "$PROGRAM" --upgrade-authority "$WALLET" --new-upgrade-authority "$DEPLOY_KEY_FILE" -k "$WALLET" -u "$RPC"` (the new key signs, so a typo cannot hand the program to an unknown key; never use `--skip-new-upgrade-authority-signer-check`; `-k "$WALLET"` makes the deploy wallet the fee payer: without it the CLI's default keypair pays, and an empty default keypair fails the step after the IDL authority has already moved) | steps 5-8 green | `solana program show`: authority = `$DEPLOY_KEY` |
+| 10 | Delete the session copy of the deploy key file (`rm -f "$DEPLOY_KEY_FILE"`; it lived in /dev/shm, so it never reached a disk). `solana program show "$PROGRAM" -u "$RPC"`; from the repository root `anchor idl authority "$PROGRAM" --provider.cluster "$RPC" --provider.wallet "$WALLET"` | | both authorities = `$DEPLOY_KEY`; the hot wallet 7PuG8… holds no upgrade or IDL power from here to S9 (it stays the architect payee until `set_architect` runs at S7) |
 | 11 | Update `health-pins.json` (the expected upgrade and IDL authority = `$DEPLOY_KEY`) with `node scripts/upgrade/pins.mjs --stage s6 --deploy-key "$DEPLOY_KEY"`, then the same with `--write`, in the same session and a reviewed commit; then `node scripts/upgrade/census.mjs --stage s6 --deploy-key "$DEPLOY_KEY" --keeper-wallet <OD-25> --seat-cold <OD-16> --expect-deploy-slot <new slot>` | step 10 green | the next health run shows the pin rows OK, so the stable-days streak does not restart |
 
 Then S7 starts, the same day (operator; SPEC 6.3 steps 3-10 in that order except step 8, `arm_keeper`, which F1-b
@@ -234,7 +237,7 @@ sheet (row "OD-32 (order)").
   emergency rollback.
 - **Step 7 refused with RequireGteViolated** (custom error 0x9ca: the compressed IDL is larger than the 16,214 B the
   account holds; the S2 IDL should be about 11.9 KB, so this is not expected): the on-chain IDL is unchanged. Run
-  `anchor idl close "$PROGRAM"` and then `anchor idl init --filepath target/idl/moon_forge.json "$PROGRAM"`, both with
+  `anchor idl close "$PROGRAM"` and then `anchor idl init --filepath "$IDL" "$PROGRAM"`, both from the repository root with
   `--provider.cluster "$RPC" --provider.wallet "$WALLET"` and before step 8. The account is re-created at the same
   address with twice the compressed size (about 0.17 XNT rent for 12 KB). Then fetch and compare again. anchor-cli
   0.32.1 has no resize command, and the program's IdlInstruction::Resize only works on an empty IDL account.
@@ -255,7 +258,8 @@ Each item is recorded with its date and UTC time:
 2. **S6**, before step 4: the sha256 and the executable hash of section 2 and the IDL sha256. The hashes are signed
    with the DEPLOY_KEY as an off-chain message, which proves that the signer holds that key:
    `solana sign-offchain-message -k "$DEPLOY_KEY_FILE" "Moon Forge v3 S6: binary sha256 <S2_SHA>, executable hash <HASH>, IDL sha256 <IDL_SHA>"`.
-   The signature goes in the table below and in SECURITY.md.
+   The signature goes in the table below and in SECURITY.md. Done on 2026-11-20, ahead of S6 (the key file copied into RAM
+   only, then shredded); at S6 before step 4 the operator only re-runs the check command of the table.
 3. **S6**, after step 10: that both authorities are the DEPLOY_KEY and that the deploy matched the hashes.
 4. **S9** (the third signature): the freeze, on its own sheet. The order after the freeze transaction: publish first (the
    signatures and the hashes in SECURITY.md, IMMUTABILITY.md, README.md, `llms.txt` / `llms-full.txt` and the agent
@@ -266,7 +270,7 @@ Each item is recorded with its date and UTC time:
 | Signature | Text signed | Signature / commit | Date (UTC) |
 |---|---|---|---|
 | S0 decisions (public decision sheet) | section 10 table + sections 1 and 3 | recorded, not signed: the commit that adds `docs/decisions/2026-11-OD-SHEET.md` | 2026-11-09 |
-| S6 hashes (DEPLOY_KEY off-chain message) | the line of item 2 | ____ | ____ |
+| S6 hashes (DEPLOY_KEY off-chain message) | the line of item 2, exactly: `Moon Forge v3 S6: binary sha256 4be7e34db410c416a3f97f97896e331c6eabf9ed2ccbbc195fc61fbcce6199b5, executable hash 802f5769158e5f5198c77abdc66ef45bf7ec7ac40c746575013026852cf61800, IDL sha256 9617cd5eaf80168026957ae77396fc72497e9c154de2f55432b0f571e793a72f` | signature `3EcmkYhmDHeaAentUcfNV7TVH2U1DvNwknFEBxi6yG4Ghg2f7HqvuzsnDsbseorfP6XvYG4LsErgXfw33ThS9Kvf`; check: `solana verify-offchain-signature "Moon Forge v3 S6: binary sha256 4be7e34db410c416a3f97f97896e331c6eabf9ed2ccbbc195fc61fbcce6199b5, executable hash 802f5769158e5f5198c77abdc66ef45bf7ec7ac40c746575013026852cf61800, IDL sha256 9617cd5eaf80168026957ae77396fc72497e9c154de2f55432b0f571e793a72f" 3EcmkYhmDHeaAentUcfNV7TVH2U1DvNwknFEBxi6yG4Ghg2f7HqvuzsnDsbseorfP6XvYG4LsErgXfw33ThS9Kvf --signer DGeGqSjsdWK385DmFYmy2ZKpoebEur3ZQrSiVPn6Ah7X` → "Signature is valid" (signed early, before S6, so it is public before the upgrade; also in SECURITY.md and docs/UPGRADE-2026-11.md section 2) | 2026-11-20 |
 | S6 completed | "deployed `<S2_SHA>`, last-deploy slot ____, authorities = DEPLOY_KEY" | ____ | ____ |
 
 ## 8. Rehearsal evidence available on 2026-10-23, with the S2 rows of 2026-11-20 (local only, nothing sent to mainnet)

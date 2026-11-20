@@ -49,6 +49,18 @@ solana-verify get-program-hash -u https://rpc.mainnet.x1.xyz 57UE1U1t23ztg2noLp8
 solana program show 57UE1U1t23ztg2noLp8pcpGW1B1Xw25rLH6ra9Mchea9 -u https://rpc.mainnet.x1.xyz            # Authority: the deploy key above, until the freeze
 ```
 
+**The signed statement (2026-11-20).** The deploy key signed the three hashes of the final upgrade as an off-chain message (Solana off-chain message format, version 0; no transaction, nothing on-chain), which shows that whoever announced these hashes holds the key that becomes the upgrade authority. The message, exactly (one line, no trailing newline):
+
+```text
+Moon Forge v3 S6: binary sha256 4be7e34db410c416a3f97f97896e331c6eabf9ed2ccbbc195fc61fbcce6199b5, executable hash 802f5769158e5f5198c77abdc66ef45bf7ec7ac40c746575013026852cf61800, IDL sha256 9617cd5eaf80168026957ae77396fc72497e9c154de2f55432b0f571e793a72f
+```
+
+Signature: `3EcmkYhmDHeaAentUcfNV7TVH2U1DvNwknFEBxi6yG4Ghg2f7HqvuzsnDsbseorfP6XvYG4LsErgXfw33ThS9Kvf`. Anyone checks it with the Solana CLI (offline; it prints "Signature is valid"):
+
+```bash
+solana verify-offchain-signature "Moon Forge v3 S6: binary sha256 4be7e34db410c416a3f97f97896e331c6eabf9ed2ccbbc195fc61fbcce6199b5, executable hash 802f5769158e5f5198c77abdc66ef45bf7ec7ac40c746575013026852cf61800, IDL sha256 9617cd5eaf80168026957ae77396fc72497e9c154de2f55432b0f571e793a72f" 3EcmkYhmDHeaAentUcfNV7TVH2U1DvNwknFEBxi6yG4Ghg2f7HqvuzsnDsbseorfP6XvYG4LsErgXfw33ThS9Kvf --signer DGeGqSjsdWK385DmFYmy2ZKpoebEur3ZQrSiVPn6Ah7X
+```
+
 **Custody.** The upgrade key is held by the anonymous operator: it is never stored in GitHub or in its secrets, so no scheduled run ever sees it; it is used only to sign the announced final upgrade and the freeze; and from the final upgrade to the freeze the authority is a new deploy key, kept offline, never in GitHub. If it were lost before the freeze, nobody could upgrade or burn the authority: the program would stay as deployed, with an authority nobody holds. The oracle and keeper keys are separate hot keys kept as repository secrets; they can be rotated (two-step `propose-oracle` / `accept-oracle` for the oracle; the keeper is permissionless).
 
 ## What depends on GitHub

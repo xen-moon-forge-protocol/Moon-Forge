@@ -16,8 +16,13 @@
  * The boundary, announced at least one full epoch ahead (SCHEDULE.md, 2026-10-23 change note; WORDING §1): burns made
  * after the publish transaction of the last epoch built under the v2 rules are scored under v3 (the v3 window starts at
  * that epoch's on-chain published_at, oracle/src/rewards.ts). Never an epoch number:
- *  - `date`: the UTC date (YYYY-MM-DD) of that last v2 publication (the planned date while the transaction does not exist);
- *  - `lastV2PublishTx`: its X1 transaction signature once it exists, null until then;
+ *  - `date`: the UTC date (YYYY-MM-DD) planned for that last v2 publication; the Forge holds new burns from 00:00 UTC of
+ *    this date in every case, so it is never moved afterwards (also when that date publishes nothing and an earlier
+ *    publication stays the last v2 one);
+ *  - `lastV2PublishTx`: the X1 transaction signature of the last v2 publication once it is known, null until then;
+ *  - `lastV2PublishUtc`: that transaction's own block time ("YYYY-MM-DD HH:MM" UTC), set together with the transaction.
+ *    It is the date the texts name: it equals `date` when the planned date publishes, and is earlier when it publishes
+ *    nothing (no burn since the previous epoch: the last v2 publication is then that earlier epoch's);
  *  - `releaseUtc`: the planned UTC time ("YYYY-MM-DD HH:MM") of the site release that names that transaction (round-4
  *    default, moved a week by each of the schedule changes of 2026-11-02 and 2026-11-14: Monday 2026-11-23 06:00, after the quiet period), disclosed by the Forge while it holds burns; null = not given.
  * While V3_BOUNDARY is null the site behaves exactly as today and the dated interim notice (src/content/interim.ts) is
@@ -31,17 +36,36 @@
  * no v2 epoch from Monday 2026-11-23 06:00 UTC (oracle/src/flow-v3.ts V2_BOUNDARY_TS_DEFAULT), and the boundary release that
  * names the transaction is planned for that time.
  */
-export const V3_BOUNDARY: { date: string; lastV2PublishTx: string | null; releaseUtc?: string | null } | null = { date: '2026-11-22', lastV2PublishTx: null, releaseUtc: '2026-11-23 06:00' };
+export type Boundary = { date: string; lastV2PublishTx: string | null; lastV2PublishUtc?: string | null; releaseUtc?: string | null };
+
+export const V3_BOUNDARY: Boundary | null = { date: '2026-11-22', lastV2PublishTx: null, lastV2PublishUtc: null, releaseUtc: '2026-11-23 06:00' };
+
+const UTC_MINUTE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/;
+
+/**
+ * How the texts date the last v2 publication once its transaction is named: by the transaction's own block time, never
+ * by `date` (the hold start), which is a different day when the planned date published nothing.
+ */
+export function boundaryPublication(b: Boundary): string {
+    return b.lastV2PublishUtc && UTC_MINUTE.test(b.lastV2PublishUtc)
+        ? `the publish transaction of ${b.lastV2PublishUtc} UTC`
+        : 'the publish transaction of the last epoch under the current reward rules';
+}
 
 /** The boundary sentence (TheForge, rules banner): dated, names the transaction once it exists, no epoch number. */
-export function boundaryText(b: { date: string; lastV2PublishTx: string | null; releaseUtc?: string | null }): { lead: string; rest: string } {
+export function boundaryText(b: Boundary): { lead: string; rest: string } {
     const rules = 'are paid under the v3 rules: first come, first served inside each day’s capacity, with a quote shown before you sign that binds the part of the burn that fits that day’s capacity.';
     // C-14: never paid under the current rules; a late upgrade only delays them
     const late = 'If the final program upgrade comes later than planned, those burns keep their own time and wait for the first epoch built under the v3 rules: no epoch under the current rules pays them.';
     const hold = `From 00:00 UTC on ${b.date} this page holds new burns until a release of this site names that transaction${b.releaseUtc ? ` (planned for ${b.releaseUtc} UTC)` : ''}.`;
-    return b.lastV2PublishTx
-        ? { lead: 'Since the publish transaction', rest: `of ${b.date} (UTC), new burns ${rules} Burns made before that transaction keep the rules of the epoch they fall in. ${late}` }
-        : { lead: '', rest: `The last epoch under the current reward rules is planned to be published on ${b.date} (UTC). Burns made after its publish transaction ${rules} ${late} ${hold} The transaction is named here once it exists.` };
+    if (b.lastV2PublishTx) {
+        const at = b.lastV2PublishUtc && UTC_MINUTE.test(b.lastV2PublishUtc) ? b.lastV2PublishUtc : null;
+        const of = at ? `of ${at} UTC` : 'of the last epoch under the current reward rules';
+        // the planned date published nothing (no burn since the previous epoch): the earlier publication stays the last
+        const none = at && at.slice(0, 10) < b.date ? ` No epoch under the current rules was published on ${b.date}: that earlier publication is the last one.` : '';
+        return { lead: 'Since the publish transaction', rest: `${of}, new burns ${rules}${none} Burns made before that transaction keep the rules of the epoch they fall in. ${late}` };
+    }
+    return { lead: '', rest: `The last epoch under the current reward rules is planned to be published on ${b.date} (UTC). Burns made after its publish transaction ${rules} ${late} ${hold} The transaction is named here once it exists.` };
 }
 
 export const githubDependence = 'If the GitHub account falls, the site, the oracle, the keeper and the epoch files stop; payouts pause; the pools stay locked in the program; once no epoch has survived its hold for 28 days, the largest voider can take the oracle seat from day 28 and anyone from day 29, with a bond.';

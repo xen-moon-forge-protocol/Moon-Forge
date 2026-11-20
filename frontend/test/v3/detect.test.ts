@@ -142,6 +142,20 @@ describe('the v2/v3 boundary (X-034, T9-25: burns after the last v2 publish tx a
         // a malformed date never opens the v2 path
         expect([boundaryHold(2, { date: '11/08/2026', lastV2PublishTx: null }, 0), boundaryHold(2, { date: '', lastV2PublishTx: null }, 0)]).toEqual(['date-reached', 'date-reached']);
     });
+    it('the hold starts at 00:00 UTC of 2026-11-22 whether that Sunday publishes or not, and the named transaction ends it either way', () => {
+        const midnight = Date.parse('2026-11-22T00:00:00Z');
+        const release = Date.parse('2026-11-23T06:00:00Z');
+        const before = { date: '2026-11-22', lastV2PublishTx: null, lastV2PublishUtc: null };
+        expect([boundaryHold(2, before, midnight - 1), boundaryHold(2, before, midnight), boundaryHold(2, before, release - 1)]).toEqual([null, 'date-reached', 'date-reached']);
+        // Sunday publishes (its own tx) or publishes nothing (epoch 1's tx of 2026-10-18 stays the last v2 publication)
+        for (const b of [
+            { date: '2026-11-22', lastV2PublishTx: 'SundayTx', lastV2PublishUtc: '2026-11-22 01:40' },
+            { date: '2026-11-22', lastV2PublishTx: epoch1Tx, lastV2PublishUtc: '2026-10-18 01:38' },
+        ]) {
+            expect([boundaryHold(2, b, release), boundaryHold(3, b, release), boundaryHold('unknown', b, release)]).toEqual(['tx-known', 'tx-known', 'tx-known']);
+            expect(v2EstimateAllowed(2, b, release)).toBe(false);
+        }
+    });
 });
 
 describe('preview override', () => {

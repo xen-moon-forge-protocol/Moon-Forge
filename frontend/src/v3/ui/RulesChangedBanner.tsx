@@ -10,7 +10,7 @@
  */
 import { Link, useLocation } from 'react-router-dom';
 import { useDetection } from '../detect';
-import { V3_BOUNDARY } from '../facts-v3';
+import { V3_BOUNDARY, boundaryPublication } from '../facts-v3';
 
 const TEXT_PAGES = ['/', '/start', '/faq', '/transparency', '/whitepaper', '/donate', '/bot'];
 const APP_PAGES = ['/forge', '/missions'];
@@ -22,7 +22,8 @@ export default function RulesChangedBanner() {
     const rewards3 = d.rewards === 3;
     if (!rules3 && !rewards3) return null;
     const path = pathname.replace(/\/+$/, '') || '/';
-    const since = V3_BOUNDARY ? ` since the publish transaction of ${V3_BOUNDARY.date} (UTC)` : '';
+    // dated by the transaction's own block time, never by the hold start (an earlier day when the planned date published nothing)
+    const since = V3_BOUNDARY?.lastV2PublishTx ? ` since ${boundaryPublication(V3_BOUNDARY)}` : '';
     if (APP_PAGES.includes(path)) {
         // the Forge shows the v3 quote itself under rewards 3; only the program line can still apply there
         const showRewards = rewards3 && path === '/missions';

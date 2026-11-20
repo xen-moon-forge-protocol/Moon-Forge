@@ -23,13 +23,13 @@ import { xenMarketLive } from '../../lib/market';
 import { fetchXntUsd } from '../../components/BurnVsSell';
 import { quoteFromWeek, weekStateFromFeed, type QuoteOk, type QuoteResult, type WeekSoFarFeed } from '../../lib/quote';
 import { useDetection } from '../detect';
-import { boundaryText, githubDependence, rewardsV3 } from '../facts-v3';
+import { boundaryText, githubDependence, rewardsV3, type Boundary } from '../facts-v3';
 
 /**
  * The boundary notice (X-034, T9-25), rendered by TheForge whenever V3_BOUNDARY is set, before and after the boundary:
  * the UTC date and, once it exists, the last v2 publish transaction; never an epoch number (WORDING §1).
  */
-export function BoundaryNotice({ boundary, className = '' }: { boundary: { date: string; lastV2PublishTx: string | null }; className?: string }) {
+export function BoundaryNotice({ boundary, className = '' }: { boundary: Boundary; className?: string }) {
     const t = boundaryText(boundary);
     return (
         <Notice kind="info" className={className}>
