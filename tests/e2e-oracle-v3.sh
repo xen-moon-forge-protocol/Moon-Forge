@@ -51,6 +51,8 @@ if (ss -ltn 2>/dev/null || netstat -ltn 2>/dev/null) | grep -qE ":(8899|9900|$WO
   echo "a validator or the fake world is already listening on 8899/9900/$WORLD_PORT: stop it first" >&2; exit 1
 fi
 [ -f "$NEW_SO" ] || { echo "no merged localnet binary at $NEW_SO (run tests/run-local.sh first)" >&2; exit 1; }
+# the oracle's R-7 pin (UPGRADED_ELF) = the build this run deploys (tests/e2e-oracle/preload.cjs, localnet profile only)
+export E2E_UPGRADED_ELF="$(sha256sum "$NEW_SO" | cut -d' ' -f1):$(stat -c %s "$NEW_SO")"
 [ -f tests/fixtures/mpl_core.so ] || solana program dump -u https://rpc.mainnet.x1.xyz "$CORE" tests/fixtures/mpl_core.so
 (cd oracle && [ -d node_modules ] || npm ci --no-audit --no-fund >/dev/null)
 chmod +x tests/e2e-oracle/bin/git 2>/dev/null # a checkout made on Windows may drop the mode bit

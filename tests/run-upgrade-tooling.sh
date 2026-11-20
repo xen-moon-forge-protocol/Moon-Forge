@@ -122,6 +122,7 @@ snap "$WORK/run/snap-s5b.json"; same "nothing changed by the refused s7" same-s5
 # --- S6: the sign-off sheet's commands, steps 1-10 ------------------------------------------------------------------
 echo "S6 (sign-off section 5 commands)"
 NEW=$(stat -c %s "$NEW_SO"); S2_SHA=$(sha256sum "$NEW_SO" | cut -d' ' -f1)
+export E2E_UPGRADED_ELF="$S2_SHA:$NEW" # the oracle's R-7 pin = this localnet build (tests/e2e-oracle/preload.cjs; --localnet-oracle runs only)
 run1() { echo "+ $*"; "$@" || { echo "FAILED: $*"; return 1; }; }
 s6_cli() { # each line must succeed; the first failure stops S6 (as the sheet's abort rules say)
   run1 solana program extend "$PROGRAM" $((NEW-OLD_LEN)) -k "$ARCH" -u "$LOCAL" &&

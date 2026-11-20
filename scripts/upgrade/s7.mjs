@@ -183,7 +183,7 @@ async function main() {
     else if (!later) G.warn('INITIAL_KEEPER', 'give --keeper to check that the key the owner keeps is the one compiled in (the only key that can create the keeper seat before 2026-12-16 00:00 UTC)');
     if (seatCold) G.check(keyChunks(so, seatCold) === 4, 'SEAT_COLD_INITIAL compiled in', `${seatCold.toBase58()} is in the deployed ELF`, `${seatCold.toBase58()} is not in the deployed ELF: init_seat would write another cold key`);
   }
-  const sims = await stepOneSimulations(conn, v3, dec, cfg0);
+  const sims = await stepOneSimulations(conn, v3, dec, cfg0, { seatPayer: deployWallet });
   G.check(sims.initSeat === 'ok' || !!(await conn.getAccountInfo(P.oracleSeat)), 'init_seat simulation (6.3 step 1)', sims.initSeat === 'ok' ? 'ok (not 101)' : 'the seat already exists', sims.initSeat);
   if (sims.owner) {
     G.check(sims.createWar === 'SealedJoinRequired', 'create_war simulation (6.3 step 1)', sims.createWar, `${sims.createWar}, expected SealedJoinRequired`);

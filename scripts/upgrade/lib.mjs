@@ -446,11 +446,15 @@ export async function sendIxs(conn, ixs, signers, { commitment = 'confirmed' } =
  * SPEC-UPGRADE-v2 6.3 step 1, simulated without signatures: init_seat (not custom 101), create_war (SealedJoinRequired),
  * place_bet (KeeperRequired). The two game calls need a PlayerState owner: the first one on chain (null codes without).
  */
-export async function stepOneSimulations(conn, idl, decoder, cfg) {
+export async function stepOneSimulations(conn, idl, decoder, cfg, { seatPayer = null } = {}) {
   const bs58 = anchor.utils.bytes.bs58;
   const players = await conn.getProgramAccounts(PROGRAM_ID, { commitment: 'confirmed', dataSlice: { offset: 0, length: 0 }, filters: [{ memcmp: { offset: 0, bytes: bs58.encode(decoder.discOf('PlayerState')) } }] }).catch(() => []);
   const owner = players.length ? (decoder.decode((await conn.getAccountInfo(players[0].pubkey, 'confirmed')).data)?.value?.owner ?? null) : null;
-  const payer = owner ?? cfg.architect;
+  // init_seat moves max(1 XNT, 10% of the free pool) + rent from its payer, so it is simulated with the wallet that
+  // really pays it at S7 (the deploy wallet, s7.mjs init-seat), never with a player's wallet: on mainnet the only
+  // PlayerState owner holds less than the bond, and the simulation then fails with the System program's
+  // insufficient-funds error (Custom 1) instead of answering for the program (found on a mainnet fork, 2026-11-20)
+  const payer = seatPayer ?? cfg.architect;
   const initSeat = idlIx(idl, 'init_seat', [
     { name: 'config', pubkey: P.config }, { name: 'seat', pubkey: P.oracleSeat, writable: true }, { name: 'reward_vault', pubkey: P.rewardVault },
     { name: 'payer', pubkey: payer, writable: true, signer: true }, { name: 'system_program', pubkey: SYSTEM_ID },

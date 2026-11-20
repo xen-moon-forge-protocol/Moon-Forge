@@ -231,7 +231,7 @@ async function main() {
 
   // ── simulations (no signatures; nothing lands) ──────────────────────────────────────────────────────────────────
   console.log('\nsimulations (sigVerify off; read-only)');
-  const sims = await stepOneSimulations(conn, v3, dec, cfg);
+  const sims = await stepOneSimulations(conn, v3, dec, cfg, { seatPayer: deployWallet });
   census.simulations = { initSeat: sims.initSeat, createWar: sims.createWar, placeBet: sims.placeBet };
   if (stage === 's5') G.check(sims.initSeat === 'InstructionFallbackNotFound' || /"Custom":101/.test(sims.initSeat), 'init_seat on the live binary', `${sims.initSeat} (programRules 2: the old binary)`, `${sims.initSeat}: the live binary already knows init_seat`);
   else if (stage === 's6') G.check(sims.initSeat === 'ok', 'init_seat (SPEC 6.3 step 1)', 'ok (not 101)', sims.initSeat);

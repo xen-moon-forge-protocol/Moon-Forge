@@ -62,8 +62,22 @@ if (process.env.E2E_V3_FIRST_EPOCH) {
   SUBS["rewards.ts"].push(["export const V3_FIRST_EPOCH: number | null = null;", `export const V3_FIRST_EPOCH: number | null = ${n};`]);
 }
 // with the fake world, the 30-requests-a-minute spacing of GeckoTerminal's public API (pricing.ts getJson) is not needed
-// (round 4 added the v3 reader getJsonV3 with the same pacing line: both are replaced; main's v2 oracle has only one)
-const WORLD_SUBS = { "pricing.ts": [["const wait = lastCall + 2100 - Date.now();", "const wait = 0;", [1, 2]]] }; // 1 in main's oracle
+// (round 4 added the v3 reader getJsonV3 with the same pacing line: both are replaced; main's v2 oracle has only one).
+// Since 2026-11-19 (GeckoTerminal's measured free-tier limits) one shared gtPaced() holds the line with a variable
+// interval; an older oracle (MAIN_REF / MAIN_ORACLE_TAR before that change) still has the fixed 2,100 ms line. Either
+// form is accepted (an array = alternatives, counted together), so the spacing is still always removed and a source
+// with neither form still stops the run.
+const WORLD_SUBS = { "pricing.ts": [[["const wait = lastCall + pace.intervalMs - Date.now();", "const wait = lastCall + 2100 - Date.now();"], "const wait = 0;", [1, 2]]] };
+// R-7 (UPGRADED_ELF, pinned to the S2 MAINNET build since 2026-11-20): a local validator runs the --features localnet
+// twin, whose bytes differ, so the oracle would read the upgrade as "unknown" and fail closed. The rehearsal scripts pass
+// the build they deployed as E2E_UPGRADED_ELF=<sha256>:<bytes> and the pin is replaced by it (localnet profile only;
+// exactly one pin line, null or pinned, must be there, else the run stops).
+if (process.env.E2E_UPGRADED_ELF) {
+  const m = /^([0-9a-f]{64}):([1-9][0-9]*)$/.exec(process.env.E2E_UPGRADED_ELF);
+  if (!m) throw new Error(`E2E_UPGRADED_ELF=${process.env.E2E_UPGRADED_ELF}: expected <sha256 hex>:<bytes>`);
+  SUBS["x1-v3.ts"].push([/^export const UPGRADED_ELF: \{ sha256: string; bytes: number \} \| null = (?:null|\{ sha256: "[0-9a-f]{64}", bytes: \d+ \});$/m,
+    `export const UPGRADED_ELF: { sha256: string; bytes: number } | null = { sha256: "${m[1]}", bytes: ${m[2]} };`]);
+}
 const active = {};
 for (const [on, table] of [[process.env.E2E_LOCALNET === "1", SUBS], [!!process.env.E2E_FAKE_WORLD, WORLD_SUBS]]) {
   if (on) for (const [f, list] of Object.entries(table)) active[f] = [...(active[f] || []), ...list];
@@ -75,11 +89,18 @@ if (Object.keys(active).length) {
     const subs = filename.startsWith(srcDir) && path.dirname(filename) + path.sep === srcDir ? active[path.basename(filename)] : null;
     if (!subs) return tsHandler(module, filename);
     let code = fs.readFileSync(filename, "utf8");
-    for (const [from, to, times = 1] of subs) {
-      const n = code.split(from).length - 1;
+    for (const [fromAny, to, times = 1] of subs) {
+      if (fromAny instanceof RegExp) {
+        const n = (code.match(new RegExp(fromAny.source, fromAny.flags.includes("g") ? fromAny.flags : fromAny.flags + "g")) || []).length;
+        if (n !== times) throw new Error(`e2e localnet profile: ${fromAny} matches ${n} times in ${filename} (expected ${times}): update tests/e2e-oracle/preload.cjs`);
+        code = code.replace(fromAny, () => to);
+        continue;
+      }
+      const froms = Array.isArray(fromAny) ? fromAny : [fromAny];
+      const n = froms.reduce((s, from) => s + code.split(from).length - 1, 0);
       const allowed = Array.isArray(times) ? times : [times];
-      if (!allowed.includes(n)) throw new Error(`e2e localnet profile: "${from}" occurs ${n} times in ${filename} (expected ${allowed.join(" or ")}): update tests/e2e-oracle/preload.cjs`);
-      code = code.split(from).join(to);
+      if (!allowed.includes(n)) throw new Error(`e2e localnet profile: "${froms.join('" or "')}" occurs ${n} times in ${filename} (expected ${allowed.join(" or ")}): update tests/e2e-oracle/preload.cjs`);
+      for (const from of froms) code = code.split(from).join(to);
     }
     module._compile(service.compile(code, filename), filename);
   };
