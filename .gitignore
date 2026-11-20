@@ -22,6 +22,7 @@ oracle/node_modules/
 dist/
 build/
 frontend/dist/
+frontend/dist-mirror/
 oracle/dist/
 artifacts/
 cache/

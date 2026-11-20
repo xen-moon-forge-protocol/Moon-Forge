@@ -1,0 +1,10 @@
+{
+  "kind": "moon-forge-mirrors",
+  "version": 1,
+  "note": "Copies of the site and the source on Arweave, one path manifest per upload (scripts/mirror/build-mirror.mjs, .github/workflows/mirror-arweave.yml). Each copy is checked against the chain, not trusted: the X1 program ID is 57UE1U1t23ztg2noLp8pcpGW1B1Xw25rLH6ra9Mchea9, and every file of a copy has its sha256 in that copy's MIRROR.json. The epoch files are not copied (decision of 2026-10-25).",
+  "gateways": [
+    "turbo-gateway.com",
+    "ar-io.dev"
+  ],
+  "mirrors": []
+}

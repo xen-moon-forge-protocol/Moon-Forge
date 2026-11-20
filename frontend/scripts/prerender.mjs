@@ -20,7 +20,10 @@ import { execSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const DIST = path.join(ROOT, 'dist');
+// --dist <dir>: the Arweave mirror build (vite build --mode mirror) writes dist-mirror/; its links are made relative
+// afterwards by scripts/mirror/build-mirror.mjs
+const distArg = process.argv.indexOf('--dist');
+const DIST = path.join(ROOT, distArg > 0 ? process.argv[distArg + 1] : 'dist');
 const PUBLIC = path.join(ROOT, 'public');
 const BASE = '/Moon-Forge/';
 const args = new Set(process.argv.slice(2));
@@ -326,6 +329,12 @@ function topBlocks(F) {
     ];
 }
 
+// Arweave copies (public/links.json `mirrors`, filled by scripts/mirror/sync-crosslinks.mjs): no section until one exists.
+function mirrorLines(F) {
+    if (!F.mirrors?.length) return [];
+    return [F.mirrorsNote, '', ...F.mirrors.slice(0, 3).map((m) => `- ${m.date} (commit ${m.commit.slice(0, 12)}): ${m.urls.join(' or ')}; llms.txt at ${m.urls[0]}llms.txt, the agent card at ${m.urls[0]}.well-known/agent-card.json, the repository files under ${m.urls[0]}source/ (inventory with sha256: ${m.urls[0]}MIRROR.json)${m.bundle ? `; full git history (${m.bundle.ref}): ${m.bundle.url}, sha256 ${m.bundle.sha256}` : ''}`)];
+}
+
 function llmsTxt(F) {
     const I = F.identity; const L = F.officialLinks; const site = L.site;
     return `# Moon Forge
@@ -364,7 +373,7 @@ Rules described: program tag ${F.rules.program}, oracle ${F.rules.oracle}, valid
 - [Public counter](${L.counter}): XEN removed from supply through Moon Forge per chain and the XNT the published epochs set aside for burners, rebuilt from the epoch files at every site build
 - [Hourly week-so-far feed](${L.weekFeed}): the inputs of the binding quote under the v3 rules (see "Quote a burn right now" below)
 
-## Key questions, answered
+${mirrorLines(F).length ? `## If this site is down\n${mirrorLines(F).join('\n')}\n\n` : ''}## Key questions, answered
 ${F.keyQa.map((k) => `Q: ${k.q}\nA: ${k.a}\n`).join('\n')}
 ## Quote a burn right now (v3 rules)
 ${F.quoteFeed.today}
@@ -409,6 +418,7 @@ function llmsFullTxt(F, meta) {
     for (const x of F.poolGrowth) lines.push(`- ${x}`);
     h('Verify you are on the real site');
     lines.push(`- Site: ${site}`, `- X1 program: ${I.programId} (RPC ${I.x1Rpc}, explorer ${I.x1Explorer}), source tag ${F.rules.program}, ${I.license} license`, `- Burn portal, the same address on every supported chain: ${I.portal}`, `- Artifacts collection (Metaplex Core): ${I.collectionPda}`, `- Reward pool: ${I.rewardVaultPda}`, `- Architect wallet (upgrade authority during the test period; receives the disclosed cuts): ${I.architectWallet}`, `- Source: ${L.github} · X: ${L.x}`, '- Any other program ID, portal, collection, site or "claim" page is not Moon Forge.');
+    if (mirrorLines(F).length) { h('If this site is down'); lines.push(...mirrorLines(F)); }
     h('Chains');
     for (const c of F.chains) lines.push(`- ${c.name} (chain id ${c.chainId}): XEN ${c.xenToken}; ${c.live ? `portal live at ${I.portal} (Sourcify https://repo.sourcify.dev/${c.chainId}/${I.portal}); gas coin ${c.gas}; a burn counts after ${c.finalityBlocks} blocks` : 'no portal, and none is planned by this project'}`);
     lines.push('', `Portal addresses and start blocks: ${L.portalsJson}. How a chain could be added (this project adds none): see the key question "Which chains are supported, and how could another chain be added?" above and ${L.operatorsMd} (section "Add a chain").`);

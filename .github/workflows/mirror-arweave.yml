@@ -1,0 +1,135 @@
+# Arweave mirror of the site and the repository files (scripts/mirror/build-mirror.mjs): if GitHub Pages or this
+# repository were taken down or hidden, the pages, llms.txt, llms-full.txt, the agent card, the plain guide and the
+# source stay readable at https://<gateway>/<manifest id>/. Same path as the Artifact metadata (nft-arweave.yml):
+# ArDrive Turbo's free tier, signed by a throwaway key generated inside the run; it owns nothing and pays nothing, and
+# this workflow reads no secret. Files above the free tier (the app bundle, large images and fixtures, the git
+# bundle) are left out and listed in the copy's MIRROR.json: the copy is then read-only.
+#   dry-run  (default) builds the mirror and prints the plan; uploads nothing.
+#   mainnet  the permanent upload; needs confirm = PERMANENT and a green wording check. Commit the run artifact's
+#            mirrors.json as deployments/mirrors.json, then run node scripts/mirror/sync-crosslinks.mjs and
+#            (cd frontend && node scripts/prerender.mjs --write-public), so every surface lists the new copy.
+#   check    serve check of every copy in deployments/mirrors.json on both gateways (also runs weekly).
+# Actions are pinned to commit SHAs (version in the comment); runner image pinned; Node 22.
+name: Arweave mirror
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "dry-run (uploads nothing) / mainnet (permanent) / check (serve check of the recorded copies)"
+        required: true
+        default: dry-run
+        type: choice
+        options: [dry-run, mainnet, check]
+      bundle_ref:
+        description: "optional: a release tag; its git bundle and sha256 are written to the plan (the bundle itself is above the free tier and is not uploaded)"
+        required: false
+        default: ""
+      confirm:
+        description: "type PERMANENT to allow a mainnet upload"
+        required: false
+        default: ""
+  schedule:
+    - cron: "17 5 * * 1" # weekly check; a no-op while deployments/mirrors.json lists no copy
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: mirror-arweave
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    if: github.event_name == 'workflow_dispatch' && inputs.mode != 'check'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0 # the git bundle of a tag needs the history
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+      - name: Offline tests (rewriting, manifest, record, cross-links)
+        run: node --test scripts/mirror/test/mirror.test.mjs
+      - name: Refuse a mainnet upload without the confirmation
+        if: inputs.mode == 'mainnet' && inputs.confirm != 'PERMANENT'
+        run: |
+          echo "::error::a mainnet upload is permanent: dispatch again with confirm = PERMANENT"
+          exit 1
+      - name: Wording check (docs/WORDING.md section 4 gate)
+        if: inputs.mode == 'mainnet'
+        run: node scripts/wording-check.mjs
+      - name: Build the mirror site (relative links, base path read at run time)
+        working-directory: frontend
+        run: |
+          npm ci --ignore-scripts
+          node scripts/check-program-id.mjs
+          node scripts/prerender.mjs --check
+          npx tsc
+          npx vite build --mode mirror
+          node scripts/prerender.mjs --dist dist-mirror
+      - name: Install the Turbo SDK from the lockfile (no install scripts)
+        if: inputs.mode == 'mainnet'
+        run: npm ci --prefix scripts/nft-metadata --ignore-scripts --no-audit --no-fund
+      - name: Build the mirror, then upload (dry-run uploads nothing)
+        env:
+          MODE: ${{ inputs.mode }}
+          BUNDLE_REF: ${{ inputs.bundle_ref }}
+        run: |
+          set -o pipefail
+          mkdir -p out
+          args=(out --site frontend/dist-mirror)
+          if [ -n "$BUNDLE_REF" ]; then args+=(--bundle-ref "$BUNDLE_REF"); fi
+          if [ "$MODE" = mainnet ]; then args+=(--upload); fi
+          node scripts/mirror/build-mirror.mjs "${args[@]}" | tee out/run.txt
+      - name: Summary
+        if: always()
+        env:
+          MODE: ${{ inputs.mode }}
+        run: |
+          {
+            echo "### Arweave mirror ($MODE)"
+            echo '```'
+            head -n 150 out/run.txt 2>/dev/null || true
+            echo '```'
+            if [ -f out/result.json ]; then echo 'New entry (commit out/mirrors.json as deployments/mirrors.json):'; echo '```json'; cat out/result.json; echo '```'; fi
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: mirror-arweave-${{ inputs.mode }}-${{ github.run_id }}
+          path: |
+            out/run.txt
+            out/plan.json
+            out/result.json
+            out/mirrors.json
+            out/manifest.json
+            out/stage/MIRROR.json
+          if-no-files-found: ignore
+          retention-days: 90
+
+  check:
+    if: github.event_name == 'schedule' || inputs.mode == 'check'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+      - name: Every surface lists the recorded copies
+        run: node scripts/mirror/sync-crosslinks.mjs --check
+      - name: Serve check of every recorded copy on both gateways
+        run: |
+          set -o pipefail
+          node scripts/mirror/check-mirrors.mjs --json check.json | tee check.txt
+      - name: Summary
+        if: always()
+        run: |
+          { echo '### Arweave mirror: serve check'; echo '```'; cat check.txt 2>/dev/null || true; echo '```'; } >> "$GITHUB_STEP_SUMMARY"

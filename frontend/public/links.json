@@ -51,6 +51,8 @@
       { "name": "Your wallet extension", "hosts": [], "sees": "whatever its own privacy policy says", "when": "when you connect" }
     ]
   },
+  "mirrorsNote": "No copy on Arweave yet. When one is stored, it is listed here, newest first, for use when the main site or the GitHub repository is down. Each copy is a snapshot of the commit it names; check the X1 program ID (57UE1U1t23ztg2noLp8pcpGW1B1Xw25rLH6ra9Mchea9) before signing anything. The record with every file hash is deployments/mirrors.json in the repository and MIRROR.json inside each copy.",
+  "mirrors": [],
   "signature": null,
   "signatureNote": "Not signed. Verify this file against the copy in the GitHub repository (frontend/public/links.json)."
 }

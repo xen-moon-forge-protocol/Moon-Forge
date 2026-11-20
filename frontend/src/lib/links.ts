@@ -24,6 +24,9 @@ export interface LinksFile {
   never: string[];
   verify: VerifyFacts;
   privacy: { sentence: string; thirdParties: ThirdParty[] };
+  /** Arweave copies of the site and the repository files, newest first (scripts/mirror/sync-crosslinks.mjs). */
+  mirrorsNote?: string;
+  mirrors?: { manifest: string; date: string; commit: string; urls: string[]; bundle?: { url: string; sha256: string; ref: string } }[];
   signature: null | { signer: string; sig: string; signedAt: string };
   signatureNote?: string;
 }

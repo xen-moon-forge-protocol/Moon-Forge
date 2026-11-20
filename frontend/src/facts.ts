@@ -485,6 +485,11 @@ export const notOfficial: string = linksJson.notOfficial;
 export const xNote: string = linksJson.official.find((l) => l.id === 'x')?.note ?? '';
 /** The facts that identify the real Moon Forge (X-064), from public/links.json. */
 export const verify = linksJson.verify;
+/** Arweave copies of the site and the repository files (newest first), from public/links.json, which
+ *  scripts/mirror/sync-crosslinks.mjs fills from deployments/mirrors.json. Empty until the first upload. */
+export interface Mirror { manifest: string; date: string; commit: string; urls: string[]; bundle?: { url: string; sha256: string; ref: string } }
+export const mirrors: readonly Mirror[] = (linksJson as { mirrors?: Mirror[] }).mirrors ?? [];
+export const mirrorsNote: string = (linksJson as { mirrorsNote?: string }).mirrorsNote ?? '';
 
 export const risks: readonly string[] = [
     'Burned XEN is gone forever. There is no undo.',
@@ -733,7 +738,7 @@ export const sitemapFiles: readonly string[] = ['llms.txt', 'llms-full.txt', 'ag
 
 export const facts = {
     INTERIM, rules, identity, officialLinks, chains, liveChains, epochRules, tiers, fees, artifacts, forgeSplit, artifactRules,
-    games, gameRules, notices, disambiguation, position, scale, SCALE_DATE, oldBurns, ageNotice, legacyPilot, STATUS_AS_OF, finalUpgradeBuild, finalUpgradeBuildLine, boundaryNotice, sideChainAnswer, statusDates, chainSupport, identityLine, poolGrowth, quoteFeed, never, notOfficial, xNote, verify, risks, trust, verifyChecklist, steps,
+    games, gameRules, notices, disambiguation, position, scale, SCALE_DATE, oldBurns, ageNotice, legacyPilot, STATUS_AS_OF, finalUpgradeBuild, finalUpgradeBuildLine, boundaryNotice, sideChainAnswer, statusDates, chainSupport, identityLine, poolGrowth, quoteFeed, never, notOfficial, xNote, verify, mirrors, mirrorsNote, risks, trust, verifyChecklist, steps,
     faq, keyQa, startQa, whitepaper, routes, sitemapFiles, bot,
 } as const;
 
