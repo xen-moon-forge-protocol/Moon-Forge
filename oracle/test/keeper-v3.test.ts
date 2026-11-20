@@ -366,6 +366,11 @@ const reveals = (w: World) => w.c.sent.filter((s) => s.data && s.data.reveal).ma
 const opts = (o: Record<string, unknown> = {}) => ({ now: () => NOW, sleep: async () => undefined, memo: newMemoV3(), clockMs: () => 0, ...o });
 
 async function main() {
+  // R-7: the fake chains below model the upgrade by the deploy slot and the PDAs; their ProgramData is not the S2 build that
+  // x1-v3.ts UPGRADED_ELF pins, so this suite runs with the pin cleared (as before S2). The pinned case: idl-split.test.ts.
+  const x1v3Mod = require("../src/x1-v3") as { UPGRADED_ELF: { sha256: string; bytes: number } | null };
+  assert.ok(x1v3Mod.UPGRADED_ELF, "the S2 pin is set in x1-v3.ts");
+  x1v3Mod.UPGRADED_ELF = null;
   // ── chains ───────────────────────────────────────────────────────────────────────────────────────────────────────
   await test("chain KDF: deterministic per key, different per key / slot / nonce, keccak-linked, tip = x_0", () => {
     const a = Keypair.generate();

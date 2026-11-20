@@ -296,18 +296,23 @@ async function main() {
   });
 
   // ── W2-4 ─────────────────────────────────────────────────────────────────────────────────────────
+  // These cases model the deploy slot and the PDAs on fake chains whose ProgramData is not the S2 build, so they run with
+  // the R-7 pin cleared (as before S2); the pinned build is covered by the R-7 test below, which restores the pin.
+  const x1v3Mod = require("../src/x1-v3") as { UPGRADED_ELF: { sha256: string; bytes: number } | null };
+  const S2_PIN = x1v3Mod.UPGRADED_ELF;
+  x1v3Mod.UPGRADED_ELF = null;
   const v3p = programV3({} as never);
   const probeOf = async (setup: (c: FakeChain) => Promise<void> | void) => {
     const c = new FakeChain();
     await setup(c);
-    return readUpgradeProbeV3(c.connection());
+    return readUpgradeProbeV3(c.connection(), "finalized", null);
   };
 
   await test("W2-4: the live chain today (deploy slot 85,429,880, no ExtraState / OracleSeat) is 'legacy' and refuses every v3 publication", async () => {
     assert.strictEqual(LIVE_DEPLOY_SLOT, 85_429_880);
     const p = await probeOf((c) => putProgram(c, LIVE_DEPLOY_SLOT));
     assert.deepStrictEqual([p.deploySlot, p.extraState, p.oracleSeat, p.houseKeeper], [LIVE_DEPLOY_SLOT, null, null, null]);
-    const v = upgradeVerdictV3(p, v3p);
+    const v = upgradeVerdictV3(p, v3p, null);
     assert.strictEqual(v.status, "legacy");
     assert.strictEqual(v.reasons.length, 3, v.reasons.join("; "));
     assert.match(v.reasons.join("; "), /last-deploy slot 85429880 is not after 85429880.*ExtraState.*does not exist.*OracleSeat.*does not exist/);
@@ -322,11 +327,18 @@ async function main() {
       putProgram(c, 90_000_000);
       await putUpgradedPdas(c, v3p);
     });
-    assert.deepStrictEqual(upgradeVerdictV3(p, v3p), { status: "upgraded", reasons: [], deploySlot: 90_000_000 });
+    assert.deepStrictEqual(upgradeVerdictV3(p, v3p, null), { status: "upgraded", reasons: [], deploySlot: 90_000_000 });
     const c = new FakeChain();
     putProgram(c, 90_000_000);
     await putUpgradedPdas(c, v3p);
     assert.strictEqual((await assertUpgradedV3(c.connection(), v3p, "x")).status, "upgraded");
+    // with the S2 pin the same fake chain is not the upgraded binary: fail closed (R-7)
+    x1v3Mod.UPGRADED_ELF = S2_PIN;
+    try {
+      await assert.rejects(assertUpgradedV3(c.connection(), v3p, "x"), /not the upgraded binary \(unknown: .*is not the pinned S2 build/);
+    } finally {
+      x1v3Mod.UPGRADED_ELF = null;
+    }
   });
 
   await test("W2-4: anything in between fails closed ('unknown'): a half-done upgrade, a foreign or malformed PDA, an RPC error, a v2 client", async () => {
@@ -342,7 +354,7 @@ async function main() {
       ["no program account", () => undefined, /program account .* is missing/],
     ];
     for (const [what, setup, why] of cases) {
-      const v = upgradeVerdictV3(await probeOf(setup), v3p);
+      const v = upgradeVerdictV3(await probeOf(setup), v3p, null);
       assert.strictEqual(v.status, "unknown", what);
       assert.match(v.reasons.join("; "), why, what);
     }
@@ -354,7 +366,7 @@ async function main() {
     await assert.rejects(assertUpgradedV3(c.connection(), v3p, "to publish v3 epoch 2"), /not the upgraded binary \(unknown: RPC error: 429 Too Many Requests\)/);
     // the v2 client can never pass: it has no ExtraState / OracleSeat account
     c.rpcError = null;
-    const v = upgradeVerdictV3(await readUpgradeProbeV3(c.connection()), programV2({} as never));
+    const v = upgradeVerdictV3(await readUpgradeProbeV3(c.connection(), "finalized", null), programV2({} as never), null);
     assert.strictEqual(v.status, "unknown");
     assert.match(v.reasons.join("; "), /the client's IDL has no ExtraState account/);
   });
@@ -466,6 +478,7 @@ async function main() {
     ]);
   });
 
+  x1v3Mod.UPGRADED_ELF = S2_PIN;
   await test("R-7: with the S2 build pinned, a redeploy of another ELF (a rollback) is 'unknown', never 'upgraded'; the ELF is read once per deploy slot", async () => {
     const elf = Buffer.from(Array.from({ length: 300 }, (_, i) => (i * 7 + 3) & 0xff));
     const pin = { sha256: createHash("sha256").update(elf).digest("hex"), bytes: elf.length };
@@ -504,7 +517,8 @@ async function main() {
     await readUpgradeProbeV3(conn, "finalized", { ...pin, sha256: "00".repeat(32) });
     await readUpgradeProbeV3(conn, "finalized", { ...pin, sha256: "00".repeat(32) });
     assert.strictEqual(full, 1);
-    assert.strictEqual(UPGRADED_ELF, null, "pinned only after S2 (the reproducible build of the reviewed commit)");
+    // R-7: pinned after S2 to the reproducible build of the commit tagged program-2026-11-25 (docs/UPGRADE-2026-11.md section 2)
+    assert.deepStrictEqual(UPGRADED_ELF, { sha256: "4be7e34db410c416a3f97f97896e331c6eabf9ed2ccbbc195fc61fbcce6199b5", bytes: 1402408 }, "the S2 pin");
   });
 
   console.log(`idl split + upgrade guard tests: ${passed} passed, ${failed} failed`);

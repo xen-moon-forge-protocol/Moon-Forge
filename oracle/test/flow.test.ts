@@ -16,7 +16,7 @@ import { baseSnapshotSkipReason, computeExtraEpoch, verifyExtraFile } from "../s
 import { MPL_CORE, PDA } from "../src/x1";
 import { artifactSnapshotV3, assetSignaturesV3 } from "../src/x1-v3";
 import { catchUpExtrasV3, extraCreatedAtV3, extraPoolV3, ExtraRecoverySourcesV3, publishGateV3, readPublishClockV3, rebuildExtraV3 } from "../src/flow-v3";
-import { publishEpochV3 } from "../src/x1-v3";
+import { publishEpochV3, UPGRADED_ELF } from "../src/x1-v3";
 import { computeEpochV3, dataHashV3, EpochFileV3, MAX_PUBLISH_LAG, MIN_WINDOW, provisionalReasonOf, rebuildReason } from "../src/rewards";
 import {
   assembleInputsV3, buildExtraAfterBaseV3, buildV3, candleReadings, claimPlanV3, emptyRecording, fixtureSources, lastMissionIds, missionContinuity, prevCursor,
@@ -372,8 +372,14 @@ async function main() {
     await assert.rejects(publishEpochV3(null as never, null as never, noWindow as never), /refusing to publish epoch 2: a v3 file without a window/);
     // the golden file passes the file guard; with the null program it then stops at the W2-4 client check (a v3 client is
     // required, and the upgraded-binary probe comes after it), never at a file refusal
-    const fileRefusal = /refusing to publish epoch 2: (a provisional dry-run file|window of|a v3 file without a window)/;
-    await assert.rejects(publishEpochV3(null as never, null as never, built.file!), (e: Error) => !fileRefusal.test(String(e)) && /not built from moon_forge\.v3\.json/.test(String(e)), "the golden file passes the guard");
+    const fileRefusal = /refusing to publish epoch 2: (a provisional dry-run file|window of|a v3 file without a window|the file's rules block)/;
+    // R-7: since the S2 pin (x1-v3.ts UPGRADED_ELF) a file must name the pinned binary in its rules block, as the oracle's
+    // own sources do (sources-v3.ts rulesForEpochV3 with the pin); the golden file is built without it, so it is refused
+    // there, and the same file naming the pinned binary passes every file guard
+    await assert.rejects(publishEpochV3(null as never, null as never, built.file!), /the file's rules block names program null, not the pinned S2 binary/);
+    const pinned = clone(built.file!) as EpochFileV3;
+    pinned.rulesBlock = { ...(pinned.rulesBlock ?? DEFAULT_RULES_V3), programHash: UPGRADED_ELF!.sha256 } as never;
+    await assert.rejects(publishEpochV3(null as never, null as never, pinned), (e: Error) => !fileRefusal.test(String(e)) && /not built from moon_forge\.v3\.json/.test(String(e)), "the golden file passes the guard");
     // a window of MIN_WINDOW or more is never labelled, and the golden file has no such member
     assert.strictEqual(provisionalReasonOf({ startTs: 0, endTs: MIN_WINDOW }), null);
     assert.strictEqual(provisionalReasonOf(built.file!.window), null);

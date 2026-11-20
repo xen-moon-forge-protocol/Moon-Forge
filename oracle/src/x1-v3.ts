@@ -975,9 +975,10 @@ export async function readUpgradeProbeV3(connection0: Connection, commitment: Co
 /**
  * R-7: the sha256 of the S2 reproducible build (`bytes` long) that the upgrade deploys, pinned after S2 (null until then:
  * the verdict then rests on the deploy slot and the PDAs alone, as before). With a pin, a deploy of any other ELF (a
- * rollback to the old binary, a wrong build) is "unknown": no v3 publication, no v3 keeper pass.
+ * rollback to the old binary, a wrong build) is "unknown": no v3 publication, no v3 keeper pass. Pinned to the S2 build of
+ * the commit tagged program-2026-11-25 (docs/UPGRADE-2026-11.md section 2) by scripts/upgrade/pin-elf.mjs --write.
  */
-export const UPGRADED_ELF: { sha256: string; bytes: number } | null = null;
+export const UPGRADED_ELF: { sha256: string; bytes: number } | null = { sha256: "4be7e34db410c416a3f97f97896e331c6eabf9ed2ccbbc195fc61fbcce6199b5", bytes: 1402408 };
 
 const elfCache = new Map<string, string | null>();
 /**
