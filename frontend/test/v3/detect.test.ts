@@ -68,13 +68,14 @@ describe('rewards detection (newest epoch file)', () => {
     it('readRewards: v2 today, 3 once the newest file is v3, unknown on a file/epoch mismatch, throws on HTTP errors', async () => {
         const files: Record<string, any> = { '/r/epochs/index.json': index, '/r/epochs/epoch-1.json': epoch1 };
         const fake = (m: Record<string, any>) => (async (u: string) => (u in m ? { ok: true, status: 200, json: async () => m[u] } : { ok: false, status: 404, json: async () => null })) as any;
-        expect((await readRewards(fake(files), '/r/')).rewards).toBe(2);
+        // no boundary transaction (null): the files alone decide (the shipped constant is tested in the boundary block below)
+        expect((await readRewards(fake(files), '/r/', null)).rewards).toBe(2);
         const v3 = { version: 3, epoch: 2, window: { startTs: 1, endTs: 604_801 }, capacity: { cash: '1' }, leaves: [], root: '00' };
         const two = { ...files, '/r/epochs/index.json': { epochs: [...(index as any).epochs, { epoch: 2 }] }, '/r/epochs/epoch-2.json': v3 };
-        expect(await readRewards(fake(two), '/r/')).toEqual({ rewards: 3, newestEpoch: 2, newestVersion: 3, boundaryPassed: false });
-        expect((await readRewards(fake({ ...two, '/r/epochs/epoch-2.json': { ...v3, epoch: 5 } }), '/r/')).rewards).toBe('unknown');
-        await expect(readRewards(fake({ '/r/epochs/index.json': two['/r/epochs/index.json'] }), '/r/')).rejects.toThrow(/404/);
-        expect((await readRewards(fake({ '/r/epochs/index.json': { epochs: [] } }), '/r/')).rewards).toBe(2);
+        expect(await readRewards(fake(two), '/r/', null)).toEqual({ rewards: 3, newestEpoch: 2, newestVersion: 3, boundaryPassed: false });
+        expect((await readRewards(fake({ ...two, '/r/epochs/epoch-2.json': { ...v3, epoch: 5 } }), '/r/', null)).rewards).toBe('unknown');
+        await expect(readRewards(fake({ '/r/epochs/index.json': two['/r/epochs/index.json'] }), '/r/', null)).rejects.toThrow(/404/);
+        expect((await readRewards(fake({ '/r/epochs/index.json': { epochs: [] } }), '/r/', null)).rewards).toBe(2);
     });
 });
 
@@ -83,9 +84,9 @@ describe('the v2/v3 boundary (X-034, T9-25: burns after the last v2 publish tx a
     const fake = (m: Record<string, any>) => (async (u: string) => (u in m ? { ok: true, status: 200, json: async () => m[u] } : { ok: false, status: 404, json: async () => null })) as any;
     const epoch1Tx = (index as any).epochs[0].tx as string;
 
-    it('announced, transaction not named yet: the shipped constant names no transaction, so the files alone decide', async () => {
-        expect(V3_BOUNDARY?.lastV2PublishTx).toBeNull();
-        expect(await readRewards(fake(files), '/r/')).toEqual({ rewards: 2, newestEpoch: 1, newestVersion: 2, boundaryPassed: false });
+    it('released (2026-11-23, no publication on 2026-11-22): the shipped constant names the epoch-1 transaction, so the files as they are read rewards 3', async () => {
+        expect(V3_BOUNDARY?.lastV2PublishTx).toBe(epoch1Tx);
+        expect(await readRewards(fake(files), '/r/')).toEqual({ rewards: 3, newestEpoch: 1, newestVersion: 2, boundaryPassed: true });
     });
     it('a version-2 newest entry whose tx is the announced boundary = rewards 3, a week before any version-3 file', async () => {
         expect(await readRewards(fake(files), '/r/', epoch1Tx)).toEqual({ rewards: 3, newestEpoch: 1, newestVersion: 2, boundaryPassed: true });

@@ -12,7 +12,7 @@ import { EpochSource } from '../../epochs.mjs';
 import { SecretsStore } from '../../secrets.mjs';
 import { loadBundledIdl } from '../../idl.mjs';
 import { BN, disc, epoch1, feedFromWorld, idlAccounts, loadVectors, offlineKit, tempDir } from './helpers-v3.mjs';
-import { allocateWindow, capOnDay } from '../../quote-v3.mjs';
+import { allocateWindow, capOnDay, V3_SWITCH } from '../../quote-v3.mjs';
 import { feedInputs } from '../../burn.mjs';
 
 const E1 = epoch1();
@@ -105,7 +105,8 @@ test('donate: to the reward pool or the bankroll; the lottery vault is refused a
 
 test('capacity: the v2 upper bound today; under v3 C = 8% of F_ref in 7 daily tranches from the last publication', async () => {
   const mf = kit();
-  const cfg = { lastEpoch: new BN(1), rewardReserved: new BN(0) };
+  // before the switch week (V3_SWITCH, announced at the boundary: from the week after the last v2 epoch the kit reports v3)
+  const cfg = { lastEpoch: new BN(V3_SWITCH ? V3_SWITCH.firstEpoch - 2 : 1), rewardReserved: new BN(0) };
   const c2 = await mf.capacity({ cfg, freeLamports: 6_000_000_000n, now: 1_792_300_000 });
   assert.equal(c2.rules, 'v2');
   assert.equal(c2.weeklyCapUpperBoundXnt, 0.6);

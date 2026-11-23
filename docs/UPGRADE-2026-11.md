@@ -19,7 +19,7 @@ The upgrade window moves by one more week, from Wednesday 2026-11-18 to **Wednes
 | Build commit, binary sha256 and executable hash | tag `program-2026-11-18`, by Monday 2026-11-16 16:00 | tag `program-2026-11-25`, by Monday 2026-11-23 16:00 |
 | Upgrade window | Wednesday 2026-11-18, 16:00–20:00 | Wednesday 2026-11-25, 16:00–20:00 |
 | Base price start of never-forged Artifact tiers (`PRICE_LAUNCH_TS`, set in the build commit) | 2026-11-25 00:00 | 2026-12-02 00:00 |
-| Last epoch under the current (v2) reward rules (planned) | Sunday 2026-11-15 | Sunday 2026-11-22 |
+| Last epoch under the current (v2) reward rules (planned) | Sunday 2026-11-15 | Sunday 2026-11-22 (nothing published: no burn since epoch 1) |
 | Boundary release (the site names the last v2 publish transaction; from then the oracle builds no v2 epoch) | Monday 2026-11-16 06:00 | Monday 2026-11-23 06:00 |
 | First epoch under the v3 reward rules, and the first of the Legacy Pilot if its list is pinned (planned: the first Sunday after the upgrade) | Sunday 2026-11-22 | Sunday 2026-11-29 |
 | 14 consecutive stable days (from the day after the upgrade) | 2026-11-19 to 2026-12-02 | 2026-11-26 to 2026-12-09 |

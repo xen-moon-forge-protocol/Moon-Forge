@@ -30,8 +30,8 @@ describe('C-14: the boundary texts', () => {
         expect(t.rest).toContain('keep their own time and wait for the first epoch built under the v3 rules');
         expect(t.rest).toContain('no epoch under the current rules pays them');
     });
-    it('is announced (2026-11-20): the last v2 epoch planned for 2026-11-22, the release that names it for 2026-11-23 06:00 UTC', () => {
-        expect(V3_BOUNDARY).toEqual({ date: '2026-11-22', lastV2PublishTx: null, lastV2PublishUtc: null, releaseUtc: '2026-11-23 06:00' });
+    it('is released (2026-11-23 06:00 UTC): 2026-11-22 published nothing, so the last v2 publication is epoch 1 (2026-10-18 01:38 UTC)', () => {
+        expect(V3_BOUNDARY).toEqual({ date: '2026-11-22', lastV2PublishTx: '4XyLDEHiP4upPW7SEiMCDQrNrRjHGAiPjw6cKv7wN4we9uFGrByEmXtDGto5edJniVT16rQ8SprwXQRVNVCWSDrY', lastV2PublishUtc: '2026-10-18 01:38', releaseUtc: '2026-11-23 06:00' });
     });
     it('a named transaction always carries its own block time (the date the texts show)', () => {
         if (V3_BOUNDARY?.lastV2PublishTx) expect(V3_BOUNDARY.lastV2PublishUtc).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);

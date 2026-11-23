@@ -10,6 +10,11 @@ Everything below that needs the v3 rules or the upgraded program is switched on 
 refused, with nothing sent, before that. Against the live program (tag `program-2026-10-12`) the kit sends the same
 instructions as 1.0.0.
 
+**Boundary release (2026-11-23)**
+- `V3_SWITCH` (`quote-v3.mjs`) is set: `{ date: '2026-11-29', firstEpoch: 2, afterPublishTx: '4XyLDEHiP4upPW7SEiMCDQrNrRjHGAiPjw6cKv7wN4we9uFGrByEmXtDGto5edJniVT16rQ8SprwXQRVNVCWSDrY' }`,
+  the last v2 publish transaction, of 2026-10-18 01:38 UTC (no epoch under the v2 rules was published on 2026-11-22).
+  Every kit sentence about the v3 rules now opens with "From the epoch published on or after 2026-11-29 (UTC)" (`V3_FROM`).
+
 **Amended final program (2026-11-02), switched on with the upgraded program like everything below**
 - `recycleArtifact()` supports the final program's Core-closed floor hatch: under the v3 rules it first reads Metaplex
   Core's program account and its ProgramData account (`MPL_CORE_PROGRAMDATA`). Only when Core was closed (the program

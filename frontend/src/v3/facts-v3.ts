@@ -35,10 +35,12 @@
  * Announced 2026-11-20 (schedule change of 2026-11-14): the last v2 epoch is planned for Sunday 2026-11-22, the oracle builds
  * no v2 epoch from Monday 2026-11-23 06:00 UTC (oracle/src/flow-v3.ts V2_BOUNDARY_TS_DEFAULT), and the boundary release that
  * names the transaction is planned for that time.
+ * Released 2026-11-23: Sunday 2026-11-22 published nothing (no burn since epoch 1), so the last v2 publication is epoch
+ * 1's, block time 2026-10-18 01:38 UTC.
  */
 export type Boundary = { date: string; lastV2PublishTx: string | null; lastV2PublishUtc?: string | null; releaseUtc?: string | null };
 
-export const V3_BOUNDARY: Boundary | null = { date: '2026-11-22', lastV2PublishTx: null, lastV2PublishUtc: null, releaseUtc: '2026-11-23 06:00' };
+export const V3_BOUNDARY: Boundary | null = { date: '2026-11-22', lastV2PublishTx: '4XyLDEHiP4upPW7SEiMCDQrNrRjHGAiPjw6cKv7wN4we9uFGrByEmXtDGto5edJniVT16rQ8SprwXQRVNVCWSDrY', lastV2PublishUtc: '2026-10-18 01:38', releaseUtc: '2026-11-23 06:00' };
 
 const UTC_MINUTE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/;
 

@@ -385,9 +385,9 @@ test('burnXen reads X1 itself: x1Connection is required, the oracle\'s last publ
   assert.ok(conn.reads.includes(CONFIG.toBase58()), 'the Config account was read');
 });
 
-test('notices about the v3 rules carry their date (WORDING §1): the planned month until the switch is announced', () => {
-  assert.equal(V3_SWITCH, null);
-  assert.match(V3_FROM, /planned for November 2026, announced at least one full epoch ahead/);
+test('notices about the v3 rules carry their date (WORDING §1): the announced date once the switch is announced', () => {
+  assert.deepEqual({ ...V3_SWITCH }, { date: '2026-11-29', firstEpoch: 2, afterPublishTx: '4XyLDEHiP4upPW7SEiMCDQrNrRjHGAiPjw6cKv7wN4we9uFGrByEmXtDGto5edJniVT16rQ8SprwXQRVNVCWSDrY' });
+  assert.equal(V3_FROM, 'From the epoch published on or after 2026-11-29 (UTC)');
   assert.ok(NOTICES.etiquette.startsWith(V3_FROM));
   assert.ok(NOTICES_V3.forge.includes(`${V3_FROM}, each week the extra pot`));
 });
