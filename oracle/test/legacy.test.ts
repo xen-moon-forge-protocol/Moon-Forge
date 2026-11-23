@@ -28,7 +28,7 @@ import {
 } from "../src/extra";
 import {
   LEGACY_ARTIFACT_REBATE_BPS, LEGACY_BURN_TOPUP_BPS, LEGACY_CUTOFF_TS, LEGACY_LEFTOVER_BPS, LEGACY_SNAPSHOT_SHA256, LEGACY_SOURCES, legacyListingCheckV3, legacyListingOf, legacyPilotInputsV3,
-  legacyPilotRules, legacyPilotRulesOf, legacyRulesPatch, legacySnapshotError, legacySnapshotSetOf, legacySnapshotSha256, LegacySnapshotDoc, verifyLegacyListingV3,
+  LEGACY_SNAPSHOT_FILE, legacyPilotRules, legacyPilotRulesOf, legacyRulesPatch, legacySnapshotError, legacySnapshotSetOf, legacySnapshotSha256, LegacySnapshotDoc, loadLegacySnapshot, verifyLegacyListingV3,
 } from "../src/legacy";
 import { RULES_V3_VERSIONS, rulesForEpochV3, rulesInForceErrorV3, RulesVersionV3 } from "../src/rules-v3";
 
@@ -225,11 +225,23 @@ test("the rule: parameters pinned (cutoff 2026-11-01 00:00 UTC, six source chain
   assert.strictEqual(JSON.stringify(rulesBlockOf(DEFAULT_RULES_V3)), JSON.stringify(rulesBlockOf(clone(DEFAULT_RULES_V3))));
 });
 
-test("the registry: unarmed until the snapshot is pinned (the rules of the first v3 epoch unchanged); armed, they carry it and verify requires it", () => {
-  assert.strictEqual(LEGACY_SNAPSHOT_SHA256, null, "pinned only once the workflow has built the snapshot");
+test("the registry: armed by the pinned snapshot (the committed list); the rules of the first v3 epoch carry it and verify requires it", () => {
+  // the pin is the sha256 of the committed deployments/legacy-burners.json (built by run 45183686387 of the snapshot workflow)
+  assert.match(String(LEGACY_SNAPSHOT_SHA256), /^[0-9a-f]{64}$/, "pinned: a lowercase sha256 hex");
+  const committed = loadLegacySnapshot();
+  assert.strictEqual(committed.sha256, LEGACY_SNAPSHOT_SHA256, "the committed list is the pinned one");
+  const doc = JSON.parse(fs.readFileSync(LEGACY_SNAPSHOT_FILE, "utf8"));
+  assert.strictEqual(legacySnapshotError(doc), null, "the oracle's validator accepts the committed list");
+  assert.strictEqual(legacySnapshotSha256(doc), LEGACY_SNAPSHOT_SHA256, "its content hashes to the pin");
+  assert.strictEqual(doc.cutoff, LEGACY_CUTOFF_TS);
+  assert.deepStrictEqual(doc.chains.map((c: { chainId: number }) => c.chainId), LEGACY_SOURCES.map((s) => s.chainId));
   assert.deepStrictEqual(legacyRulesPatch(null), {});
-  assert.strictEqual("legacyPilot" in RULES_V3_VERSIONS[0].rules, false);
-  assert.strictEqual("legacyPilot" in rulesForEpochV3(1, null), false);
+  assert.deepStrictEqual(RULES_V3_VERSIONS[0].rules.legacyPilot, legacyPilotRules(LEGACY_SNAPSHOT_SHA256 as string));
+  assert.deepStrictEqual(rulesForEpochV3(1, null).legacyPilot, legacyPilotRules(LEGACY_SNAPSHOT_SHA256 as string));
+  // a file built under the block without the member is not the rules in force
+  const { legacyPilot: _p, ...unarmedRules } = rulesForEpochV3(1, null) as RulesBlockV3;
+  const unarmed = build({ epoch: 1, prev: null, burns: [{ day: 1, usd: 1_000_000n, x1: W(1), pilot: pilot(1) }], F: 2_000n * XNT, rules: unarmedRules });
+  assert.match(String(rulesInForceErrorV3(unarmed, null)), /not the rules version in force/);
   // armed (the pin): the rules of the first v3 epoch carry the member, and a file without it is not the rules in force
   const { legacyPilot: _x, ...first } = RULES_V3_VERSIONS[0].rules as RulesBlockV3;
   const armed: RulesVersionV3[] = [{ fromEpoch: null, announced: null, rules: { ...first, ...legacyRulesPatch(SHA) } }];

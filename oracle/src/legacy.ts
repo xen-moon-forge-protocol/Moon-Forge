@@ -64,7 +64,7 @@ const BPS = 10_000n;
  * epoch (rules-v3.ts); pin it BEFORE the first v3 epoch is built. After that, the rule can only come in as a new rules
  * version (rulesId + 1, with its fromEpoch and announcement), never by editing a version files were built under.
  */
-export const LEGACY_SNAPSHOT_SHA256: string | null = null;
+export const LEGACY_SNAPSHOT_SHA256: string | null = "2aea1f8243fe5fbd207483180dca6306b7e9d88bd6b8bda715cadcaa21fae047";
 /** where the oracle reads the snapshot (the repository copy, committed with its pin) */
 export const LEGACY_SNAPSHOT_FILE = path.join(__dirname, "..", "..", "deployments", "legacy-burners.json");
 

@@ -16,6 +16,7 @@ import {
 } from "../src/rewards";
 import { countersMissingV3, FIRST_RULES_ID_V3, RULES_V3_VERSIONS, rulesForEpochV3, rulesInForceErrorV3, rulesRegistryErrorV3, RulesVersionV3 } from "../src/rules-v3";
 import { vectorWorlds, wallet } from "./fixtures/make-rules-vectors";
+import { LEGACY_SNAPSHOT_SHA256, legacyRulesPatch } from "../src/legacy";
 
 let passed = 0;
 let failed = 0;
@@ -280,7 +281,9 @@ test("rules-v3.ts: the registry is append-only, versioned, and says which block 
   assert.strictEqual(rulesForEpochV3(1, null).rulesId, 2, "the first v3 epoch is built under rulesId 2");
   // a registry that starts at the retired rulesId 1 is refused
   assert.match(String(rulesRegistryErrorV3([{ ...RULES_V3_VERSIONS[0], rules: { ...RULES_V3_VERSIONS[0].rules, rulesId: 1 } }])), /rules version 2: .*rulesId 1 was replaced/);
-  assert.deepStrictEqual(rulesForEpochV3(17, null), rulesBlockOf(DEFAULT_RULES_V3));
+  // the Legacy Pilot is armed (LEGACY_SNAPSHOT_SHA256 pinned): the block of the first v3 epoch is the default block plus its member
+  assert.notStrictEqual(LEGACY_SNAPSHOT_SHA256, null);
+  assert.deepStrictEqual(rulesForEpochV3(17, null), rulesBlockOf({ ...DEFAULT_RULES_V3, ...legacyRulesPatch() }));
   assert.strictEqual(rulesForEpochV3(17, "ab".repeat(32)).programHash, "ab".repeat(32), "the pinned binary's hash");
   assert.strictEqual(RULES_V3_VERSIONS[0].rules.operatorWallets.wallets.length, 0, "no operator wallet is listed until the operator publishes one");
   const v2: RulesVersionV3 = { fromEpoch: 20, announced: "2027-02-01", rules: { ...RULES_V3_VERSIONS[0].rules, rulesId: 3, operatorWallets: { rule: "rank-last", wallets: [wallet(9)], exceptions: [] } } };
@@ -292,11 +295,17 @@ test("rules-v3.ts: the registry is append-only, versioned, and says which block 
   assert.match(String(rulesRegistryErrorV3([...RULES_V3_VERSIONS, { ...v2, announced: null }])), /YYYY-MM-DD/);
   assert.match(String(rulesRegistryErrorV3([{ ...RULES_V3_VERSIONS[0], fromEpoch: 3 }])), /from the first v3 epoch/);
   assert.match(String(rulesRegistryErrorV3([...RULES_V3_VERSIONS, v2, { ...v2, rules: { ...v2.rules, rulesId: 4 } }])), /not after the previous version's/);
-  // a file carries exactly the version in force for its epoch
+  // a file carries exactly the version in force for its epoch (the vector worlds are built under the block without the
+  // Legacy Pilot member, so they are checked against that registry; under the pinned registry they are not the rules in force)
+  const { legacyPilot: _lp, ...unarmedRules } = RULES_V3_VERSIONS[0].rules as RulesBlockV3;
+  const unarmed: RulesVersionV3[] = [{ ...RULES_V3_VERSIONS[0], rules: unarmedRules }];
   const f = world("x010-counters-t134-supply").epochs[1].file;
-  assert.strictEqual(rulesInForceErrorV3(f, null), null);
-  assert.strictEqual(rulesInForceErrorV3(f, null, reg), null, "epoch 2 is before version 2's first epoch");
-  assert.match(String(rulesInForceErrorV3({ ...f, epoch: 20 }, null, reg)), /records rules 2, not the rules version in force for it \(3\)/);
+  assert.strictEqual(rulesInForceErrorV3(f, null, unarmed), null);
+  assert.match(String(rulesInForceErrorV3(f, null)), /not the rules version in force/, "a file without the Legacy Pilot member is not the pinned rules");
+  const regU: RulesVersionV3[] = [...unarmed, { ...v2, rules: { ...unarmedRules, rulesId: 3, operatorWallets: v2.rules.operatorWallets } }];
+  assert.strictEqual(rulesRegistryErrorV3(regU), null);
+  assert.strictEqual(rulesInForceErrorV3(f, null, regU), null, "epoch 2 is before version 2's first epoch");
+  assert.match(String(rulesInForceErrorV3({ ...f, epoch: 20 }, null, regU)), /records rules 2, not the rules version in force for it \(3\)/);
   assert.match(String(rulesInForceErrorV3(world("d18-operator-exception").epochs[0].file, null)), /not the rules version in force/, "a block that is not a published version");
   assert.match(String(rulesInForceErrorV3({ epoch: 3 }, null)), /has no rules block/);
 });
