@@ -4,12 +4,16 @@ name: Legacy Pilot snapshot
 # XEN before 2026-11-01T00:00:00Z, read from XEN's own contracts (Transfer to 0x0) on Ethereum and the five Moon Forge
 # chains, through public RPCs. It runs on GitHub, never on a personal machine. Manual only, no secret, a read-only token.
 # A plan job cuts each chain's block range into parts (scripts/legacy/build-snapshot.mjs SOURCES `parts`, or the `parts`
-# input); one scan job per part, at most 20 at a time, each reading its range from every keyless RPC that serves it, in
+# input); one scan job per part, at most 12 at a time, each reading its range from every keyless RPC that serves it, in
 # parallel. A part stops by itself at 320 minutes (inside the 350-minute job limit), saves a checkpoint artifact and
-# fails: "Re-run failed jobs" resumes it from there (and re-runs the merge). Then a merge job checks that the parts tile
-# each chain exactly, checks the file with the script and with the oracle's own validator and uploads it as an
-# artifact. The same reads give the same bytes, whatever the parts. Pin its sha256 (printed in the run summary) in
-# oracle/src/legacy.ts LEGACY_SNAPSHOT_SHA256, in one reviewed commit with the file, before the first v3 epoch is built.
+# fails: "Re-run failed jobs" resumes it from there (and re-runs the merge). A new dispatch with `reuse_run` (the id of
+# an earlier run of this workflow) does not scan again a part that run finished with the same split: the part file is
+# downloaded from it, checked (part-check: chain, part, split, exact range, cutoff) and uploaded again as this run's;
+# an unfinished part resumes from that run's checkpoint when this run has none (checkpoints are kept 7 days, parts 30).
+# Then a merge job checks that the parts tile each chain exactly, checks the file with the script and with the oracle's
+# own validator and uploads it as an artifact. The same reads give the same bytes, whatever the parts. Pin its sha256
+# (printed in the run summary) in oracle/src/legacy.ts LEGACY_SNAPSHOT_SHA256, in one reviewed commit with the file,
+# before the first v3 epoch is built.
 # Actions pinned to commit SHAs (version in the comment), runner image pinned, Node 22, like ci.yml.
 
 on:
@@ -44,12 +48,17 @@ on:
         required: false
         default: ''
       parts:
-        description: 'optional parallel parts per chain as chainId=n pairs (n 1..64), e.g. 43114=48,56=24; empty = the script default (1, 10, 137: 1; 8453: 4; 56: 16; 43114: 32)'
+        description: 'optional parallel parts per chain as chainId=n pairs (n 1..64), e.g. 43114=48,56=24; empty = the script default (1, 10, 137: 1; 8453: 4; 56: 16; 43114: 8)'
+        required: false
+        default: ''
+      reuse_run:
+        description: 'optional id of an earlier run of this workflow: its finished parts of the same split are reused (not scanned again), its checkpoints resume the others; pass the same `parts` as that run'
         required: false
         default: ''
 
 permissions:
   contents: read
+  actions: read # reuse_run: download the part and checkpoint artifacts of an earlier run of this workflow
 
 concurrency:
   group: legacy-snapshot
@@ -72,8 +81,10 @@ jobs:
       - id: m
         env:
           PARTS: ${{ inputs.parts }}
+          REUSE_RUN: ${{ inputs.reuse_run }}
         run: |
           set -euo pipefail
+          case "$REUSE_RUN" in ''|*[!0-9]*) [ -z "$REUSE_RUN" ] || { echo "reuse_run must be a run id (digits only)"; exit 1; } ;; esac
           M="$(node scripts/legacy/build-snapshot.mjs matrix --parts "$PARTS")"
           echo "$M"
           echo "matrix=$M" >> "$GITHUB_OUTPUT"
@@ -85,7 +96,7 @@ jobs:
     timeout-minutes: 350
     strategy:
       fail-fast: false
-      max-parallel: 20
+      max-parallel: 12 # leaves 8 of the free plan's 20 concurrent jobs for the oracle, keeper, health and site deploy
       matrix:
         include: ${{ fromJSON(needs.plan.outputs.matrix) }}
     steps:
@@ -95,12 +106,30 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '22'
+      - name: Reuse the part if the earlier run finished it (reuse_run)
+        if: inputs.reuse_run != ''
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        continue-on-error: true
+        with:
+          name: legacy-part-${{ matrix.chain }}-${{ matrix.part }}-of-${{ matrix.parts }}
+          path: reuse
+          run-id: ${{ inputs.reuse_run }}
+          github-token: ${{ github.token }}
       - name: Restore the checkpoint of an earlier attempt (none on the first attempt)
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         continue-on-error: true
         with:
           name: legacy-ckpt-${{ matrix.chain }}-${{ matrix.part }}-of-${{ matrix.parts }}
           path: ckpt
+      - name: Restore the checkpoint of the earlier run (reuse_run), when this run has none
+        if: inputs.reuse_run != '' && hashFiles(format('ckpt/ckpt-{0}-{1}.json', matrix.chain, matrix.part)) == '' && hashFiles(format('reuse/part-{0}-{1}.json', matrix.chain, matrix.part)) == ''
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        continue-on-error: true
+        with:
+          name: legacy-ckpt-${{ matrix.chain }}-${{ matrix.part }}-of-${{ matrix.parts }}
+          path: ckpt
+          run-id: ${{ inputs.reuse_run }}
+          github-token: ${{ github.token }}
       - name: Scan XEN burns before the cutoff
         env:
           CHAIN: ${{ matrix.chain }}
@@ -113,8 +142,18 @@ jobs:
           BASE_RPC: ${{ inputs.base_rpc }}
           AVAX_RPC: ${{ inputs.avax_rpc }}
           FROM_BLOCKS: ${{ inputs.from_blocks }}
+          REUSE_RUN: ${{ inputs.reuse_run }}
         run: |
           set -euo pipefail
+          REUSED="reuse/part-$CHAIN-$PART.json"
+          if [ -f "$REUSED" ]; then
+            # finished by the earlier run (reuse_run): checked, then kept as this run's part (no scan)
+            node scripts/legacy/build-snapshot.mjs part-check --chain "$CHAIN" --part "$PART" --parts "$PARTS" "$REUSED"
+            mkdir -p parts
+            cp "$REUSED" "parts/part-$CHAIN-$PART.json"
+            echo "chain $CHAIN part $((PART + 1))/$PARTS reused from run $REUSE_RUN" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           case "$CHAIN" in
             1) RPC="$ETH_RPC" ;; 10) RPC="$OP_RPC" ;; 56) RPC="$BSC_RPC" ;;
             137) RPC="$POLYGON_RPC" ;; 8453) RPC="$BASE_RPC" ;; 43114) RPC="$AVAX_RPC" ;;

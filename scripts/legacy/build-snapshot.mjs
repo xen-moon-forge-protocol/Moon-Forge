@@ -9,6 +9,9 @@
  *   node scripts/legacy/build-snapshot.mjs matrix [--parts <chainId=n,...>]
  *   node scripts/legacy/build-snapshot.mjs scan --chain <id> --out <part.json> [--part <k> --parts <n>] [--rpc <url,url>]
  *        [--from <block>] [--chunk <n>] [--max-chunk <n>] [--checkpoint <file>] [--deadline-min <m>] [--verify <n>]
+ *        [--verify-span <blocks>] [--park-min <m>]
+ *   node scripts/legacy/build-snapshot.mjs part-check --chain <id> --part <k> --parts <n> <part.json>
+ *   node scripts/legacy/build-snapshot.mjs crosscheck --chain <id> --rpc <url> <part.json | checkpoint.json> ...
  *   node scripts/legacy/build-snapshot.mjs merge --out deployments/legacy-burners.json <part.json> ...
  *   node scripts/legacy/build-snapshot.mjs check <legacy-burners.json>
  *   node scripts/legacy/build-snapshot.mjs sources
@@ -27,12 +30,19 @@
  * the part's first block (its header and its logs) gets its own worker; the others are left out with the reason. Each
  * worker reads the next unread blocks in a range of its own size: a range its provider refuses (or cannot answer in
  * time) is halved for that RPC only (down to 50 blocks) and given back to the queue, a failing range is given back and
- * the RPC cools down (backoff), an RPC that fails `tries × rounds` times in a row is dropped, the range grows again after
- * quiet reads. When every RPC is dropped the part fails with each RPC's last error (never an empty answer taken as no
- * burn). After the reads, a sample of each RPC's ranges (--verify, default 8) is read again from another RPC and must
- * give the same burns, or the part fails naming both RPCs (a node that answers [] for history it does not hold).
+ * the RPC cools down (backoff), an RPC that fails `tries × rounds` times in a row is parked for --park-min minutes
+ * (default 10) and then tried again (a pooled gateway that fails for a while comes back), and dropped after its third
+ * park; the range grows again after quiet reads. When every RPC is dropped the part fails with each RPC's last error
+ * (never an empty answer taken as no burn). After the reads, a sample of each RPC's ranges (--verify, default 8) is read
+ * again from another RPC (the one with the largest accepted range first; a range longer than --verify-span blocks is
+ * checked on a sub-range of that length around one of its burns) and must give the same burns, or the part fails naming
+ * both RPCs (a node that answers [] for history it does not hold).
  * Resumable: with --checkpoint, the ranges read so far are saved every minute and at the time budget (--deadline-min);
  * a scan that finds its checkpoint continues from it (exit code 3 = stopped at the time budget, run it again).
+ *
+ * `part-check` checks a part file of an earlier run (chain, part, split, exact range, cutoff, sorted addresses) before
+ * the workflow reuses it instead of scanning that part again. `crosscheck` reads again, from another RPC, the blocks
+ * of finished parts or checkpoints and compares the events and the addresses: an independent check of earlier reads.
  *
  * The merged file is deterministic: { cutoff, chains: [{ chainId, xen, fromBlock, toBlock, events, addresses }],
  * addresses: [lowercase, ascending, unique], sha256 }, where sha256 is the sha256 of the canonical JSON (keys sorted,
@@ -58,7 +68,15 @@ const MIN_CHUNK = 50;
  * dropped while the others carry on. polygon-rpc.com (now keyed), eth.llamarpc.com (a browser challenge) and
  * bsc-dataseed (no eth_getLogs) were dropped. `parts`: the default number of parallel jobs of the chain (run
  * 41608437087: Ethereum 454 s, Optimism 898 s, Polygon 1183 s in one job; Base 11995 s at 1000-block ranges; BSC and
- * Avalanche did not finish), overridable with the workflow's `parts` input.
+ * Avalanche did not finish), overridable with the workflow's `parts` input. `maxChunk`: the largest range asked of one
+ * RPC; `verifySpan`: the blocks of each cross-check sub-range.
+ * Avalanche (run 44584662134, 64 parts, three attempts): api.avax.network refuses getLogs over 100 blocks and fails
+ * about one request in three, publicnode (up to 50000 blocks) fails often with "not found" and was dropped, drpc
+ * refuses over 100 blocks on its free plan, blastapi and 1rpc answer 403; 14 parts finished, the others reached 50 to
+ * 95%. Measured 2026-11-22: avalanche-mainnet.gateway.tenderly.co (keyless) answers a whole 1.23M-block part in one
+ * request (1 to 16 s) and 9.8M blocks (7883 logs) in 8 s, with the same events as the RPC-read parts; pocket.network
+ * serves up to 10001 blocks. A keyless explorer log API (Routescan) was measured too and left out: its log index
+ * misses the burn of block 79017614 that every RPC (and its own token-transfer index) has.
  */
 export const SOURCES = Object.freeze([
   { chainId: 1, name: 'Ethereum', xen: '0x06450dee7fd2fb8e39061434babcfc05599a6fb8', chunk: 2_000, parts: 1, rpcs: ['https://ethereum-rpc.publicnode.com', 'https://mainnet.gateway.tenderly.co', 'https://eth.drpc.org', 'https://eth.meowrpc.com', 'https://1rpc.io/eth'] },
@@ -66,7 +84,7 @@ export const SOURCES = Object.freeze([
   { chainId: 56, name: 'BSC', xen: '0x2ab0e9e4ee70fff1fb9d67031e44f6410170d00e', chunk: 2_000, parts: 16, rpcs: ['https://bsc-rpc.publicnode.com', 'https://bsc.rpc.blxrbdn.com', 'https://bsc.drpc.org', 'https://bsc.meowrpc.com', 'https://1rpc.io/bnb', 'https://bsc-mainnet.public.blastapi.io', 'https://rpc-bsc.48.club'] },
   { chainId: 137, name: 'Polygon', xen: '0x2ab0e9e4ee70fff1fb9d67031e44f6410170d00e', chunk: 3_000, parts: 1, rpcs: ['https://polygon-bor-rpc.publicnode.com', 'https://polygon.gateway.tenderly.co', 'https://polygon.drpc.org', 'https://1rpc.io/matic'] },
   { chainId: 8453, name: 'Base', xen: '0xffcbf84650ce02dafe96926b37a0ac5e34932fa5', chunk: 2_000, parts: 4, rpcs: ['https://base-rpc.publicnode.com', 'https://mainnet.base.org', 'https://base.gateway.tenderly.co', 'https://base.drpc.org'] },
-  { chainId: 43114, name: 'Avalanche', xen: '0xc0c5aa69dbe4d6dddfbc89c0957686ec60f24389', chunk: 2_000, parts: 32, rpcs: ['https://api.avax.network/ext/bc/C/rpc', 'https://avalanche-c-chain-rpc.publicnode.com', 'https://avalanche.drpc.org', 'https://1rpc.io/avax/c', 'https://ava-mainnet.public.blastapi.io/ext/bc/C/rpc'] },
+  { chainId: 43114, name: 'Avalanche', xen: '0xc0c5aa69dbe4d6dddfbc89c0957686ec60f24389', chunk: 100, maxChunk: 1_000_000, verifySpan: 10_000, parts: 8, rpcs: ['https://avalanche-mainnet.gateway.tenderly.co', 'https://avalanche-c-chain-rpc.publicnode.com', 'https://avax.api.pocket.network', 'https://api.avax.network/ext/bc/C/rpc', 'https://avalanche.drpc.org'] },
 ]);
 
 const RPC_TIMEOUT_MS = Number(process.env.LEGACY_RPC_TIMEOUT_MS || 60_000);
@@ -200,7 +218,9 @@ function burnsOf(logs, a, b, xen, chainId) {
   }
   return out;
 }
-const digestOf = (burns) => createHash('sha256').update(burns.map((x) => x.key).sort().join('\n')).digest('hex').slice(0, 32);
+const digestOfKeys = (keys) => createHash('sha256').update(keys.slice().sort().join('\n')).digest('hex').slice(0, 32);
+const digestOf = (burns) => digestOfKeys(burns.map((x) => x.key));
+const blockOfKey = (k) => Number(k.slice(0, k.indexOf(':')));
 const getLogs = (url, xen, a, b) => rpcCall(url, 'eth_getLogs', [{ address: xen, topics: [TRANSFER_TOPIC, null, ZERO_TOPIC], fromBlock: hex(a), toBlock: hex(b) }]);
 
 /** sorted disjoint block intervals: add one, merging neighbours */
@@ -316,7 +336,7 @@ export async function scanChain(o) {
       const t0 = Date.now();
       const l = await client([u], { tries, rounds: 1, backoffMs: backoff }).call('eth_getLogs', [{ address: xen, topics: [TRANSFER_TOPIC, null, ZERO_TOPIC], fromBlock: hex(firstBlock), toBlock: hex(firstBlock) }], Array.isArray);
       burnsOf(l, firstBlock, firstBlock, xen, o.chainId);
-      states.push({ url: u, host: host(u), chunk: Math.max(MIN_CHUNK, o.chunk ?? 2_000), ceiling: Infinity, quiet: 0, fails: 0, coolUntil: 0, dropped: false, lastErr: '', ok: 0, failed: 0, blocks: 0, ms: 0, windows: [], probeMs: Date.now() - t0 });
+      states.push({ url: u, host: host(u), chunk: Math.max(MIN_CHUNK, o.chunk ?? 2_000), ceiling: Infinity, quiet: 0, fails: 0, parks: 0, coolUntil: 0, dropped: false, lastErr: '', ok: 0, failed: 0, blocks: 0, ms: 0, windows: [], probeMs: Date.now() - t0 });
     } catch (e) {
       const why = String(e?.message ?? e).slice(0, 200);
       reasons.push(`${host(u)}: ${why}`);
@@ -327,6 +347,8 @@ export async function scanChain(o) {
   log(`${tag}: blocks ${rangeFrom}..${rangeTo} of ${fromBlock}..${toBlock}, ${states.length} RPCs read in parallel: ${states.map((s) => `${s.host} (${s.probeMs} ms)`).join(', ')}`);
 
   const maxChunk = Math.max(MIN_CHUNK, o.chunk ?? 2_000, o.maxChunk ?? 100_000);
+  const parkMs = o.parkMs ?? 600_000;
+  const maxParks = o.maxParks ?? 3;
   const started = Date.now();
   const total = rangeTo - rangeFrom + 1;
   let lastLog = started;
@@ -357,6 +379,7 @@ export async function scanChain(o) {
       if (stopped) return;
       const now = Date.now();
       if (now < s.coolUntil) {
+        if (!pending.length && inflight === 0) return;
         await SLEEP(Math.min(s.coolUntil - now, 250));
         continue;
       }
@@ -394,9 +417,17 @@ export async function scanChain(o) {
         }
         s.fails++;
         if (s.fails >= tries * rounds) {
-          s.dropped = true;
-          log(`${tag}: ${s.host} dropped after ${s.fails} failures in a row (last: ${s.lastErr})`);
-          return;
+          // parked, then tried again (a pooled gateway that fails for a while comes back); dropped after its last park
+          if (s.parks >= maxParks) {
+            s.dropped = true;
+            log(`${tag}: ${s.host} dropped after ${s.fails} failures in a row, ${s.parks} parks (last: ${s.lastErr})`);
+            return;
+          }
+          s.parks++;
+          s.fails = 0;
+          s.coolUntil = Date.now() + parkMs;
+          log(`${tag}: ${s.host} parked for ${Math.round(parkMs / 1000)} s after ${tries * rounds} failures in a row (park ${s.parks} of ${maxParks}; last: ${s.lastErr})`);
+          continue;
         }
         s.coolUntil = Date.now() + backoff * 2 ** Math.min(s.fails - 1, 6);
         continue;
@@ -406,7 +437,7 @@ export async function scanChain(o) {
       s.ok++;
       s.ms += Date.now() - t0;
       s.blocks += r[1] - r[0] + 1;
-      s.windows.push([r[0], r[1], burns.length, digestOf(burns)]);
+      s.windows.push([r[0], r[1], burns.length, digestOf(burns), burns.map((x) => x.key)]);
       for (const x of burns) addresses.add(x.from);
       events += burns.length;
       addInterval(done, r);
@@ -438,23 +469,36 @@ export async function scanChain(o) {
     throw new Error(`${tag}: every RPC was dropped with blocks ${pending[0][0]}..${pending[0][1]} still unread (${states.map((s) => `${s.host}: ${s.lastErr}`).join(' | ')})`);
   }
 
-  // cross-check: a sample of each RPC's ranges read again from another RPC must give the same burns
+  // cross-check: a sample of each RPC's ranges read again from another RPC must give the same burns; half of the sample
+  // among the ranges with a burn, half spread over all; a range longer than `span` is checked on a sub-range of `span`
+  // blocks around one of its burns (or its middle); the verifiers with the largest accepted range are asked first
   const V = o.verify ?? 8;
+  const span = Math.max(MIN_CHUNK, o.verifySpan ?? 100_000);
   const live = states.filter((s) => !s.dropped);
   if (V > 0 && states.some((s) => s.windows.length)) {
     if (live.length < 2) log(`${tag}: only one RPC left: no cross-check of the reads`);
     else {
       let checked = 0;
+      const spread = (list, n) => [...new Set(Array.from({ length: Math.min(n, list.length) }, (_, i) => Math.floor((i * list.length) / Math.min(n, list.length))))].map((i) => list[i]);
       for (const s of states) {
         const w = s.windows.slice().sort((x, y) => x[0] - y[0]);
-        const pick = [...new Set(Array.from({ length: Math.min(V, w.length) }, (_, i) => Math.floor((i * w.length) / Math.min(V, w.length))))].map((i) => w[i]);
-        for (const [a, b, cnt, dg] of pick) {
+        const withBurns = spread(w.filter((x) => x[2] > 0), Math.ceil(V / 2));
+        const pick = [...new Set([...withBurns, ...spread(w, V - withBurns.length)])];
+        const verifiers = live.filter((v) => v !== s).sort((x, y) => y.chunk - x.chunk);
+        for (const [a, b, cnt, dg, keys] of pick) {
+          let [x, y, want, wantN] = [a, b, dg, cnt];
+          if (b - a + 1 > span) {
+            const centre = keys.length ? blockOfKey(keys[Math.floor(keys.length / 2)]) : Math.floor((a + b) / 2);
+            x = Math.max(a, Math.min(centre - Math.floor(span / 2), b - span + 1));
+            y = x + span - 1;
+            const sub = keys.filter((k) => blockOfKey(k) >= x && blockOfKey(k) <= y);
+            [want, wantN] = [digestOfKeys(sub), sub.length];
+          }
           let got = null;
           let by = null;
-          for (const v of live) {
-            if (v === s) continue;
+          for (const v of verifiers) {
             try {
-              got = await readRange(v, a, b);
+              got = await readRange(v, x, y);
               by = v;
               break;
             } catch {
@@ -462,10 +506,10 @@ export async function scanChain(o) {
             }
           }
           if (got === null) {
-            log(`${tag}: blocks ${a}..${b} (read by ${s.host}) could not be read again from another RPC`);
+            log(`${tag}: blocks ${x}..${y} (read by ${s.host}) could not be read again from another RPC`);
             continue;
           }
-          if (digestOf(got) !== dg) throw new Error(`${tag}: the RPCs disagree on blocks ${a}..${b}: ${s.host} answered ${cnt} burns, ${by.host} answered ${got.length}; leave the wrong one out with the workflow input (an RPC list)`);
+          if (digestOf(got) !== want) throw new Error(`${tag}: the RPCs disagree on blocks ${x}..${y}: ${s.host} answered ${wantN} burns, ${by.host} answered ${got.length}; leave the wrong one out with the workflow input (an RPC list)`);
           checked++;
         }
       }
@@ -606,6 +650,85 @@ export function matrix(override = '', sources = SOURCES) {
   return out;
 }
 
+/** null when `p` is a finished part of chain `chain`, part `part` of `parts` (its exact range, the cutoff, sorted addresses), else why not. */
+export function partError(p, { chain, part, parts } = {}, sources = SOURCES) {
+  if (!p || p.kind !== 'legacy-burners-part') return 'not a part file';
+  const s = sources.find((x) => x.chainId === p.chainId);
+  if (!s) return `chain ${p.chainId} is not a source chain`;
+  if (chain !== undefined && p.chainId !== chain) return `chain ${p.chainId}, not ${chain}`;
+  if (part !== undefined && p.part !== part) return `part ${p.part}, not ${part}`;
+  if (parts !== undefined && p.parts !== parts) return `a split in ${p.parts}, not ${parts}`;
+  if (p.xen !== s.xen) return `xen ${p.xen} is not ${s.xen}`;
+  if (p.cutoff !== CUTOFF_TS) return `cutoff ${p.cutoff}, not ${CUTOFF_TS}`;
+  if (![p.fromBlock, p.toBlock, p.part, p.parts, p.rangeFrom, p.rangeTo, p.events].every(Number.isSafeInteger) || p.fromBlock < 0 || p.fromBlock > p.toBlock) return 'bad block bounds or counts';
+  let r;
+  try {
+    r = partRange(p.fromBlock, p.toBlock, p.part, p.parts);
+  } catch (e) {
+    return String(e?.message ?? e);
+  }
+  if (p.rangeFrom !== r[0] || p.rangeTo !== r[1]) return `blocks ${p.rangeFrom}..${p.rangeTo}, not ${r[0]}..${r[1]}`;
+  if (!Array.isArray(p.addresses) || p.events < p.addresses.length) return 'fewer events than addresses';
+  for (let i = 0; i < p.addresses.length; i++) {
+    if (!/^0x[0-9a-f]{40}$/.test(p.addresses[i])) return `addresses[${i}] is not a lowercase address`;
+    if (i > 0 && !(p.addresses[i - 1] < p.addresses[i])) return `addresses[${i}] is not after addresses[${i - 1}]`;
+  }
+  return null;
+}
+
+/** The burns of blocks [a, b] from one RPC: ranges halved when refused, grown after quiet reads, `tries` per range. */
+export async function rpcBurns(url, xen, a, b, chainId, { chunk = 2_000, maxChunk = 1_000_000, tries = 5, backoffMs = 2_000 } = {}) {
+  const out = [];
+  let size = Math.max(MIN_CHUNK, chunk);
+  for (let x = a; x <= b; ) {
+    const y = Math.min(b, x + size - 1);
+    let logs = null;
+    let last = '';
+    for (let t = 0; t < tries && logs === null; t++) {
+      try {
+        const l = await getLogs(url, xen, x, y);
+        if (!Array.isArray(l)) throw new Error('eth_getLogs did not answer an array');
+        logs = l;
+      } catch (e) {
+        last = String(e?.message ?? e);
+        if ((isRangeError(last) || isSlow(last)) && size > MIN_CHUNK) break;
+        if (t + 1 < tries) await SLEEP(backoffMs * 2 ** Math.min(t, 4));
+      }
+    }
+    if (logs === null) {
+      if ((isRangeError(last) || isSlow(last)) && size > MIN_CHUNK) {
+        size = Math.max(MIN_CHUNK, Math.floor(size / 2));
+        continue;
+      }
+      throw new Error(`${host(url)}: blocks ${x}..${y}: ${last.slice(0, 200)}`);
+    }
+    out.push(...burnsOf(logs, x, y, xen, chainId));
+    if (logs.length < 2_000 && size * 2 <= maxChunk) size *= 2;
+    x = y + 1;
+  }
+  return out;
+}
+
+/**
+ * A finished part or a checkpoint against another RPC: the blocks it read (the part's range, or the checkpoint's `done`
+ * ranges) read again, and the events and the addresses compared.
+ */
+export async function crossCheck(doc, url, s, o = {}) {
+  if (!doc || (doc.kind !== 'legacy-burners-part' && doc.kind !== 'legacy-burners-checkpoint')) throw new Error('not a part or checkpoint file');
+  if (doc.chainId !== s.chainId || doc.xen !== s.xen) throw new Error(`a file of chain ${doc.chainId}, not ${s.chainId}`);
+  const intervals = doc.kind === 'legacy-burners-part' ? [[doc.rangeFrom, doc.rangeTo]] : doc.done;
+  const burns = [];
+  for (const [a, b] of intervals) burns.push(...(await rpcBurns(url, s.xen, a, b, s.chainId, { chunk: o.chunk ?? s.chunk, maxChunk: o.maxChunk ?? s.maxChunk, tries: o.tries, backoffMs: o.backoffMs })));
+  const got = new Set(burns.map((x) => x.from));
+  const want = new Set(doc.addresses);
+  const onlyBefore = [...want].filter((x) => !got.has(x));
+  const onlyNow = [...got].filter((x) => !want.has(x));
+  return {
+    same: burns.length === doc.events && onlyBefore.length === 0 && onlyNow.length === 0, part: doc.part, parts: doc.parts, intervals: intervals.length,
+    blocks: intervals.reduce((n, [a, b]) => n + b - a + 1, 0), before: { events: doc.events, addresses: want.size }, now: { events: burns.length, addresses: got.size }, onlyBefore, onlyNow,
+  };
+}
+
 function args(argv) {
   const o = { _: [] };
   for (let i = 0; i < argv.length; i++) {
@@ -640,13 +763,35 @@ async function main() {
     if (!a.out) throw new Error('--out is required');
     const rpcs = (a.rpc ? String(a.rpc) : s.rpcs.join(',')).split(',').map((u) => u.trim()).filter(Boolean);
     const deadlineMin = intArg(a['deadline-min'], 'deadline-min');
+    const parkMin = intArg(a['park-min'], 'park-min');
     const part = await scanChain({
-      chainId, xen: s.xen, rpcs, from: intArg(a.from, 'from'), chunk: intArg(a.chunk, 'chunk') ?? s.chunk, maxChunk: intArg(a['max-chunk'], 'max-chunk'),
+      chainId, xen: s.xen, rpcs, from: intArg(a.from, 'from'), chunk: intArg(a.chunk, 'chunk') ?? s.chunk, maxChunk: intArg(a['max-chunk'], 'max-chunk') ?? s.maxChunk,
       backoffMs: intArg(a['backoff-ms'], 'backoff-ms'), part: intArg(a.part, 'part'), parts: intArg(a.parts, 'parts'), checkpoint: a.checkpoint || undefined,
       deadlineAt: deadlineMin ? Date.now() + deadlineMin * 60_000 : undefined, maxChunks: intArg(a['max-chunks'], 'max-chunks'), verify: intArg(a.verify, 'verify'),
+      verifySpan: intArg(a['verify-span'], 'verify-span') ?? s.verifySpan, parkMs: parkMin === undefined ? undefined : parkMin * 60_000,
     });
     mkdirSync(dirname(a.out), { recursive: true });
     writeFileSync(a.out, JSON.stringify({ kind: 'legacy-burners-part', ...part }) + '\n');
+    return;
+  }
+  if (cmd === 'part-check') {
+    const p = JSON.parse(readFileSync(a._[0], 'utf8'));
+    const bad = partError(p, { chain: intArg(a.chain, 'chain'), part: intArg(a.part, 'part'), parts: intArg(a.parts, 'parts') });
+    if (bad) throw new Error(`${a._[0]}: ${bad}`);
+    process.stdout.write(`ok: chain ${p.chainId} part ${p.part + 1}/${p.parts}, blocks ${p.rangeFrom}..${p.rangeTo}, ${p.events} events, ${p.addresses.length} addresses\n`);
+    return;
+  }
+  if (cmd === 'crosscheck') {
+    const s = SOURCES.find((x) => x.chainId === Number(a.chain));
+    if (!s) throw new Error(`--chain must be one of ${SOURCES.map((x) => x.chainId).join(', ')}`);
+    if (!a.rpc) throw new Error('--rpc <url> is required');
+    let bad = 0;
+    for (const f of a._) {
+      const r = await crossCheck(JSON.parse(readFileSync(f, 'utf8')), String(a.rpc), s, { backoffMs: intArg(a['backoff-ms'], 'backoff-ms') });
+      if (!r.same) bad++;
+      process.stdout.write(`${r.same ? 'same' : 'DIFFERENT'}: ${f}: chain ${s.chainId} part ${r.part + 1}/${r.parts}, ${r.blocks} blocks in ${r.intervals} ranges; before ${r.before.events} events ${r.before.addresses} addresses; ${host(String(a.rpc))} ${r.now.events} events ${r.now.addresses} addresses${r.same ? '' : `; only before: ${r.onlyBefore.slice(0, 5).join(' ')}; only now: ${r.onlyNow.slice(0, 5).join(' ')}`}\n`);
+    }
+    if (bad) throw new Error(`${bad} of ${a._.length} files differ`);
     return;
   }
   if (cmd === 'merge') {
@@ -666,7 +811,7 @@ async function main() {
     process.stdout.write(`ok: ${doc.addresses.length} addresses, sha256 ${doc.sha256}\n`);
     return;
   }
-  throw new Error('usage: build-snapshot.mjs matrix [--parts <id=n,...>] | scan --chain <id> --out <file> [--part <k> --parts <n>] [--rpc <urls>] [--from <block>] [--checkpoint <file>] [--deadline-min <m>] | merge --out <file> <parts...> | check <file> | sources');
+  throw new Error('usage: build-snapshot.mjs matrix [--parts <id=n,...>] | scan --chain <id> --out <file> [--part <k> --parts <n>] [--rpc <urls>] [--from <block>] [--checkpoint <file>] [--deadline-min <m>] | part-check --chain <id> --part <k> --parts <n> <file> | crosscheck --chain <id> --rpc <url> <files...> | merge --out <file> <parts...> | check <file> | sources');
 }
 
 if (/build-snapshot\.mjs$/.test(process.argv[1] ?? '')) {

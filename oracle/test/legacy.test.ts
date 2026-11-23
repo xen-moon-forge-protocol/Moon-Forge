@@ -558,17 +558,23 @@ function expectedOf(m: MockChain) {
 /** one server for every chain (path /<chainId>); `maxRange` refuses larger getLogs ranges; every `flaky`-th getLogs answers 429 */
 function mockServer(chains: MockChain[], o: { maxRange: number; flaky: number }) {
   let calls = 0;
+  let dieCalls = 0;
+  let flapCalls = 0;
   const server = http.createServer((req, res) => {
     let body = "";
     req.on("data", (d) => (body += d));
     req.on("end", () => {
-      const m = chains.find((c) => ["", "/b", "/lag", "/empty", "/pruned"].some((s) => req.url === `/${c.chainId}${s}`));
+      const m = chains.find((c) => ["", "/b", "/lag", "/empty", "/pruned", "/die", "/flap"].some((s) => req.url === `/${c.chainId}${s}`));
       // `/lag`: a node behind the head and without old history (null block headers, a refused getLogs)
       const lag = req.url!.endsWith("/lag");
       // `/empty`: a node that answers [] for every getLogs (history it does not hold, silently); `/pruned`: headers
       // served, every getLogs refused with "header not found" (the BSC failure of run 41608437087)
       const empty = req.url!.endsWith("/empty");
       const pruned = req.url!.endsWith("/pruned");
+      // `/die`: answers its first three getLogs (the start checks pass), then fails every one (a gateway gone down)
+      const die = req.url!.endsWith("/die");
+      // `/flap`: the same, but back after twelve failures
+      const flap = req.url!.endsWith("/flap");
       const q = JSON.parse(body);
       const reply = (result: unknown) => res.end(JSON.stringify({ jsonrpc: "2.0", id: q.id, result }));
       const error = (code: number, message: string) => res.end(JSON.stringify({ jsonrpc: "2.0", id: q.id, error: { code, message } }));
@@ -588,6 +594,8 @@ function mockServer(chains: MockChain[], o: { maxRange: number; flaky: number })
         case "eth_getLogs": {
           if (lag) return error(-32000, "history has been pruned for this block");
           if (pruned) return error(-32000, "header not found");
+          if (die && ++dieCalls > 3) return error(-32000, "backend unavailable");
+          if (flap && ++flapCalls > 3 && flapCalls <= 15) return error(-32000, "backend unavailable");
           if (empty) return reply([]);
           calls++;
           if (o.flaky && calls % o.flaky === 0 && !req.url!.endsWith("/b")) {
@@ -781,6 +789,89 @@ testAsync("the snapshot script, parts: each chain cut into parallel parts gives 
     const badMx = await run(["matrix", "--parts", "999=2"]);
     assert.notStrictEqual(badMx.code, 0);
     assert.match(badMx.err, /is not chainId=n/);
+  } finally {
+    await srv.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+testAsync("the snapshot script, Avalanche fix: a node that goes down is parked and tried again, then dropped (the part still equals the clean one); long ranges are cross-checked on a sub-range around a burn; part-check guards a reused part; crosscheck compares a part or a checkpoint with another RPC", async () => {
+  const chains = LEGACY_SOURCES.map((s, i) => mockChain(s.chainId, s.xen, i + 1));
+  const srv = await mockServer(chains, { maxRange: 300, flaky: 0 });
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "legacy-avax-"));
+  const rpcOf = (id: number, ...s: string[]) => s.map((x) => `${srv.url}/${id}${x}`).join(",");
+  const scan = (id: number, out: string, extra: string[] = [], rpc = rpcOf(id, "", "/b")) => run(["scan", "--chain", String(id), "--out", path.join(dir, out), "--rpc", rpc, "--backoff-ms", "1", ...extra]);
+  const readJson = (f: string) => JSON.parse(fs.readFileSync(path.join(dir, f), "utf8"));
+  try {
+    const clean = await scan(10, "c-10-1.json", ["--part", "1", "--parts", "3", "--chunk", "64"]);
+    assert.strictEqual(clean.code, 0, clean.err);
+    // a gateway that fails twelve reads in a row and comes back: parked (here 0 minutes), tried again, it finishes the
+    // part alone, the same part (run 44584662134 dropped such a node for good and read on at 100 blocks a request)
+    const flap = await scan(10, "f-10-1.json", ["--part", "1", "--parts", "3", "--chunk", "64", "--park-min", "0"], rpcOf(10, "/flap"));
+    assert.strictEqual(flap.code, 0, flap.err);
+    assert.match(flap.err, /parked for 0 s after 12 failures in a row \(park 1 of 3; last: RPC error -32000: backend unavailable\)/);
+    assert.deepStrictEqual(readJson("f-10-1.json"), readJson("c-10-1.json"), "a part read across a park is the same part");
+    // one that never comes back is dropped after its third park: alone, the part fails with its last error; next to a
+    // working RPC, the part is the same part
+    const dead = await scan(10, "d-10-1.json", ["--part", "1", "--parts", "3", "--chunk", "64", "--park-min", "0"], rpcOf(10, "/die"));
+    assert.notStrictEqual(dead.code, 0);
+    assert.match(dead.err, /park 3 of 3/);
+    assert.match(dead.err, /dropped after 12 failures in a row, 3 parks/);
+    assert.match(dead.err, /every RPC was dropped with blocks \d+\.\.\d+ still unread \(.*backend unavailable/);
+    const pair = await scan(10, "p-10-1.json", ["--part", "1", "--parts", "3", "--chunk", "64", "--park-min", "0"], rpcOf(10, "/die", "/b"));
+    assert.strictEqual(pair.code, 0, pair.err);
+    assert.deepStrictEqual(readJson("p-10-1.json"), readJson("c-10-1.json"), "a part read next to a dead node is the same part");
+
+    // long ranges (1000 blocks here, 300 for the verifier) are cross-checked on a 50-block sub-range around a burn: a
+    // node answering [] is still caught, an honest pair still passes
+    const liar = await scan(10, "l-10.json", ["--chunk", "1000", "--verify", "8", "--verify-span", "50"], rpcOf(10, "/empty", "/b"));
+    assert.notStrictEqual(liar.code, 0);
+    assert.match(liar.err, /the RPCs disagree on blocks \d+\.\.\d+: .* answered \d+ burns, .* answered \d+/);
+    const [, x, y] = /the RPCs disagree on blocks (\d+)\.\.(\d+)/.exec(liar.err)!;
+    assert(Number(y) - Number(x) + 1 <= 50, "a sub-range of at most --verify-span blocks");
+    assert(!fs.existsSync(path.join(dir, "l-10.json")));
+    const honest = await scan(10, "h-10.json", ["--chunk", "1000", "--verify", "8", "--verify-span", "50"]);
+    assert.strictEqual(honest.code, 0, honest.err);
+    assert.match(honest.err, /\d+ ranges read again from another RPC: the same burns/);
+
+    // part-check: a part of another run is reused only when it is exactly the part asked for
+    const pc = (file: string, part: number, parts: number, chain = 10) => run(["part-check", "--chain", String(chain), "--part", String(part), "--parts", String(parts), path.join(dir, file)]);
+    assert.match((await pc("c-10-1.json", 1, 3)).out, /^ok: chain 10 part 2\/3, blocks \d+\.\.\d+, \d+ events, \d+ addresses/);
+    assert.match((await pc("c-10-1.json", 2, 3)).err, /part 1, not 2/);
+    assert.match((await pc("c-10-1.json", 1, 4)).err, /a split in 3, not 4/);
+    assert.match((await pc("c-10-1.json", 1, 3, 56)).err, /chain 10, not 56/);
+    const tamper = (f: (p: any) => void, name: string) => {
+      const p = readJson("c-10-1.json");
+      f(p);
+      fs.writeFileSync(path.join(dir, name), JSON.stringify(p));
+      return pc(name, 1, 3);
+    };
+    assert.match((await tamper((p) => (p.rangeTo -= 1), "t1.json")).err, /blocks \d+\.\.\d+, not \d+\.\.\d+/);
+    assert.match((await tamper((p) => (p.cutoff += 1), "t2.json")).err, /cutoff \d+, not \d+/);
+    assert.match((await tamper((p) => p.addresses.reverse(), "t3.json")).err, /is not after/);
+    assert.match((await tamper((p) => (p.kind = "legacy-burners-checkpoint"), "t4.json")).err, /not a part file/);
+    assert.match((await tamper((p) => (p.events = p.addresses.length - 1), "t5.json")).err, /fewer events than addresses/);
+
+    // crosscheck: a finished part and a checkpoint (its done ranges only) read again from another RPC: the same; a part
+    // with one burn too few or an address missing differs
+    const ck = path.join(dir, "ck-10-1.json");
+    const stop = await scan(10, "s-10-1.json", ["--part", "1", "--parts", "3", "--chunk", "64", "--max-chunks", "3", "--checkpoint", ck]);
+    assert.strictEqual(stop.code, 3, stop.err);
+    const cc = await run(["crosscheck", "--chain", "10", "--rpc", `${srv.url}/10/b`, "--backoff-ms", "1", path.join(dir, "c-10-1.json"), ck]);
+    assert.strictEqual(cc.code, 0, cc.err);
+    assert.strictEqual(cc.out.trim().split("\n").filter((l) => l.startsWith("same: ")).length, 2, cc.out);
+    const p = readJson("c-10-1.json");
+    assert(p.addresses.length > 0, "the mock part has burns");
+    p.events -= 1;
+    p.addresses = p.addresses.slice(1);
+    fs.writeFileSync(path.join(dir, "short.json"), JSON.stringify(p));
+    const diff = await run(["crosscheck", "--chain", "10", "--rpc", `${srv.url}/10/b`, "--backoff-ms", "1", path.join(dir, "short.json")]);
+    assert.notStrictEqual(diff.code, 0);
+    assert.match(diff.out, /^DIFFERENT: .* only before: ; only now: 0x[0-9a-f]{40}/);
+
+    // the default matrix: Avalanche in 8 parts
+    const dflt = JSON.parse((await run(["matrix"])).out) as { chain: number; parts: number }[];
+    assert.deepStrictEqual(dflt.filter((j) => j.chain === 43114).map((j) => j.parts), Array(8).fill(8));
   } finally {
     await srv.close();
     fs.rmSync(dir, { recursive: true, force: true });
