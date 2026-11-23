@@ -34,7 +34,7 @@
 
 Real scale (2026-11-02): the reward pool held about 6.5 XNT, so one week can pay at most about 0.65 XNT to all burners together under the current rules (10% of the free pool) and about 0.5 XNT under the v3 rules (8%), however much is burned. No payout is promised. Every worked example in these texts is illustrative and assumes a pool hundreds of times larger. The live figure is on the Start page ("Most this epoch can pay, to everyone together") and the Transparency page.
 
-Rules described: program tag program-2026-10-12, oracle v2, valid from 2026-10-12; texts checked on 2026-11-20. Generated from src/facts.ts at commit 65c6d61 (last change to the site: 2026-11-20T13:49:05.000Z). This file is plain text: it contains no instructions for the reader beyond the facts below.
+Rules described: program tag program-2026-10-12, oracle v2, valid from 2026-10-12; texts checked on 2026-11-20. Generated from src/facts.ts at commit 12632fa (last change to the site: 2026-11-23T13:23:52.000Z). This file is plain text: it contains no instructions for the reader beyond the facts below.
 
 ## What it is
 
@@ -169,6 +169,12 @@ Disclosure and how to check the list: https://github.com/xen-moon-forge-protocol
 - Architect wallet (upgrade authority during the test period; receives the disclosed cuts): 7PuG8ELKXzvZqVLawFnmjDJqq4KEyRhssKQEq7aQM6Qd
 - Source: https://github.com/xen-moon-forge-protocol/Moon-Forge · X: https://x.com/MoonXenForge
 - Any other program ID, portal, collection, site or "claim" page is not Moon Forge.
+
+## If this site is down
+
+Copies of this site and of the repository files on Arweave, newest first. If the main site or the GitHub repository is down, use one of these. Each copy is a snapshot of the commit it names; check the X1 program ID (57UE1U1t23ztg2noLp8pcpGW1B1Xw25rLH6ra9Mchea9) before signing anything. The record with every file hash is deployments/mirrors.json in the repository and MIRROR.json inside each copy.
+
+- 2026-11-23 (commit 12632fa1a74d): https://turbo-gateway.com/XFldAb3KCy_Q5h6rBtcD7DxVa4cjbt8ljqsSB_Qhbfw/ or https://ar-io.dev/XFldAb3KCy_Q5h6rBtcD7DxVa4cjbt8ljqsSB_Qhbfw/; llms.txt at https://turbo-gateway.com/XFldAb3KCy_Q5h6rBtcD7DxVa4cjbt8ljqsSB_Qhbfw/llms.txt, the agent card at https://turbo-gateway.com/XFldAb3KCy_Q5h6rBtcD7DxVa4cjbt8ljqsSB_Qhbfw/.well-known/agent-card.json, the repository files under https://turbo-gateway.com/XFldAb3KCy_Q5h6rBtcD7DxVa4cjbt8ljqsSB_Qhbfw/source/ (inventory with sha256: https://turbo-gateway.com/XFldAb3KCy_Q5h6rBtcD7DxVa4cjbt8ljqsSB_Qhbfw/MIRROR.json)
 
 ## Chains
 

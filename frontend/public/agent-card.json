@@ -17,6 +17,8 @@
     { "name": "week-so-far-feed", "endpoint": "https://xen-moon-forge-protocol.github.io/Moon-Forge/feed/week-so-far.json" },
     { "name": "operators", "endpoint": "https://github.com/xen-moon-forge-protocol/Moon-Forge/blob/main/OPERATORS.md" },
     { "name": "source", "endpoint": "https://github.com/xen-moon-forge-protocol/Moon-Forge" },
+    { "name": "arweave-mirror", "endpoint": "https://turbo-gateway.com/XFldAb3KCy_Q5h6rBtcD7DxVa4cjbt8ljqsSB_Qhbfw/" },
+    { "name": "arweave-mirror-2", "endpoint": "https://ar-io.dev/XFldAb3KCy_Q5h6rBtcD7DxVa4cjbt8ljqsSB_Qhbfw/" },
     { "name": "x1-program", "endpoint": "x1:mainnet:57UE1U1t23ztg2noLp8pcpGW1B1Xw25rLH6ra9Mchea9" }
   ],
   "x402Support": false,

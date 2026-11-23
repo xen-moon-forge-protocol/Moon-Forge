@@ -63,6 +63,11 @@ Rules described: program tag program-2026-10-12, oracle v2, valid from 2026-10-1
 - [Public counter](https://xen-moon-forge-protocol.github.io/Moon-Forge/counter.json): XEN removed from supply through Moon Forge per chain and the XNT the published epochs set aside for burners, rebuilt from the epoch files at every site build
 - [Hourly week-so-far feed](https://xen-moon-forge-protocol.github.io/Moon-Forge/feed/week-so-far.json): the inputs of the binding quote under the v3 rules (see "Quote a burn right now" below)
 
+## If this site is down
+Copies of this site and of the repository files on Arweave, newest first. If the main site or the GitHub repository is down, use one of these. Each copy is a snapshot of the commit it names; check the X1 program ID (57UE1U1t23ztg2noLp8pcpGW1B1Xw25rLH6ra9Mchea9) before signing anything. The record with every file hash is deployments/mirrors.json in the repository and MIRROR.json inside each copy.
+
+- 2026-11-23 (commit 12632fa1a74d): https://turbo-gateway.com/XFldAb3KCy_Q5h6rBtcD7DxVa4cjbt8ljqsSB_Qhbfw/ or https://ar-io.dev/XFldAb3KCy_Q5h6rBtcD7DxVa4cjbt8ljqsSB_Qhbfw/; llms.txt at https://turbo-gateway.com/XFldAb3KCy_Q5h6rBtcD7DxVa4cjbt8ljqsSB_Qhbfw/llms.txt, the agent card at https://turbo-gateway.com/XFldAb3KCy_Q5h6rBtcD7DxVa4cjbt8ljqsSB_Qhbfw/.well-known/agent-card.json, the repository files under https://turbo-gateway.com/XFldAb3KCy_Q5h6rBtcD7DxVa4cjbt8ljqsSB_Qhbfw/source/ (inventory with sha256: https://turbo-gateway.com/XFldAb3KCy_Q5h6rBtcD7DxVa4cjbt8ljqsSB_Qhbfw/MIRROR.json)
+
 ## Key questions, answered
 Q: What is Moon Forge, in one sentence?
 A: You burn XEN on Base, Optimism, Polygon, BSC or Avalanche through XEN’s own burn() and receive XNT on X1 from a public reward pool, valued by one public market rule, with no new token. The pool is small: on 2026-11-02 it held about 6.5 XNT, so one week can pay at most about 0.5 to 0.65 XNT to all burners together. No payout is promised. It is one more way for XEN holders, alongside the others in the XEN and X1 ecosystem; holders can use several with different parts of their XEN.

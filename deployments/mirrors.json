@@ -6,5 +6,24 @@
     "turbo-gateway.com",
     "ar-io.dev"
   ],
-  "mirrors": []
+  "mirrors": [
+    {
+      "manifest": "XFldAb3KCy_Q5h6rBtcD7DxVa4cjbt8ljqsSB_Qhbfw",
+      "manifestSha256": "79cc9a57dab9556c9a1b0669076729a82345eac00cbb7e54796976ed9ff41412",
+      "commit": "12632fa1a74d4485c3b0937c2d2f6ef4015f7185",
+      "uploadedAt": "2026-11-23T13:28:39.098Z",
+      "uploadedBy": "GitHub Actions run 45184120877 (Arweave mirror), throwaway key, ArDrive Turbo free tier",
+      "owner": "VaBvj_v8AdTDi403KGsjk8zsUsQTtG3nKQCxBqJTOik",
+      "stableOwner": false,
+      "app": "left out (above the free tier): the pages are read-only",
+      "files": 491,
+      "bytes": 8191897,
+      "leftOut": 84,
+      "mirrorJson": {
+        "id": "5Ky6stxA06pxKF79EYHSb0O_pkwKxppbgbx9qgjtjGc",
+        "sha256": "2a3c3348840c9cfb466aebb31aeb9d0bd254def307b5d75c2908522b22f80683"
+      },
+      "bundle": null
+    }
+  ]
 }
