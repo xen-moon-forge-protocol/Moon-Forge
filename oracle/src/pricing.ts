@@ -368,8 +368,12 @@ export function poolFeeBpsV3(name: unknown): number {
 export interface XenMarketDetailV3 extends XenMarket {
   /** D-13: the price pool's creation time (unix s), null when GeckoTerminal does not say */
   poolCreatedAt: number | null;
-  /** A5-c / the kit's route: the price pool's other token, its USD price as GeckoTerminal states it, and the pool fee */
-  quote: { address: string; usd: number; feeBps: number };
+  /**
+   * A5-c / the kit's route: the price pool's other token, its USD price as the pool record states it (GeckoTerminal's
+   * figure at the pool's LAST TRADE, stale on a thin pool), the pool fee and, when read, `tokenUsd`: GeckoTerminal's
+   * current USD price of that token (its token record), the reading A5-c compares with Chainlink at toBlock
+   */
+  quote: { address: string; usd: number; feeBps: number; tokenUsd?: number };
 }
 
 /** xenMarket's rule (allowlisted quote, ±3× band, deepest pool prices), read with getJsonV3, plus the price pool's details. */
@@ -378,7 +382,22 @@ export async function xenMarketV3(chain: ChainConfig): Promise<XenMarketDetailV3
   const ref = Number(token?.data?.attributes?.price_usd);
   if (!(ref > 0)) throw new Error(`no XEN price for ${chain.name}`);
   const j = await getJsonV3(`${GT}/networks/${chain.gecko}/tokens/${chain.xen}/pools?page=1`);
-  return xenMarketOfV3(chain, ref, j);
+  const m = xenMarketOfV3(chain, ref, j);
+  // A5-c (rule change 2026-11-22): the quote token's CURRENT USD price, so that the check compares two readings of the
+  // same moment. The pool record's figure is the price at the pool's last trade (2026-11-22: WAVAX $6.98 from a trade
+  // 2.7 days old against Chainlink's $6.68 at toBlock, a 4.45% "mismatch" that was only time). Not read: the pool
+  // record's figure is compared, as before.
+  const tokenUsd = await quoteTokenUsdV3(chain, m.quote.address).catch(() => null);
+  if (tokenUsd !== null) m.quote.tokenUsd = tokenUsd;
+  return m;
+}
+
+/** A5-c: GeckoTerminal's current USD price of a quote token (its token record's price_usd); null when it states none. */
+export async function quoteTokenUsdV3(chain: ChainConfig, token: string, get: (url: string) => Promise<any> = getJsonV3): Promise<number | null> {
+  if (!/^0x[0-9a-fA-F]{40}$/.test(token)) return null;
+  const j = await get(`${GT}/networks/${chain.gecko}/tokens/${token.toLowerCase()}`);
+  const usd = Number(j?.data?.attributes?.price_usd);
+  return usd > 0 && Number.isFinite(usd) ? usd : null;
 }
 
 /** The pure part of xenMarketV3 (one GeckoTerminal pool list): the same eligibility and spot as xenMarket. */

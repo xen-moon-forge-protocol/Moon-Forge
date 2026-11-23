@@ -202,6 +202,18 @@ refuse a file whose block is not the one in force for its epoch on the pinned bi
   it had when the run began, with its frozen L (which halves each week). A market again ends it.
 - **A5-c quote USD.** At the build, GeckoTerminal's USD price of the price pool's quote token must agree with Chainlink's
   (`CHAINLINK_QUOTE_FEEDS_V3`, checked read-only 2026-10-25) within 3%, or the chain is skipped this epoch.
+  Rule change 2026-11-22 (same 3% threshold): GeckoTerminal's reading is the token's current price (its token record,
+  `price_usd`), compared with Chainlink's answer at toBlock, so both readings are of the same moment. Before, the
+  reading was the price pool record's figure, which is the quote token's price at the pool's last trade: on a thin pool
+  it is days old (2026-11-22, Avalanche: WAVAX $6.98 from a trade 2.7 days earlier against Chainlink's $6.68, a 4.45%
+  gap that was only time; replayed over the 8 Sunday builds since 2026-10-04 that reading would have skipped Avalanche
+  4 times, while GeckoTerminal's conversion at each trade's own hour stayed within 2.2% of the market, median 0.2%).
+  When the token record cannot be read, the pool's figure is compared, as before. The sidecar records which reading
+  was compared (`statedFrom: "token"`, absent for the pool's figure) and keeps the pool's figure (`poolE18`).
+- **Run guard.** The oracle CLI (`src/index.ts`: epoch, claim, keeper, feed, ...) and `announce` run under
+  `src/run-guard.ts`: if Node's event loop empties while the command is still
+  waiting on a promise (an await nothing can settle any more), the run prints what was still open and exits with
+  code 3 (an `::error::` on GitHub), never with a silent, green 0.
 - **D-23 (phase 1) price sidecar.** Every build writes `epoch-<n>.prices.json` next to the file (the closes and raw
   candles each burn was priced from with their URL, each chain's on-chain depth and route, the XDEX reading, the A5-c
   checks), hashed into the file (`sidecar`); `verify` re-derives every burn's readings from it offline.

@@ -61,6 +61,7 @@ import {
   anchorsForRoleV3, armKeeperCli, CLAIM_HOLD, HOUSE_TICK_MS, houseDueV3, KeeperChains, keeperModeV3, KeeperModeV3, keeperPassV3, newMemoV3, nextDeadlineV3, readOracleSeatLivenessV3, RoleV3,
   takeKeeperCli, keeperWithdrawCli, proposeKeeperCli,
 } from "./keeper-v3";
+import { guardRun } from "./run-guard";
 
 const file = (n: number) => path.join(EPOCHS_DIR, `epoch-${n}.json`);
 const extraFile = (n: number) => path.join(EPOCHS_DIR, `extra-${n}.json`);
@@ -1484,9 +1485,8 @@ async function publishExtraCli(arg: number | null) {
   }
 }
 
-main().catch((e) => {
-  console.error(e);
-  process.exit(1);
-});
+// run-guard.ts: a rejection prints and exits 1, as before; an event loop that empties before main() settles (an await
+// nothing can settle any more) exits RUN_GUARD_EXIT_CODE with a message instead of a silent, green exit code 0
+guardRun(process.argv.slice(2).filter((a) => !a.startsWith("--"))[0] ?? "oracle", main);
 
 export { PublicKey };

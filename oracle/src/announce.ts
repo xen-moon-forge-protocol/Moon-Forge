@@ -18,6 +18,7 @@ import { withFailover } from "./evm";
 import { xenMarket, xntUsd } from "./pricing";
 import { connect, fetchConfig, PDA } from "./x1";
 import { claimsLineV3, dailyReleaseV3 } from "./flow-v3";
+import { guardRun } from "./run-guard";
 
 const SITE = "https://xen-moon-forge-protocol.github.io/Moon-Forge/";
 const XNT = 1e9;
@@ -184,4 +185,5 @@ async function main() {
 export { xLength };
 
 // run as a script only (the tests import heartbeatText without posting anything)
-if (require.main === module) main().catch((e) => { console.error(e); process.exit(1); });
+// run-guard.ts: an event loop that empties before main() settles exits non-zero instead of a silent exit code 0
+if (require.main === module) guardRun("announce", main);

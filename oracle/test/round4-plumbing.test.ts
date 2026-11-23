@@ -8,10 +8,10 @@ import * as fs from "fs";
 import * as path from "path";
 import { PublicKey } from "@solana/web3.js";
 import { CHAINS, ChainConfig } from "../src/config";
-import { EpochFile } from "../src/epoch";
+import { EpochFile, toE18 } from "../src/epoch";
 import { chunkedLogsV3, isRangeErrorV3 } from "../src/evm";
-import { assembleInputsV3, buildV3, fixtureSources, gateDecisionV3, isNoMarketErrorV3, gateHoldsV3, gateRecordOf, GateRecordV3, RecordedSourcesV3, sidecarKeysV3, sidecarSha256V3, SourcesV3, verifyPriceSidecarV3 } from "../src/flow-v3";
-import { CHAINLINK_QUOTE_FEEDS_V3, closesFromOhlcvV3, getJsonV3, GT_429_MIN_WAIT_MS, GT_FAST_INTERVAL_MS, GT_SLOW_INTERVAL_MS, gtRetryWaitMs, poolFeeBpsV3, QUOTE_ALLOWLIST, quoteUsdDiffBpsV3, retryAfterMs, xenMarketOfV3 } from "../src/pricing";
+import { assembleInputsV3, buildV3, fixtureSources, gateDecisionV3, isNoMarketErrorV3, gateHoldsV3, gateRecordOf, GateRecordV3, quoteStatedUsdV3, RecordedSourcesV3, sidecarKeysV3, sidecarSha256V3, SourcesV3, verifyPriceSidecarV3 } from "../src/flow-v3";
+import { CHAINLINK_QUOTE_FEEDS_V3, closesFromOhlcvV3, getJsonV3, GT_429_MIN_WAIT_MS, GT_FAST_INTERVAL_MS, GT_SLOW_INTERVAL_MS, gtRetryWaitMs, poolFeeBpsV3, QUOTE_ALLOWLIST, QUOTE_USD_MAX_DIFF_BPS, quoteTokenUsdV3, quoteUsdDiffBpsV3, retryAfterMs, xenMarketOfV3 } from "../src/pricing";
 import { anomalyGateV3, EpochFileV3, EpochInputsV3, GATE_HOLD_SECONDS, sidecarFileV3, verifyAny } from "../src/rewards";
 import { parseCpmmPoolV3, tokenAmountV3, WXNT_MINT, xdexReadingFromV3, XDEX_POOL_V3 } from "../src/xdex-v3";
 
@@ -339,6 +339,56 @@ async function main() {
     const doc = clone(b.sidecar!);
     doc.quotes["10"] = { token: "0x4200000000000000000000000000000000000006", statedE18: "2346500000000000000000", chainlinkE18: "2000000000000000000000", feed: "0xfeed", diffBps: quoteUsdDiffBpsV3(2_346_500_000_000_000_000_000n, 2_000_000_000_000_000_000_000n) };
     assert(verifyPriceSidecarV3(f, doc).some((e) => /A5-c: it is skipped/.test(e)));
+  });
+
+  await test("A5-c rule change 2026-11-22: the token's current GeckoTerminal price is compared (same moment as Chainlink), not the pool's last-trade figure", async () => {
+    // the 2026-11-22 dry build: the Avalanche price pool (aXEN / WAVAX 1%, no trade for 2.7 days) states WAVAX at $6.98,
+    // the WAVAX token record $6.69, Chainlink AVAX / USD at toBlock $6.68242047
+    assert.deepStrictEqual(quoteStatedUsdV3({ usd: 6.98, tokenUsd: 6.69 }), { usd: 6.69, from: "token" });
+    assert.deepStrictEqual(quoteStatedUsdV3({ usd: 6.98 }), { usd: 6.98, from: "pool" }, "no token reading: the pool's figure, as before");
+    assert.deepStrictEqual(quoteStatedUsdV3({ usd: 6.98, tokenUsd: 0 }), { usd: 6.98, from: "pool" });
+    assert.deepStrictEqual(quoteStatedUsdV3({ usd: 6.98, tokenUsd: Number.NaN }), { usd: 6.98, from: "pool" });
+    assert.strictEqual(quoteStatedUsdV3({ usd: 0 }), null);
+    const CL = "6682420470000000000";
+    assert(quoteUsdDiffBpsV3(BigInt("6980000000000000000"), BigInt(CL)) > QUOTE_USD_MAX_DIFF_BPS, "the stale pool figure: 4.45%, a skip");
+    assert(quoteUsdDiffBpsV3(BigInt("6690000000000000000"), BigInt(CL)) <= QUOTE_USD_MAX_DIFF_BPS, "the token's current price: 0.11%");
+    // the token reading: GeckoTerminal's token record (price_usd), by address; nothing stated or not an EVM address: null
+    const urls: string[] = [];
+    const get = (body: unknown) => async (u: string) => (urls.push(u), body);
+    const avax = CHAINS.find((c) => c.chainId === 43114)!;
+    assert.strictEqual(await quoteTokenUsdV3(avax, "0xB31f66AA3C1e785363F0875A1B74E27b85FD66c7", get({ data: { attributes: { price_usd: "6.69" } } })), 6.69);
+    assert.deepStrictEqual(urls, ["https://api.geckoterminal.com/api/v2/networks/avax/tokens/0xb31f66aa3c1e785363f0875a1b74e27b85fd66c7"]);
+    assert.strictEqual(await quoteTokenUsdV3(avax, "0xb31f66aa3c1e785363f0875a1b74e27b85fd66c7", get({ data: { attributes: { price_usd: null } } })), null);
+    assert.strictEqual(await quoteTokenUsdV3(avax, "not-an-address", get({})), null);
+    // the flow: the same replayed week, the quote stated stale by the pool (+4.45%) but current by the token record
+    const FIX = path.join(__dirname, "fixtures");
+    const epoch1: EpochFile = JSON.parse(fs.readFileSync(path.join(FIX, "epoch-1.json"), "utf8"));
+    const recording: RecordedSourcesV3 = JSON.parse(fs.readFileSync(path.join(FIX, "flow-v3-epoch2.json"), "utf8")).recording;
+    const PORTAL = epoch1.chains[0].portal;
+    const chains: ChainConfig[] = CHAINS.map((c) => ({ ...c, portal: epoch1.chains.some((x) => x.chainId === c.chainId) ? PORTAL : "" }));
+    const base = fixtureSources(clone(recording));
+    const withQuote = (q: { usd: number; tokenUsd?: number }, clE18: string): SourcesV3 => ({
+      ...base,
+      market: async (c) => ({ ...(await base.market(c)), quote: { address: "0xb31f66aa3c1e785363f0875a1b74e27b85fd66c7", feeBps: 100, ...q } }),
+      quoteUsd: async () => ({ feed: "0x0A77230d17318075983913bC2145DB16C7366156", pair: "AVAX / USD", usdE18: clE18 }),
+    });
+    const a = await assembleInputsV3(2, epoch1, withQuote({ usd: 6.98, tokenUsd: 6.69 }, CL), chains, [epoch1], () => {});
+    assert.deepStrictEqual(a.skipped, [], "the token's current price agrees: no chain skipped");
+    for (const q of Object.values(a.sidecar!.quotes)) {
+      assert.strictEqual(q.statedFrom, "token");
+      assert.strictEqual(q.statedE18, toE18(6.69));
+      assert.strictEqual(q.poolE18, toE18(6.98), "the pool's stale figure stays recorded");
+      assert.strictEqual(q.diffBps, quoteUsdDiffBpsV3(BigInt(toE18(6.69)), BigInt(CL)));
+    }
+    assert.deepStrictEqual(verifyPriceSidecarV3(buildV3(a.inputs, epoch1).file!, a.sidecar!).filter((e) => /A5-c|quote/.test(e)), [], "verify re-derives the check from the recorded reading");
+    // the threshold is unchanged: a CURRENT price 5% off Chainlink still skips (the USDC.X kind of fault)
+    const b = await assembleInputsV3(2, epoch1, withQuote({ usd: 6.69, tokenUsd: 7.02 }, CL), chains, [epoch1], () => {});
+    assert(b.skipped.length === epoch1.chains.length && b.skipped.every((x) => /quote USD mismatch \(A5-c\).*its current price/.test(x.reason)), JSON.stringify(b.skipped));
+    // no token reading: the pool's figure is compared and recorded exactly as before the change (no new fields)
+    const c = await assembleInputsV3(2, epoch1, withQuote({ usd: 6.98 }, CL), chains, [epoch1], () => {});
+    assert(c.skipped.length === epoch1.chains.length && c.skipped.every((x) => /the pool's last-trade figure/.test(x.reason)));
+    const d = await assembleInputsV3(2, epoch1, withQuote({ usd: 6.69 }, CL), chains, [epoch1], () => {});
+    assert(Object.values(d.sidecar!.quotes).every((q) => !("statedFrom" in q) && !("poolE18" in q)));
   });
 
   // ── D-21 ──────────────────────────────────────────────────────────────────────────────────────

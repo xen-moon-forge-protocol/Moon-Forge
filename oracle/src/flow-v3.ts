@@ -75,7 +75,7 @@ export interface XenMarketV3 {
   /** D-13: the price pool's creation time (unix s); absent in older recordings */
   poolCreatedAt?: number | null;
   /** A5-c / the kit's route: the price pool's other token, its stated USD price and the pool fee; absent in older recordings */
-  quote?: { address: string; usd: number; feeBps: number };
+  quote?: { address: string; usd: number; feeBps: number; tokenUsd?: number };
 }
 
 /** D-13 / the kit's route: the on-chain depth of a chain's eligible pools and the price pool's reserves (pricing.ts xenDepthV3). */
@@ -571,14 +571,22 @@ export async function assembleInputsV3(
       }
       const m = market;
       // A5-c: GeckoTerminal's USD price of the price pool's quote token against Chainlink's at toBlock: more than 3% apart
-      // skips the chain this epoch (its cursor kept); no feed or no fresh round: the check is not made, with a warning
-      if (m.quote && m.quote.usd > 0) {
-        const stated = BigInt(toE18(m.quote.usd));
+      // skips the chain this epoch (its cursor kept); no feed or no fresh round: the check is not made, with a warning.
+      // Rule change 2026-11-22: GeckoTerminal's reading is the token's CURRENT price (its token record, `tokenUsd`), the
+      // same moment as Chainlink's; the pool record's figure is its price at the pool's last trade, days old on a thin
+      // pool, and stays recorded (`poolE18`). Without a token reading the pool's figure is compared, as before.
+      const statedUsd = m.quote ? quoteStatedUsdV3(m.quote) : null;
+      if (m.quote && statedUsd) {
+        const stated = BigInt(toE18(statedUsd.usd));
         const cl = s.quoteUsd ? await s.quoteUsd(c, m, to).catch(() => null) : null;
         const diff = cl ? quoteUsdDiffBpsV3(stated, BigInt(cl.usdE18)) : null;
-        quotes.set(c.chainId, { token: m.quote.address, statedE18: stated.toString(), chainlinkE18: cl?.usdE18 ?? null, feed: cl?.feed ?? null, diffBps: diff });
+        quotes.set(c.chainId, {
+          token: m.quote.address, statedE18: stated.toString(), chainlinkE18: cl?.usdE18 ?? null, feed: cl?.feed ?? null, diffBps: diff,
+          // a pool reading is recorded exactly as before the change (no statedFrom: the pool's figure)
+          ...(statedUsd.from === "token" ? { statedFrom: "token" as const, poolE18: m.quote.usd > 0 ? toE18(m.quote.usd) : null } : {}),
+        });
         if (diff !== null && diff > QUOTE_USD_MAX_DIFF_BPS) {
-          throw new SkipChain(`quote USD mismatch (A5-c): GeckoTerminal prices the price pool's quote token ${m.quote.address} at $${m.quote.usd}, Chainlink ${cl!.pair} at $${Number(cl!.usdE18) / 1e18} (${diff / 100}% apart, more than ${QUOTE_USD_MAX_DIFF_BPS / 100}%)`);
+          throw new SkipChain(`quote USD mismatch (A5-c): GeckoTerminal prices the price pool's quote token ${m.quote.address} at $${statedUsd.usd} (${statedUsd.from === "token" ? "its current price" : "the pool's last-trade figure"}), Chainlink ${cl!.pair} at $${Number(cl!.usdE18) / 1e18} (${diff / 100}% apart, more than ${QUOTE_USD_MAX_DIFF_BPS / 100}%)`);
         }
         if (s.quoteUsd && !cl) warnings.push(`${c.name}: the quote token's USD price was not checked against Chainlink (no listed feed or no fresh round, A5-c)`);
       }
@@ -728,10 +736,26 @@ export interface PriceSidecarV3 {
 /** A5-c: one chain's quote-token check at the build. */
 export interface QuoteCheckV3 {
   token: string;
+  /** the GeckoTerminal reading compared with Chainlink's (statedFrom says which one; absent: the pool's, before 2026-11-22) */
   statedE18: string;
   chainlinkE18: string | null;
   feed: string | null;
   diffBps: number | null;
+  /** "token": the token's current price was compared (the rule since 2026-11-22); absent: the pool record's figure was */
+  statedFrom?: "token";
+  /** with statedFrom "token": the pool record's figure (its price at the pool's last trade), recorded, not compared */
+  poolE18?: string | null;
+}
+
+/**
+ * A5-c (rule change 2026-11-22): the GeckoTerminal USD price of a quote token that is compared with Chainlink's at
+ * toBlock: its current price (`tokenUsd`, the token record) when read, else the pool record's last-trade figure (`usd`,
+ * the rule before); null when neither is a positive number (no check). Pure.
+ */
+export function quoteStatedUsdV3(q: { usd: number; tokenUsd?: number }): { usd: number; from: "token" | "pool" } | null {
+  if (typeof q.tokenUsd === "number" && Number.isFinite(q.tokenUsd) && q.tokenUsd > 0) return { usd: q.tokenUsd, from: "token" };
+  if (Number.isFinite(q.usd) && q.usd > 0) return { usd: q.usd, from: "pool" };
+  return null;
 }
 
 const sortedObject = <T>(o: Record<string, T>): Record<string, T> => Object.fromEntries(Object.keys(o).sort().map((k) => [k, o[k]]));
