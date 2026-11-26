@@ -14,7 +14,7 @@ It is community software under the MIT license, built on the Moon Forge [agent k
 
 ## What it does today (dated 2026-11-08)
 
-The binding quote exists only from the v3 switch epoch (planned for November 2026, announced at least one full epoch ahead). Until the week-so-far feed is published, every tick logs `decision=WAIT reason="no week-so-far feed published yet ..."` and **the bot does not burn**: the kit fails closed, and the bot never burns without the kit's quote. Claims work today (the bot finds and claims leaves of published epochs). Sealed games, the extra-pot rebates and Artifact listings need the final upgrade (planned, earliest 2026-11-25); the bot reads the rules from X1 and waits until then.
+The binding quote exists only from the v3 switch epoch (planned for November 2026, announced at least one full epoch ahead). Until the week-so-far feed is published, every tick logs `decision=WAIT reason="no week-so-far feed published yet ..."` and **the bot does not burn**: the kit fails closed, and the bot never burns without the kit's quote. Claims work today (the bot finds and claims leaves of published epochs). Sealed games, the extra-pot rebates and Artifact listings need the final upgrade (planned, earliest 2026-12-02); the bot reads the rules from X1 and waits until then.
 
 ## How a burn decision is made
 
@@ -31,9 +31,9 @@ On every tick, for every chain in [`deployments/portals.json`](../../deployments
 A decision line looks like this:
 
 ```
-2026-11-30T14:05:00Z DECISION tick=12 mode=dry-run chain=Base(8453) decision=BURN reason="rule met" amountXen=25000000 quoteXnt=0.004100 xntPer1e9Xen=0.164000 leftTodayXnt=0.051000 sellXnt=0.003900
-2026-11-30T14:05:00Z DECISION tick=12 mode=dry-run chain=Optimism(10) decision=WAIT reason="another chain pays more per XEN this tick" ...
-2026-11-30T14:05:00Z DECISION tick=12 mode=dry-run chain=BSC(56) decision=WAIT reason="gas price 4.1 gwei is above the cap of 3 gwei"
+2026-12-07T14:05:00Z DECISION tick=12 mode=dry-run chain=Base(8453) decision=BURN reason="rule met" amountXen=25000000 quoteXnt=0.004100 xntPer1e9Xen=0.164000 leftTodayXnt=0.051000 sellXnt=0.003900
+2026-12-07T14:05:00Z DECISION tick=12 mode=dry-run chain=Optimism(10) decision=WAIT reason="another chain pays more per XEN this tick" ...
+2026-12-07T14:05:00Z DECISION tick=12 mode=dry-run chain=BSC(56) decision=WAIT reason="gas price 4.1 gwei is above the cap of 3 gwei"
 ```
 
 The numbers above are illustrative: they assume a week with burns and a pool of the size stated above.

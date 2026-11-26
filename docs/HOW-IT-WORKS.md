@@ -4,7 +4,7 @@
 
 **The real scale first.** On 2026-11-02 the reward pool that pays every burner held about **6.5 XNT** (read on X1). One week can pay at most about **0.65 XNT to all burners together** under today's rules (10% of the free pool) and about **0.5 XNT** (about 0.074 XNT a day) under the v3 rules (8%), however much is burned. **No payout is promised.** Every worked example in this guide is illustrative: it assumes a pool hundreds of times larger, to show how the rules work. The live figure is on the [Start page](https://xen-moon-forge-protocol.github.io/Moon-Forge/start/) ("Most this epoch can pay, to everyone together") and the [Transparency page](https://xen-moon-forge-protocol.github.io/Moon-Forge/transparency/).
 
-**Which rules are live.** Today the X1 program is v2 (tag `program-2026-10-12`) and the oracle pays burns under the v2 reward rules ("rules 2"). The final program upgrade is planned for **Wednesday 2026-11-25, 16:00–20:00 UTC** (the same hours a week later if a gate is not green), and the first weekly payout under the v3 reward rules ("rules 3") for **Sunday 2026-11-29**. Every paragraph marked *From the final upgrade* or *Rules 3* describes those planned rules: it is a plan until the transactions exist. No v2 payout was published on Sunday 2026-11-22 (nothing to publish), so the last one stays the payout published on 2026-10-18 01:38 UTC (X1 transaction `4XyLDEHiP4upPW7SEiMCDQrNrRjHGAiPjw6cKv7wN4we9uFGrByEmXtDGto5edJniVT16rQ8SprwXQRVNVCWSDrY`), and burns made after it are paid under rules 3 (notice of 2026-11-23, [POLICY-CHANGES.md](../POLICY-CHANGES.md)). A burn made after that publish transaction is never paid under rules 2: it keeps its own time and waits for the first rules-3 payout, also if the upgrade is late; from Monday 2026-11-23 06:00 UTC the oracle builds no rules-2 payout. From 00:00 UTC on 2026-11-22 the site's Forge does not offer new burns until the upgraded program and its hourly quote file are live (notice of 2026-11-20). The build commit of the upgrade (tag `program-2026-11-25`) and its binary hash were published on 2026-11-20: [UPGRADE-2026-11.md, section 2](UPGRADE-2026-11.md#2-source-binary-and-how-to-check-the-hash). The switch to the v3 rules was announced on 2026-11-23 with the last v2 transaction; after it, any change to the reward rules needs a new rule set announced at least two weeks ahead, never applied backwards. Sources: [UPGRADE-2026-11.md](UPGRADE-2026-11.md) (the program changelog), `oracle/src/rewards.ts` (rules 3), [CLAIMS.md](CLAIMS.md) (every public claim with its evidence).
+**Which rules are live.** Today the X1 program is v2 (tag `program-2026-10-12`) and the oracle pays burns under the v2 reward rules ("rules 2"). The final program upgrade is planned for **Wednesday 2026-12-02, 16:00–20:00 UTC** (moved from 2026-11-25 on 2026-11-26: that window was not used, nothing was signed or sent and nothing changed on chain, [schedule change](UPGRADE-2026-11.md#schedule-change-2026-11-26); the same hours a week later if a gate is not green), and the first weekly payout under the v3 reward rules ("rules 3") for **Sunday 2026-12-06**. Every paragraph marked *From the final upgrade* or *Rules 3* describes those planned rules: it is a plan until the transactions exist. No v2 payout was published on Sunday 2026-11-22 (nothing to publish), so the last one stays the payout published on 2026-10-18 01:38 UTC (X1 transaction `4XyLDEHiP4upPW7SEiMCDQrNrRjHGAiPjw6cKv7wN4we9uFGrByEmXtDGto5edJniVT16rQ8SprwXQRVNVCWSDrY`), and burns made after it are paid under rules 3 (notice of 2026-11-23, [POLICY-CHANGES.md](../POLICY-CHANGES.md)). A burn made after that publish transaction is never paid under rules 2: it keeps its own time and waits for the first rules-3 payout, also if the upgrade is late; from Monday 2026-11-23 06:00 UTC the oracle builds no rules-2 payout. From 00:00 UTC on 2026-11-22 the site's Forge does not offer new burns until the upgraded program and its hourly quote file are live (notice of 2026-11-20). The build commit of the upgrade (tag `program-2026-11-25`) and its binary hash were published on 2026-11-20 and stay valid: [UPGRADE-2026-11.md, section 2](UPGRADE-2026-11.md#2-source-binary-and-how-to-check-the-hash). The switch to the v3 rules was announced on 2026-11-23 with the last v2 transaction; after it, any change to the reward rules needs a new rule set announced at least two weeks ahead, never applied backwards. Sources: [UPGRADE-2026-11.md](UPGRADE-2026-11.md) (the program changelog), `oracle/src/rewards.ts` (rules 3), [CLAIMS.md](CLAIMS.md) (every public claim with its evidence).
 
 **Words used here.**
 
@@ -27,7 +27,7 @@ Contents: [1. What it is](#1-what-moon-forge-is) · [2. Where the XNT comes from
 
 **In one sentence:** you burn XEN on Base, Optimism, Polygon, BSC or Avalanche through XEN's own `burn()`, and receive XNT on X1 from a public reward pool, valued by one public market rule, with no new token.
 
-**In about 60 words:** X1 and XNT grew out of the XEN community. Moon Forge adds one more path, alongside the others: burn XEN on Base, Optimism, Polygon, BSC or Avalanche through XEN's own `burn()` and receive XNT on X1 (under rules 3, planned from 2026-11-29: 1.25× the burn's counted market value at the claim, 2.5× over 45 days or 3.75× over 180) from a public pool, while weekly capacity lasts. No new token. No payout is promised, and the pool is small: on 2026-11-02 a whole week could pay all burners together about 0.5 XNT.
+**In about 60 words:** X1 and XNT grew out of the XEN community. Moon Forge adds one more path, alongside the others: burn XEN on Base, Optimism, Polygon, BSC or Avalanche through XEN's own `burn()` and receive XNT on X1 (under rules 3, planned from 2026-12-06: 1.25× the burn's counted market value at the claim, 2.5× over 45 days or 3.75× over 180) from a public pool, while weekly capacity lasts. No new token. No payout is promised, and the pool is small: on 2026-11-02 a whole week could pay all burners together about 0.5 XNT.
 
 **Only XEN and XNT.** You burn XEN, the chain's own XEN token. You receive XNT, X1's native coin. Moon Forge has no token, no token airdrop, no presale, no whitelist and no team allocation; any "Moon Forge token" or claim page is not Moon Forge. The only airdrop is the Genesis airdrop: up to 120 Lunar Dust NFTs with no floor for the X1 validator withdraw authorities published on 2026-10-12 (section 4). Artifacts are optional NFTs bought with XNT. **Burning needs no NFT and no game: those are optional.**
 
@@ -49,7 +49,7 @@ Every XNT a burner receives comes out of one program account on X1, the **reward
 
 **What fills the reward pool**
 
-| Source | Today (v2) | From the final upgrade (planned 2026-11-25) |
+| Source | Today (v2) | From the final upgrade (planned 2026-12-02) |
 |---|---|---|
 | Artifact forge price | 40% | 20% |
 | Sale of an Artifact on the native market | (no native market) | 2% of the price |
@@ -81,7 +81,7 @@ From the final upgrade there is also a second, separate pot, the **extra pot** (
 
 Each weekly payout round has a budget that the program computes: at most 10% of the free pool, and at most 1.25× the burns' value in XNT (Orbit counts 2× and Moon Landing 3×). A tenth of the budget is drawn at random among that week's burners as Forge Drops (Lunar Dust NFTs with a floor of at least 5 XNT; a random draw, 18+ and only where legal); the rest is paid in XNT. Each burn is valued at its chain's XEN price in its hour, with a liquidity discount L/(L+V) (L = the chain's XEN-side market depth, V = everything burned on that chain in the whole week, so a large burn on your chain in the same week lowers the value of every burn there), converted at one XNT price for the whole round, and every burner receives a share of the budget in proportion to that value. Details: [WHITEPAPER.md](WHITEPAPER.md), [EXAMPLES.md](EXAMPLES.md). Burns made after the last v2 publication (planned Sunday 2026-11-22) wait for the first rules-3 payout and keep their own time.
 
-### 3.2 Rules 3: how one burn is valued (planned from the payout of 2026-11-29)
+### 3.2 Rules 3: how one burn is valued (planned from the payout of 2026-12-06)
 
 Five steps, the same for every wallet and every chain:
 
@@ -173,7 +173,7 @@ An Artifact is an optional NFT (Metaplex Core) that you forge on X1 with XNT. **
 
 **Today (v2, live):** a held Artifact raises its holder's share of a payout round (+5% / +10% / +20% / +50% by tier, inside the same budget), grants weekly lottery chips, and is the ticket to Duels and Moon Wars; the forge price splits 50% floor / 40% reward pool / 5% Burn Lottery / 5% architect. Forging and the Genesis claim are paused on the site until the final upgrade; recycling works.
 
-**From the final upgrade (planned 2026-11-25):**
+**From the final upgrade (planned 2026-12-02):**
 
 | Tier | Max alive | Base price | Price moves | Minimum | Maximum |
 |---|---|---|---|---|---|
@@ -182,7 +182,7 @@ An Artifact is an optional NFT (Metaplex Core) that you forge on X1 with XNT. **
 | Solar Core | 90 | 60 XNT | +5% per forge, −1 step per 7 quiet days | 30 XNT | 600 XNT |
 | Void Anomaly | 10 | 200 XNT | +5% per forge, −1 step per 14 quiet days | 100 XNT | 2,000 XNT |
 
-- **Where the forge price goes:** 50% stays inside the Artifact as its **floor**, 20% to the reward pool (every burner benefits), 25% to the extra pot, 5% to the architect. A tier never forged starts at its base price on 2026-12-02 00:00 UTC (planned; the date is fixed in the build commit) and falls from then.
+- **Where the forge price goes:** 50% stays inside the Artifact as its **floor**, 20% to the reward pool (every burner benefits), 25% to the extra pot, 5% to the architect. A tier never forged starts at its base price on 2026-12-02 00:00 UTC (the date is fixed in the build commit, so it did not move with the upgrade) and falls from then: with the upgrade on 2026-12-02, Lunar Dust forges at its base price of 10 XNT until 2026-12-03 00:00 UTC and then falls about 2% a day while nobody forges; Cosmic Shard keeps its base price until 2026-12-05, Solar Core until 2026-12-09 and Void Anomaly until 2026-12-16 (planned).
 - **Floor and recycle:** recycling through Moon Forge destroys the NFT and gives you back its floor (half of the price you paid) plus the record's rent, at any time, no fee, no waiting. The slot is freed and anyone can forge into it again at the current price, which sends another 20% to the reward pool and 25% to the extra pot. Burning an Artifact in a wallet app instead sends its floor to the reward pool.
 - **No boost, no chips, no game ticket.** An Artifact never changes what the reward pool pays for a burn: a holder and a non-holder are paid exactly the same for the same burn (the oracle's property tests NFT-1 and NFT-2 check this on randomized cases).
 - **What it can add: a weekly rebate from the extra pot**, tied to the holder's own burns (oracle policy, limited on-chain). Only for a forged Artifact (not Genesis, not a Forge Drop, not one forged before the upgrade), held by the same wallet at two weekly snapshots in a row, in the first 52 weeks after its forge; only for burns whose X1 destination is the wallet that holds it; only for the part of those burns the reward pool did **not** pay. Counted use is at most 1% of the price paid per Artifact per week, and the rebate at most 2 XNT per counted XNT, so at most **2% of the price paid per Artifact per week**, while the pot lasts. It is not promised and can stop. Nothing is eligible in the first extra week, so the earliest rebate comes with the second rules-3 payout.
@@ -220,7 +220,7 @@ An Artifact is an optional NFT (Metaplex Core) that you forge on X1 with XNT. **
 
 **What you can play**
 
-| | Today (v2, live) | From the final upgrade (planned 2026-11-25) |
+| | Today (v2, live) | From the final upgrade (planned 2026-12-02) |
 |---|---|---|
 | House games: Coin Flip, High-Low, Void Rush | open; the result comes from the hash of the block after the bet; a bet not settled within about 3 minutes counts as lost (settle your own bet) | shown on the site **only while the chain shows a live house keeper**, read from X1 on every visit: seat armed, a bond of at least 20 XNT, active within 28 days, no bond withdrawal announced, no more than 32 draws waiting for a reveal, and its service levels kept on the bets pending now (anchor within 150 slots, reveal within about 10 minutes). No keeper is armed at the upgrade, and none is scheduled: this may never happen |
 | Jackpot | open | the same live-keeper condition; pot at most 20 XNT a round |
@@ -251,7 +251,7 @@ An Artifact is an optional NFT (Metaplex Core) that you forge on X1 with XNT. **
 
 ## 6. Legacy Pilot
 
-*Dated: applies from the first rules-3 payout (planned 2026-11-29). The public list of addresses was built and published on 2026-11-23 and its hash pinned in the oracle before that payout is built, so the rule is part of the rules of that payout; nothing applies before it.*
+*Dated: applies from the first rules-3 payout (planned 2026-12-06). The public list of addresses was built and published on 2026-11-23 and its hash pinned in the oracle before that payout is built, so the rule is part of the rules of that payout; nothing applies before it.*
 
 **What it is.** A one-time recognition for people who burned XEN before Moon Forge's final rules. **Eligible:** any EVM address that burned XEN (a transfer to the zero address recorded by XEN's own contract) on Ethereum, Base, Optimism, Polygon, BSC or Avalanche before **2026-11-01 00:00 UTC**. Old burns are still not paid as burns; the Legacy Pilot adds to new ones:
 
@@ -290,7 +290,7 @@ The portal is the same contract on all five, deployed 2026-10-07, source verifie
 
 ## 8. Nobody in control after the freeze
 
-**Today** the X1 program can still be replaced by one upgrade key, held by the anonymous builder; until the freeze that key could replace the code, including code that moves the pools. From the final upgrade it moves to a new deploy key, kept offline and never in GitHub, used once more for the **freeze**: the upgrade authority and the IDL authority are burned, earliest **2026-12-09**, after the mainnet proof plan and 14 stable days, and no later than **2026-12-31** ([IMMUTABILITY.md](../IMMUTABILITY.md)). The builder leaves after the freeze. The portals are already immutable.
+**Today** the X1 program can still be replaced by one upgrade key, held by the anonymous builder; until the freeze that key could replace the code, including code that moves the pools. From the final upgrade it moves to a new deploy key, kept offline and never in GitHub, used once more for the **freeze**: the upgrade authority and the IDL authority are burned, earliest **2026-12-16**, after the mainnet proof plan and 14 stable days, and no later than **2026-12-31** ([IMMUTABILITY.md](../IMMUTABILITY.md)). The builder leaves after the freeze. The portals are already immutable.
 
 **After the freeze, no key can:**
 

@@ -120,7 +120,7 @@ export const DEFAULT_RULES_V3 = Object.freeze({
  * (YYYY-MM-DD, the boundary notice's FIRST_V3_EPOCH_DATE), `afterPublishTx` the last v2 publish transaction (WORDING: a
  * date and that transaction, never an epoch number in public text). Null until the boundary announcement; a one-line change.
  */
-export const V3_SWITCH = Object.freeze({ date: '2026-11-29', firstEpoch: 2, afterPublishTx: '4XyLDEHiP4upPW7SEiMCDQrNrRjHGAiPjw6cKv7wN4we9uFGrByEmXtDGto5edJniVT16rQ8SprwXQRVNVCWSDrY' });
+export const V3_SWITCH = Object.freeze({ date: '2026-12-06', firstEpoch: 2, afterPublishTx: '4XyLDEHiP4upPW7SEiMCDQrNrRjHGAiPjw6cKv7wN4we9uFGrByEmXtDGto5edJniVT16rQ8SprwXQRVNVCWSDrY' });
 /**
  * The opening words of every kit sentence about what the v3 oracle rules bring (WORDING §1: a sentence about the future
  * carries a date). Before the announcement the planned month; after it the announced date.

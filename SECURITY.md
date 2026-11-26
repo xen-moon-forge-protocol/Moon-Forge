@@ -15,7 +15,7 @@ Source of truth: the header of [`programs/moon-forge/src/lib.rs`](programs/moon-
 | Architect key | `set_airdrop_root` once (done on 2026-10-12) | anything else in the program |
 | Upgrade authority | replace the program (test period only; currently the same wallet as the architect) | — see below |
 
-*Dated note (2026-10-22): the Forge Drop, Artifact-boost, chips and Duel-ticket rows above are true of the live v2 program and oracle. Boosts stop entering the scoring from the v3 switch epoch (planned for November 2026), and Forge Drops, chips and the Artifact ticket end at the final program upgrade (earliest 2026-11-25). Details and dates: the [interim notice in the README](README.md#interim-notice-2026-10-22).*
+*Dated note (2026-10-22): the Forge Drop, Artifact-boost, chips and Duel-ticket rows above are true of the live v2 program and oracle. Boosts stop entering the scoring from the v3 switch epoch (planned for November 2026), and Forge Drops, chips and the Artifact ticket end at the final program upgrade (earliest 2026-12-02). Details and dates: the [interim notice in the README](README.md#interim-notice-2026-10-22).*
 
 The plain statement of what is immutable, what the oracle can still do, what the community can run and what depends on GitHub — today and after the freeze — is kept in one place: [IMMUTABILITY.md, "Who can do what: status today and after the freeze"](IMMUTABILITY.md#who-can-do-what-status-today-and-after-the-freeze).
 
@@ -33,7 +33,7 @@ A dishonest oracle could still direct up to one epoch's budget to false burns; t
 
 ## Upgrade authority
 
-During the public test period the program upgrade authority is the architect wallet `7PuG8ELKXzvZqVLawFnmjDJqq4KEyRhssKQEq7aQM6Qd`, so that bugs found by the community can be fixed. **It will be burned** on the published conditions — the final upgrade deployed with its announced hash, the mainnet proof plan complete, 14 consecutive daily health runs with no FAIL, the Artifact metadata on Arweave — earliest **2026-12-09** (2026-11-25 before the [schedule change of 2026-11-02](docs/UPGRADE-2026-11.md#schedule-change-2026-11-02), which moved the final upgrade from 2026-11-11 to 2026-11-18, and 2026-12-02 before the [schedule change of 2026-11-14](docs/UPGRADE-2026-11.md#schedule-change-2026-11-14), which moved it to 2026-11-25) and **no later than 2026-12-31** (on that date the authority is burned on the then-current binary, with the games delisted, or a later fixed date is published with the same rule). Conditions in full: [IMMUTABILITY.md](IMMUTABILITY.md#when-the-upgrade-authority-will-be-burned). The freeze is two transactions in one session:
+During the public test period the program upgrade authority is the architect wallet `7PuG8ELKXzvZqVLawFnmjDJqq4KEyRhssKQEq7aQM6Qd`, so that bugs found by the community can be fixed. **It will be burned** on the published conditions — the final upgrade deployed with its announced hash, the mainnet proof plan complete, 14 consecutive daily health runs with no FAIL, the Artifact metadata on Arweave — earliest **2026-12-16** (2026-11-25 before the [schedule change of 2026-11-02](docs/UPGRADE-2026-11.md#schedule-change-2026-11-02), which moved the final upgrade from 2026-11-11 to 2026-11-18, and 2026-12-02 before the [schedule change of 2026-11-14](docs/UPGRADE-2026-11.md#schedule-change-2026-11-14), which moved it to 2026-11-25, and 2026-12-09 before the [schedule change of 2026-11-26](docs/UPGRADE-2026-11.md#schedule-change-2026-11-26), which moved it to 2026-12-02) and **no later than 2026-12-31** (on that date the authority is burned on the then-current binary, with the games delisted, or a later fixed date is published with the same rule). Conditions in full: [IMMUTABILITY.md](IMMUTABILITY.md#when-the-upgrade-authority-will-be-burned). The freeze is two transactions in one session:
 
 ```bash
 anchor idl erase-authority --program-id 57UE1U1t23ztg2noLp8pcpGW1B1Xw25rLH6ra9Mchea9 --provider.cluster https://rpc.mainnet.x1.xyz
@@ -42,7 +42,7 @@ solana program set-upgrade-authority 57UE1U1t23ztg2noLp8pcpGW1B1Xw25rLH6ra9Mchea
 
 Until then, treat the program as upgradeable: whoever holds that key can replace the code, including fees and vault logic. The Transparency page reads the current authority directly from the chain.
 
-**The announced hash of the final upgrade (S2).** The build commit is the commit tagged `program-2026-11-25` ([docs/UPGRADE-2026-11.md, section 2](docs/UPGRADE-2026-11.md#2-source-binary-and-how-to-check-the-hash), with the rebuild procedure): `target/deploy/moon_forge.so`, 1,402,408 bytes, sha256 `4be7e34db410c416a3f97f97896e331c6eabf9ed2ccbbc195fc61fbcce6199b5`, executable hash `802f5769158e5f5198c77abdc66ef45bf7ec7ac40c746575013026852cf61800`. From the upgrade (planned Wednesday 2026-11-25, 16:00–20:00 UTC) to the freeze, the upgrade authority and the IDL authority are the deploy key `DGeGqSjsdWK385DmFYmy2ZKpoebEur3ZQrSiVPn6Ah7X` (OD-32). After the deploy, anyone can check both:
+**The announced hash of the final upgrade (S2).** The build commit is the commit tagged `program-2026-11-25` ([docs/UPGRADE-2026-11.md, section 2](docs/UPGRADE-2026-11.md#2-source-binary-and-how-to-check-the-hash), with the rebuild procedure): `target/deploy/moon_forge.so`, 1,402,408 bytes, sha256 `4be7e34db410c416a3f97f97896e331c6eabf9ed2ccbbc195fc61fbcce6199b5`, executable hash `802f5769158e5f5198c77abdc66ef45bf7ec7ac40c746575013026852cf61800`. From the upgrade (planned Wednesday 2026-12-02, 16:00–20:00 UTC) to the freeze, the upgrade authority and the IDL authority are the deploy key `DGeGqSjsdWK385DmFYmy2ZKpoebEur3ZQrSiVPn6Ah7X` (OD-32). After the deploy, anyone can check both:
 
 ```bash
 solana-verify get-program-hash -u https://rpc.mainnet.x1.xyz 57UE1U1t23ztg2noLp8pcpGW1B1Xw25rLH6ra9Mchea9   # = the executable hash above
@@ -79,7 +79,7 @@ The site (GitHub Pages), the scheduled oracle, keeper and health runs (GitHub Ac
 
 ## Open findings (until the final upgrade)
 
-Known, unfixed on the live v2 binary, disclosed here and, from the site deploy of 2026-10-23, on the site's game panels; each one is fixed or removed by the final upgrade (earliest 2026-11-25). Ids are those of [docs/KNOWN-ISSUES.md](docs/KNOWN-ISSUES.md), the public register where every id resolves; `REV-2026-10-…` ids also refer to [docs/REVIEW-2026-10.md](docs/REVIEW-2026-10.md).
+Known, unfixed on the live v2 binary, disclosed here and, from the site deploy of 2026-10-23, on the site's game panels; each one is fixed or removed by the final upgrade (earliest 2026-12-02). Ids are those of [docs/KNOWN-ISSUES.md](docs/KNOWN-ISSUES.md), the public register where every id resolves; `REV-2026-10-…` ids also refer to [docs/REVIEW-2026-10.md](docs/REVIEW-2026-10.md).
 
 | Id | What | Status today |
 |---|---|---|

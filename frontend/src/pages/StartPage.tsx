@@ -161,7 +161,7 @@ export default function StartPage() {
                             <div className="bg-space-700/40 rounded-xl p-4">
                                 <div className="text-lunar-400 text-xs mb-1">The same under the v3 rules (8%)</div>
                                 <div className="font-mono text-2xl text-white">{formatXnt(pool.v3MaxXnt)} XNT</div>
-                                <div className="text-lunar-500 text-xs">Planned from the first v3 epoch (2026-11-29)</div>
+                                <div className="text-lunar-500 text-xs">Planned from the first v3 epoch (2026-12-06)</div>
                             </div>
                         </div>
                         <p className="text-xs text-lunar-500">

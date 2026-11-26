@@ -4,11 +4,18 @@ Dates are UTC. Versions follow semver; the repository tag of a release is `kit-v
 version is deprecated when the agent card names a higher `minKitVersion`; `checkKitVersion(card)` (and
 `npm run watch -- --card`) report it. Never auto-update a funded agent: pin the tag you reviewed.
 
-## 2.0.0 (unreleased; tag `kit-v2.0.0` planned for the day of the final program upgrade, earliest 2026-11-25)
+## 2.0.0 (unreleased; tag `kit-v2.0.0` planned for the day of the final program upgrade, earliest 2026-12-02)
 
 Everything below that needs the v3 rules or the upgraded program is switched on by what the chain reports and is
 refused, with nothing sent, before that. Against the live program (tag `program-2026-10-12`) the kit sends the same
 instructions as 1.0.0.
+
+**Postponement of the final upgrade (2026-11-26)**
+- `V3_SWITCH.date` (`quote-v3.mjs`) is `2026-12-06`: the upgrade window of 2026-11-25 was not used and the upgrade moved to
+  2026-12-02, so the first v3 epoch is planned for Sunday 2026-12-06. `firstEpoch` (2) and `afterPublishTx` do not change:
+  no epoch is published under the v2 rules meanwhile. Every kit sentence about the v3 rules now opens with "From the
+  epoch published on or after 2026-12-06 (UTC)" (`V3_FROM`). `PRICE_LAUNCH_TS` stays 1,796,169,600 (compiled into the
+  build commit), now the day of the upgrade.
 
 **Boundary release (2026-11-23)**
 - `V3_SWITCH` (`quote-v3.mjs`) is set: `{ date: '2026-11-29', firstEpoch: 2, afterPublishTx: '4XyLDEHiP4upPW7SEiMCDQrNrRjHGAiPjw6cKv7wN4we9uFGrByEmXtDGto5edJniVT16rQ8SprwXQRVNVCWSDrY' }`,

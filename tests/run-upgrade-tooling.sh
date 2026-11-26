@@ -219,7 +219,7 @@ echo "S9 freeze"
 S9B=(--rpc "$LOCAL" --deploy-key "$DK_PUB" --elf "$NEW_SO" --pins "$WORK/run/health-pins.json")
 S9=("${S9B[@]}" --expect-deploy-slot "$S6_SLOT")
 snap "$WORK/run/snap-s7.json"
-expect 1 "s9 dry run before 2026-12-09 is red (date gate)" s9-date.log $U/s9.mjs "${S9[@]}"
+expect 1 "s9 dry run before 2026-12-16 is red (date gate)" s9-date.log $U/s9.mjs "${S9[@]}"
 expect 0 "s9 dry run green (rehearsal date gate moved)" s9-dry.log $U/s9.mjs "${S9[@]}" --not-before 2026-10-01T00:00:00Z
 expect 3 "s9 --send refuses before the date" s9-send-date.log $U/s9.mjs "${S9[@]}" --deploy-key-file "$DK" --send
 expect 3 "s9 refuses a key file that is not the DEPLOY_KEY" s9-wrongkey.log $U/s9.mjs "${S9[@]}" --deploy-key-file "$PAYEE" --not-before 2026-10-01T00:00:00Z --send
